@@ -6,15 +6,12 @@ import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/type
 import { miniGameManifests, miniGameModuleById } from '../minigames/registry'
 import { LocalStorageProgressStore } from '../infrastructure/local-storage-progress-store'
 import { projectHubUi } from '../view-model/hub-ui-model'
-import { MiniGameStage } from './pixi/mini-game-stage'
-import type { StageTransitionState } from './pixi/mini-game-stage'
 import tapDashCharacterIcon from '../../assets/images/character-tap-dash-pixel-transparent.png'
 import timingShotCharacterIcon from '../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacterIcon from '../../assets/images/character-lane-dodge-pixel-transparent.png'
 import sameCharacterIcon from '../../assets/images/same-character/seo-taiji.png'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
-const STAGE_TRANSITION_MS = 420
 const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
 const GAME_START_COUNTDOWN_STEP_MS = 1000
 const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
@@ -31,14 +28,12 @@ export function GameHubApp() {
     return new GameHubUseCases(store, miniGameManifests, HUB_BOOTSTRAP_CONFIG)
   }, [])
 
-  const transitionTimerRef = useRef<number | null>(null)
   const countdownTimerRef = useRef<number | null>(null)
 
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null)
   const [selectedGameId, setSelectedGameId] = useState<MiniGameId>(DEFAULT_SELECTED_GAME_ID)
   const [isLobbyGamePicked, setIsLobbyGamePicked] = useState(false)
   const [activeGameId, setActiveGameId] = useState<MiniGameId | null>(null)
-  const [stageTransitionState, setStageTransitionState] = useState<StageTransitionState>('idle')
   const [resultGameId, setResultGameId] = useState<MiniGameId | null>(null)
   const [lastReward, setLastReward] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -50,7 +45,6 @@ export function GameHubApp() {
 
   useEffect(() => {
     return () => {
-      clearTransitionTimer(transitionTimerRef)
       clearCountdownTimer(countdownTimerRef)
     }
   }, [])
@@ -85,7 +79,7 @@ export function GameHubApp() {
 
   const uiModel = snapshot ? projectHubUi(snapshot) : null
   const selectedCard = snapshot?.cards.find((card) => card.manifest.id === selectedGameId) ?? null
-  const isTapDashActive = activeGameId === 'tap-dash'
+  const isInGameView = activeGameId !== null
 
   const selectGame = async (gameId: MiniGameId) => {
     setIsLobbyGamePicked(true)
@@ -129,12 +123,8 @@ export function GameHubApp() {
     setLastReward(null)
     setActiveGameId(gameId)
     setCountdownStepIndex(0)
-    setStageTransitionState('enter')
 
     await reload(useCases, gameId, gameId, setSnapshot, setError)
-    scheduleTransition(transitionTimerRef, () => {
-      setStageTransitionState('idle')
-    })
   }
 
   const startSelectedGame = async () => {
@@ -161,14 +151,9 @@ export function GameHubApp() {
       return
     }
 
-    setStageTransitionState('exit')
     setCountdownStepIndex(null)
-
-    scheduleTransition(transitionTimerRef, () => {
-      setActiveGameId(null)
-      setStageTransitionState('idle')
-      void reload(useCases, selectedGameId, null, setSnapshot, setError)
-    })
+    setActiveGameId(null)
+    await reload(useCases, selectedGameId, null, setSnapshot, setError)
   }
 
   const finishMiniGame = async (result: MiniGameResult) => {
@@ -183,13 +168,8 @@ export function GameHubApp() {
       setLastReward(response.earnedCoins)
       setError(null)
       setCountdownStepIndex(null)
-
-      setStageTransitionState('exit')
-      scheduleTransition(transitionTimerRef, () => {
-        setActiveGameId(null)
-        setResultGameId(finishedGameId)
-        setStageTransitionState('idle')
-      })
+      setActiveGameId(null)
+      setResultGameId(finishedGameId)
     } catch (caught) {
       setError(toMessage(caught))
     }
@@ -202,9 +182,9 @@ export function GameHubApp() {
   const countdownLabel = isCountdownActive ? GAME_START_COUNTDOWN_LABELS[countdownStepIndex] : null
 
   return (
-    <main className={`game-shell ${isTapDashActive ? 'tapdash-immersive' : ''}`}>
-      <section className={`hub-frame ${isTapDashActive ? 'tapdash-immersive' : ''}`} aria-label="mini-game-hub">
-        {isTapDashActive ? null : (
+    <main className={`game-shell ${isInGameView ? 'game-immersive' : ''}`}>
+      <section className={`hub-frame ${isInGameView ? 'game-immersive' : ''}`} aria-label="mini-game-hub">
+        {isInGameView ? null : (
           <header className="hub-header">
             <div>
               <p className="eyebrow">MINI HEAVEN</p>
@@ -214,23 +194,16 @@ export function GameHubApp() {
           </header>
         )}
 
-        {lastReward !== null && !isResultActionView && !isTapDashActive ? (
+        {lastReward !== null && !isResultActionView && !isInGameView ? (
           <p className="reward-toast">이번 라운드 보상 +{lastReward} 코인</p>
         ) : null}
-        {error !== null && !isTapDashActive ? <p className="error-toast">{error}</p> : null}
+        {error !== null && !isInGameView ? <p className="error-toast">{error}</p> : null}
 
         {activeGameId !== null && activeModule ? (
           <>
-            {activeGameId === 'tap-dash' ? null : (
-              <MiniGameStage
-                gameId={activeGameId}
-                title={activeModule.manifest.title}
-                transitionState={stageTransitionState}
-              />
-            )}
             {isCountdownActive && countdownLabel !== null ? (
               <section
-                className={`game-countdown-panel ${activeGameId === 'tap-dash' ? 'tapdash-immersive' : ''}`}
+                className={`game-countdown-panel ${isInGameView ? 'game-immersive' : ''}`}
                 aria-label="game-start-countdown"
               >
                 <p className="game-countdown-text">{countdownLabel}</p>
@@ -309,31 +282,11 @@ export function GameHubApp() {
   )
 }
 
-function clearTransitionTimer(timerRef: MutableRefObject<number | null>): void {
-  if (timerRef.current !== null) {
-    window.clearTimeout(timerRef.current)
-    timerRef.current = null
-  }
-}
-
 function clearCountdownTimer(timerRef: MutableRefObject<number | null>): void {
   if (timerRef.current !== null) {
     window.clearTimeout(timerRef.current)
     timerRef.current = null
   }
-}
-
-function scheduleTransition(
-  timerRef: MutableRefObject<number | null>,
-  callback: () => void,
-  delayMs = STAGE_TRANSITION_MS,
-): void {
-  clearTransitionTimer(timerRef)
-
-  timerRef.current = window.setTimeout(() => {
-    timerRef.current = null
-    callback()
-  }, delayMs)
 }
 
 async function reload(

@@ -55,11 +55,12 @@ img {
   image-rendering: pixelated;
 }
 
-.game-shell.tapdash-immersive {
+.game-shell.game-immersive {
   min-height: 100vh;
   min-height: 100svh;
   padding: 0;
-  align-items: stretch;
+  align-items: center;
+  justify-content: center;
 }
 
 .hub-frame {
@@ -79,8 +80,11 @@ img {
   box-shadow: 8px 8px 0 #4b5563;
 }
 
-.hub-frame.tapdash-immersive {
-  max-width: 100%;
+.hub-frame.game-immersive {
+  width: min(100vw, calc(100svh * 9 / 16));
+  max-width: none;
+  height: 100vh;
+  height: 100svh;
   min-height: 100vh;
   min-height: 100svh;
   padding: 0;
@@ -88,27 +92,6 @@ img {
   border: 0;
   box-shadow: none;
   background: #f5f3ee;
-}
-
-:fullscreen .game-shell,
-:-webkit-full-screen .game-shell {
-  min-height: 100vh;
-  min-height: 100svh;
-  padding: 0;
-  align-items: center;
-  justify-content: center;
-}
-
-:fullscreen .hub-frame,
-:-webkit-full-screen .hub-frame {
-  width: min(100vw, calc(100svh * 9 / 16));
-  max-width: none;
-  height: 100vh;
-  height: 100svh;
-  min-height: 100vh;
-  min-height: 100svh;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 .hub-header {
@@ -228,7 +211,7 @@ img {
   justify-content: center;
 }
 
-.game-countdown-panel.tapdash-immersive {
+.game-countdown-panel.game-immersive {
   margin-top: 0;
   width: 100%;
   min-height: 100vh;
@@ -471,6 +454,15 @@ img {
   box-shadow: 4px 4px 0 #9ca3af;
 }
 
+.hub-frame.game-immersive .mini-game-panel {
+  margin-top: 0;
+  width: 100%;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .mini-game-panel h3 {
   margin: 0;
   color: #1f2937;
@@ -500,7 +492,7 @@ img {
   box-shadow: 2px 2px 0 #9ca3af;
 }
 
-.hub-frame.tapdash-immersive .tap-dash-panel {
+.hub-frame.game-immersive .tap-dash-panel {
   margin-top: 0;
   width: 100%;
   min-height: 100vh;
@@ -564,7 +556,7 @@ img {
     0 6px 0 rgba(75, 85, 99, 0.25);
 }
 
-.hub-frame.tapdash-immersive .tap-touch-zone {
+.hub-frame.game-immersive .tap-touch-zone {
   margin-top: 0;
   width: 100%;
   height: 100vh;
@@ -586,6 +578,114 @@ img {
 
 .tap-touch-zone.hit {
   animation: zone-hit 130ms steps(3, end);
+}
+
+.run-run-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.run-run-board {
+  margin-top: 0;
+  flex: 1;
+  height: 100%;
+  min-height: 520px;
+}
+
+.run-run-svg {
+  height: 100%;
+  min-height: 520px;
+}
+
+.run-run-board .zigzag-svg {
+  height: 100%;
+  min-height: 100%;
+}
+
+.run-run-hud {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 6;
+  color: #132b40;
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.72);
+  pointer-events: none;
+}
+
+.run-run-score {
+  margin: 0;
+  font-size: clamp(1.6rem, 11vw, 3rem);
+  line-height: 1;
+}
+
+.run-run-best {
+  margin: 4px 0 0;
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.5rem;
+  background: rgba(255, 255, 255, 0.78);
+  border: 2px solid rgba(15, 23, 42, 0.28);
+}
+
+.run-run-meta {
+  margin: 6px 0 0;
+  font-size: 0.5rem;
+  color: #0f172a;
+}
+
+.run-run-status {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 96px;
+  margin: 0;
+  z-index: 6;
+  font-size: 0.52rem;
+  line-height: 1.5;
+  color: #17344b;
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.68);
+  pointer-events: none;
+}
+
+.run-run-overlay-actions {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-run-action-button {
+  border: 2px solid rgba(15, 23, 42, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #0f172a;
+  padding: 8px 10px;
+  font-size: 0.52rem;
+  cursor: pointer;
+}
+
+.run-run-action-button.ghost {
+  background: rgba(15, 23, 42, 0.68);
+  color: #f8fafc;
+}
+
+.hub-frame.game-immersive .run-run-panel {
+  padding: 0;
+}
+
+.hub-frame.game-immersive .run-run-board {
+  min-height: 100%;
+  border-radius: 0;
+  border: 0;
+}
+
+.hub-frame.game-immersive .run-run-svg {
+  min-height: 100%;
 }
 
 .tap-dash-score-overlay {

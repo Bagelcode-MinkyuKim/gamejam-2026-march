@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import runRunCharacter from '../../../assets/images/MrTae.png'
 import wallHuman01 from '../../../assets/images/Human 01.png'
@@ -20,12 +21,16 @@ const EXTEND_SEGMENTS = 24
 const LOOKAHEAD_DISTANCE = 200
 const KEEP_BACK_DISTANCE = 170
 
-const VIEWBOX_WIDTH = 160
-const VIEWBOX_HEIGHT = 260
-const WORLD_SCALE = 2.4
-const CAMERA_FOLLOW_Y = 196
+const VIEWBOX_WIDTH = 162
+const VIEWBOX_HEIGHT = 288
+const WORLD_SCALE = 1.62
+const ROAD_STROKE_HALF_PX = ROAD_HALF_WIDTH * WORLD_SCALE
+const CAMERA_BOTTOM_MARGIN = ROAD_STROKE_HALF_PX + 4
+const CAMERA_FOLLOW_Y = VIEWBOX_HEIGHT - CAMERA_BOTTOM_MARGIN
 const CAMERA_ROTATE_MAX_DEG = 17
 const CAMERA_ROTATE_SMOOTHING = 0.14
+const ROAD_TAIL_DISTANCE = 92
+
 const PLAYER_SPRITE_WIDTH = 36
 const PLAYER_SPRITE_HEIGHT = 57
 const WALL_CHARACTER_SPACING = 9
@@ -42,6 +47,7 @@ const WALL_CHARACTERS = [
   { src: wallHuman03 },
   { src: wallHuman04 },
 ] as const
+
 const WALL_CHARACTER_PATTERN = [0, 1, 2, 3, 2, 1] as const
 
 interface Point {
@@ -208,6 +214,27 @@ function pickWallCharacterIndex(slotIndex: number): number {
   return WALL_CHARACTER_PATTERN[patternIndex]
 }
 
+function toRoadCenterNodes(roadSegments: RoadSegment[]): Point[] {
+  if (roadSegments.length === 0) {
+    return [{ x: 0, y: 0 }]
+  }
+
+  const nodes: Point[] = [roadSegments[0].start]
+  for (const segment of roadSegments) {
+    nodes.push(segment.end)
+  }
+
+  return nodes
+}
+
+function toPolyline(points: Point[], player: Point): string {
+  return points
+    .map((point) => worldToScreen(point, player))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && point.y > -160)
+    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(' ')
+}
+
 function toWallEdgePoints(roadSegments: RoadSegment[]): WallAnchor[] {
   const edgePoints: WallAnchor[] = []
   let distanceToNext = WALL_START_OFFSET
@@ -230,6 +257,7 @@ function toWallEdgePoints(roadSegments: RoadSegment[]): WallAnchor[] {
       },
       slotIndex,
     })
+
     edgePoints.push({
       side: 'right',
       point: {
@@ -238,6 +266,7 @@ function toWallEdgePoints(roadSegments: RoadSegment[]): WallAnchor[] {
       },
       slotIndex,
     })
+
     slotIndex += 1
   }
 
@@ -271,15 +300,16 @@ function toWallEdgePoints(roadSegments: RoadSegment[]): WallAnchor[] {
   return edgePoints
 }
 
-function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
+function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [roadSegments, setRoadSegments] = useState<RoadSegment[]>(() => createInitialRoad())
   const [player, setPlayer] = useState<Point>(() => ({ x: 0, y: 1 }))
   const [direction, setDirection] = useState<MoveDirection>('right')
+  const [isRunning, setIsRunning] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
   const [speed, setSpeed] = useState(START_SPEED)
   const [turnCount, setTurnCount] = useState(0)
   const [score, setScore] = useState(0)
-  const [statusText, setStatusText] = useState('탭하면 좌/우 전환됩니다. 코스 밖으로 나가면 종료됩니다.')
+  const [statusText, setStatusText] = useState('좌/우를 터치해서 출발하세요. 코스 밖으로 나가면 종료됩니다.')
   const [cameraRotationDeg, setCameraRotationDeg] = useState(0)
 
   const roadRef = useRef<RoadSegment[]>(roadSegments)
@@ -289,21 +319,27 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
   const elapsedMsRef = useRef(0)
   const finishedRef = useRef(false)
 
+  const centerPolyline = useMemo(() => {
+    const roadNodes = toRoadCenterNodes(roadSegments)
+    const tailNode = movePoint(player, direction, -ROAD_TAIL_DISTANCE)
+    return toPolyline([tailNode, ...roadNodes], player)
+  }, [direction, player, roadSegments])
+
   const playerScreenPoint = useMemo(() => worldToScreen(player, player), [player])
+
   const worldLayerTransform = useMemo(
     () => `rotate(${cameraRotationDeg.toFixed(2)} ${VIEWBOX_WIDTH / 2} ${CAMERA_FOLLOW_Y})`,
     [cameraRotationDeg],
   )
+
   const playerSpriteX = useMemo(() => playerScreenPoint.x - PLAYER_SPRITE_WIDTH / 2, [playerScreenPoint.x])
   const playerSpriteY = useMemo(() => playerScreenPoint.y - PLAYER_SPRITE_HEIGHT + 8, [playerScreenPoint.y])
+
   const wallSprites = useMemo<WallSprite[]>(() => {
     return toWallEdgePoints(roadSegments)
       .map((edgePoint) => {
         const screenPoint = worldToScreen(edgePoint.point, player)
-        if (
-          screenPoint.y < -WALL_VISIBLE_MARGIN ||
-          screenPoint.y > VIEWBOX_HEIGHT + WALL_VISIBLE_MARGIN
-        ) {
+        if (screenPoint.y < -WALL_VISIBLE_MARGIN || screenPoint.y > VIEWBOX_HEIGHT + WALL_VISIBLE_MARGIN) {
           return null
         }
 
@@ -328,6 +364,14 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
       .sort((a, b) => a.y - b.y)
   }, [player, roadSegments])
 
+  const svgStyle = useMemo(
+    () =>
+      ({
+        '--road-stroke': `${ROAD_HALF_WIDTH * 2 * WORLD_SCALE}px`,
+      }) as CSSProperties,
+    [],
+  )
+
   const finishRound = useCallback(() => {
     if (finishedRef.current) {
       return
@@ -342,23 +386,61 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     })
   }, [onFinish])
 
-  const switchDirection = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
+  const setMoveDirection = useCallback(
+    (nextDirection: MoveDirection) => {
+      if (finishedRef.current) {
+        return
+      }
 
-    const nextDirection = toggleDirection(directionRef.current)
-    directionRef.current = nextDirection
-    setDirection(nextDirection)
-    setTurnCount((previous) => previous + 1)
-    setStatusText(nextDirection === 'left' ? '좌측으로 전환!' : '우측으로 전환!')
-  }, [])
+      const shouldStartRound = !isRunning
+      const hasDirectionChanged = directionRef.current !== nextDirection
+
+      if (shouldStartRound) {
+        setIsRunning(true)
+        setStatusText('출발!')
+      }
+
+      directionRef.current = nextDirection
+      setDirection(nextDirection)
+
+      if (hasDirectionChanged) {
+        setTurnCount((previous) => previous + 1)
+        setStatusText(nextDirection === 'left' ? '좌측으로 이동 중' : '우측으로 이동 중')
+      }
+    },
+    [isRunning],
+  )
+
+  const toggleMoveDirection = useCallback(() => {
+    setMoveDirection(toggleDirection(directionRef.current))
+  }, [setMoveDirection])
+
+  const handleBoardPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect()
+      const nextDirection: MoveDirection = event.clientX - rect.left < rect.width / 2 ? 'left' : 'right'
+      setMoveDirection(nextDirection)
+    },
+    [setMoveDirection],
+  )
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Space' || event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+      if (event.code === 'ArrowLeft') {
         event.preventDefault()
-        switchDirection()
+        setMoveDirection('left')
+        return
+      }
+
+      if (event.code === 'ArrowRight') {
+        event.preventDefault()
+        setMoveDirection('right')
+        return
+      }
+
+      if (event.code === 'Space') {
+        event.preventDefault()
+        toggleMoveDirection()
       }
     }
 
@@ -366,12 +448,16 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [switchDirection])
+  }, [setMoveDirection, toggleMoveDirection])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (finishedRef.current) {
         window.clearInterval(timer)
+        return
+      }
+
+      if (!isRunning) {
         return
       }
 
@@ -385,6 +471,7 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
       const movedPlayer = movePoint(playerRef.current, directionRef.current, currentSpeed * (TICK_MS / 1000))
       playerRef.current = movedPlayer
       setPlayer(movedPlayer)
+
       const targetCameraRotation = toCameraRotationTarget(movedPlayer.x, directionRef.current)
       const nextCameraRotation =
         cameraRotationRef.current + (targetCameraRotation - cameraRotationRef.current) * CAMERA_ROTATE_SMOOTHING
@@ -413,17 +500,24 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     return () => {
       window.clearInterval(timer)
     }
-  }, [finishRound])
+  }, [finishRound, isRunning])
+
+  const displayedBestScore = Math.max(bestScore, score)
 
   return (
-    <section className="mini-game-panel" aria-label="run-run-game">
-      <h3>달려달려</h3>
-      <p className="mini-game-description">지그재그 길을 따라 탭으로 좌우 전환하며 최대 거리까지 달리세요.</p>
-      <p className="mini-game-description">{statusText}</p>
-
-      <div className="zigzag-board" onPointerDown={switchDirection} role="presentation">
-        <svg className="zigzag-svg" viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} aria-label="zigzag-road">
+    <section className="mini-game-panel run-run-panel" aria-label="run-run-game">
+      <div className="zigzag-board run-run-board" onPointerDown={handleBoardPointerDown} role="presentation">
+        <svg
+          className="zigzag-svg run-run-svg"
+          viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
+          preserveAspectRatio="xMidYMax meet"
+          aria-label="zigzag-road"
+          style={svgStyle}
+        >
           <g transform={worldLayerTransform}>
+            <polyline className="zigzag-road-outline" points={centerPolyline} />
+            <polyline className="zigzag-road-main" points={centerPolyline} />
+            <polyline className="zigzag-road-inner" points={centerPolyline} />
             {wallSprites.map((sprite) => (
               <image
                 key={sprite.key}
@@ -442,6 +536,7 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
               />
             ))}
           </g>
+
           <circle className="zigzag-player-shadow" cx={playerScreenPoint.x} cy={playerScreenPoint.y + 2.6} r="3.2" />
           <image
             className="zigzag-player-sprite"
@@ -453,24 +548,37 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
             preserveAspectRatio="xMidYMid meet"
           />
         </svg>
-        <p className="zigzag-tap-hint">터치/클릭으로 방향 전환</p>
+
+        <div className="run-run-hud">
+          <p className="run-run-score">{score}</p>
+          <p className="run-run-best">BEST {displayedBestScore}</p>
+          <p className="run-run-meta">
+            속도 {speed.toFixed(1)} · 전환 {turnCount} · {(elapsedMs / 1000).toFixed(1)}s
+          </p>
+        </div>
+
+        <p className="run-run-status">{statusText}</p>
+        <p className="zigzag-tap-hint">왼쪽/오른쪽 터치로 방향 전환</p>
+
+        <div className="run-run-overlay-actions">
+          <button
+            className="run-run-action-button"
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={finishRound}
+          >
+            종료
+          </button>
+          <button
+            className="run-run-action-button ghost"
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onExit}
+          >
+            나가기
+          </button>
+        </div>
       </div>
-
-      <p className="mini-game-stat">진행 거리: {score}</p>
-      <p className="mini-game-stat">현재 속도: {speed.toFixed(1)} / {MAX_SPEED.toFixed(0)}</p>
-      <p className="mini-game-stat">방향: {direction === 'left' ? '좌상향' : '우상향'}</p>
-      <p className="mini-game-stat">방향 전환 횟수: {turnCount}</p>
-      <p className="mini-game-stat">플레이 시간: {(elapsedMs / 1000).toFixed(1)}초</p>
-
-      <button className="tap-button" type="button" onClick={switchDirection}>
-        방향 전환
-      </button>
-      <button className="tap-button" type="button" onClick={finishRound}>
-        라운드 종료
-      </button>
-      <button className="text-button" type="button" onClick={onExit}>
-        허브로 돌아가기
-      </button>
     </section>
   )
 }
