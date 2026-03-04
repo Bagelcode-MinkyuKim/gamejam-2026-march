@@ -8,6 +8,10 @@ node_modules/
 .cache/
 .parcel-cache/
 dist/
+coverage/
+
+# 템플릿 임시 폴더
+temp_vite_scaffold/
 
 # 빌드 출력물
 *.apk
@@ -20,3 +24,7 @@ Thumbs.db
 # 로컬 전용 설정
 *.local.*
 *.local
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
