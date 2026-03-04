@@ -2,9 +2,9 @@ import { Application } from '@pixi/react'
 import type { CSSProperties } from 'react'
 import type { MiniGameId } from '../../primitives/types'
 import { MOBILE_VIEWPORT, MINI_GAME_STAGE_HEIGHT } from '../../primitives/constants'
-import tapDashCharacter from '../../../assets/images/character-tap-dash.png'
-import timingShotCharacter from '../../../assets/images/character-timing-shot.png'
-import laneDodgeCharacter from '../../../assets/images/character-lane-dodge.png'
+import tapDashCharacter from '../../../assets/images/character-tap-dash-pixel-transparent.png'
+import timingShotCharacter from '../../../assets/images/character-timing-shot-pixel-transparent.png'
+import laneDodgeCharacter from '../../../assets/images/character-lane-dodge-pixel-transparent.png'
 
 export type StageTransitionState = 'idle' | 'enter' | 'exit'
 
