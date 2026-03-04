@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, MutableRefObject } from 'react'
+import type { MutableRefObject } from 'react'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
@@ -8,7 +8,6 @@ import { LocalStorageProgressStore } from '../infrastructure/local-storage-progr
 import { projectHubUi } from '../view-model/hub-ui-model'
 import { MiniGameStage } from './pixi/mini-game-stage'
 import type { StageTransitionState } from './pixi/mini-game-stage'
-import lobbyBackgroundImage from '../../assets/images/bg-lobby-bright-pixel.png'
 import tapDashCharacterIcon from '../../assets/images/character-tap-dash-pixel-transparent.png'
 import timingShotCharacterIcon from '../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacterIcon from '../../assets/images/character-lane-dodge-pixel-transparent.png'
@@ -16,6 +15,8 @@ import sameCharacterIcon from '../../assets/images/same-character/seo-taiji.png'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
 const STAGE_TRANSITION_MS = 420
+const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
+const GAME_START_COUNTDOWN_STEP_MS = 1000
 const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
   'tap-dash': tapDashCharacterIcon,
   'timing-shot': timingShotCharacterIcon,
@@ -23,9 +24,6 @@ const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
   'same-character': sameCharacterIcon,
   'run-run': tapDashCharacterIcon,
 }
-const GAME_SHELL_STYLE = {
-  '--lobby-bg-image': `url("${lobbyBackgroundImage}")`,
-} as CSSProperties
 
 export function GameHubApp() {
   const useCases = useMemo(() => {
@@ -34,6 +32,7 @@ export function GameHubApp() {
   }, [])
 
   const transitionTimerRef = useRef<number | null>(null)
+  const countdownTimerRef = useRef<number | null>(null)
 
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null)
   const [selectedGameId, setSelectedGameId] = useState<MiniGameId>(DEFAULT_SELECTED_GAME_ID)
@@ -43,6 +42,7 @@ export function GameHubApp() {
   const [resultGameId, setResultGameId] = useState<MiniGameId | null>(null)
   const [lastReward, setLastReward] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [countdownStepIndex, setCountdownStepIndex] = useState<number | null>(null)
 
   useEffect(() => {
     void reload(useCases, DEFAULT_SELECTED_GAME_ID, null, setSnapshot, setError)
@@ -51,11 +51,41 @@ export function GameHubApp() {
   useEffect(() => {
     return () => {
       clearTransitionTimer(transitionTimerRef)
+      clearCountdownTimer(countdownTimerRef)
     }
   }, [])
 
+  useEffect(() => {
+    if (activeGameId === null || countdownStepIndex === null) {
+      clearCountdownTimer(countdownTimerRef)
+      return
+    }
+
+    clearCountdownTimer(countdownTimerRef)
+    countdownTimerRef.current = window.setTimeout(() => {
+      countdownTimerRef.current = null
+      setCountdownStepIndex((current) => {
+        if (current === null) {
+          return null
+        }
+
+        const next = current + 1
+        if (next >= GAME_START_COUNTDOWN_LABELS.length) {
+          return null
+        }
+
+        return next
+      })
+    }, GAME_START_COUNTDOWN_STEP_MS)
+
+    return () => {
+      clearCountdownTimer(countdownTimerRef)
+    }
+  }, [activeGameId, countdownStepIndex])
+
   const uiModel = snapshot ? projectHubUi(snapshot) : null
   const selectedCard = snapshot?.cards.find((card) => card.manifest.id === selectedGameId) ?? null
+  const isTapDashActive = activeGameId === 'tap-dash'
 
   const selectGame = async (gameId: MiniGameId) => {
     setIsLobbyGamePicked(true)
@@ -98,6 +128,7 @@ export function GameHubApp() {
     setResultGameId(null)
     setLastReward(null)
     setActiveGameId(gameId)
+    setCountdownStepIndex(0)
     setStageTransitionState('enter')
 
     await reload(useCases, gameId, gameId, setSnapshot, setError)
@@ -121,6 +152,7 @@ export function GameHubApp() {
   const openMainMenu = async () => {
     setResultGameId(null)
     setLastReward(null)
+    setCountdownStepIndex(null)
     await reload(useCases, selectedGameId, null, setSnapshot, setError)
   }
 
@@ -130,6 +162,7 @@ export function GameHubApp() {
     }
 
     setStageTransitionState('exit')
+    setCountdownStepIndex(null)
 
     scheduleTransition(transitionTimerRef, () => {
       setActiveGameId(null)
@@ -149,6 +182,7 @@ export function GameHubApp() {
       setSnapshot(response.snapshot)
       setLastReward(response.earnedCoins)
       setError(null)
+      setCountdownStepIndex(null)
 
       setStageTransitionState('exit')
       scheduleTransition(transitionTimerRef, () => {
@@ -163,31 +197,46 @@ export function GameHubApp() {
 
   const activeModule = activeGameId ? miniGameModuleById[activeGameId] : null
   const isResultActionView = activeGameId === null && resultGameId !== null
+  const isCountdownActive = activeGameId !== null && countdownStepIndex !== null
+  const countdownLabel = isCountdownActive ? GAME_START_COUNTDOWN_LABELS[countdownStepIndex] : null
 
   return (
-    <main className="game-shell" style={GAME_SHELL_STYLE}>
-      <section className="hub-frame" aria-label="mini-game-hub">
-        <header className="hub-header">
-          <div>
-            <p className="eyebrow">MINI HEAVEN</p>
-            <h1>Bagel Mini Plaza</h1>
-          </div>
-          <p className="coin-badge">{uiModel ? uiModel.coinLabel : '로딩중...'}</p>
-        </header>
+    <main className={`game-shell ${isTapDashActive ? 'tapdash-immersive' : ''}`}>
+      <section className={`hub-frame ${isTapDashActive ? 'tapdash-immersive' : ''}`} aria-label="mini-game-hub">
+        {isTapDashActive ? null : (
+          <header className="hub-header">
+            <div>
+              <p className="eyebrow">MINI HEAVEN</p>
+              <h1>Bagel Mini Plaza</h1>
+            </div>
+            <p className="coin-badge">{uiModel ? uiModel.coinLabel : '로딩중...'}</p>
+          </header>
+        )}
 
-        {lastReward !== null && !isResultActionView ? (
+        {lastReward !== null && !isResultActionView && !isTapDashActive ? (
           <p className="reward-toast">이번 라운드 보상 +{lastReward} 코인</p>
         ) : null}
-        {error !== null ? <p className="error-toast">{error}</p> : null}
+        {error !== null && !isTapDashActive ? <p className="error-toast">{error}</p> : null}
 
         {activeGameId !== null && activeModule ? (
           <>
-            <MiniGameStage
-              gameId={activeGameId}
-              title={activeModule.manifest.title}
-              transitionState={stageTransitionState}
-            />
-            <activeModule.Component onFinish={finishMiniGame} onExit={exitMiniGame} />
+            {activeGameId === 'tap-dash' ? null : (
+              <MiniGameStage
+                gameId={activeGameId}
+                title={activeModule.manifest.title}
+                transitionState={stageTransitionState}
+              />
+            )}
+            {isCountdownActive && countdownLabel !== null ? (
+              <section
+                className={`game-countdown-panel ${activeGameId === 'tap-dash' ? 'tapdash-immersive' : ''}`}
+                aria-label="game-start-countdown"
+              >
+                <p className="game-countdown-text">{countdownLabel}</p>
+              </section>
+            ) : (
+              <activeModule.Component onFinish={finishMiniGame} onExit={exitMiniGame} />
+            )}
           </>
         ) : isResultActionView ? (
           <section className="post-game-action-panel" aria-label="post-game-action-panel">
@@ -256,6 +305,13 @@ export function GameHubApp() {
 }
 
 function clearTransitionTimer(timerRef: MutableRefObject<number | null>): void {
+  if (timerRef.current !== null) {
+    window.clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+}
+
+function clearCountdownTimer(timerRef: MutableRefObject<number | null>): void {
   if (timerRef.current !== null) {
     window.clearTimeout(timerRef.current)
     timerRef.current = null

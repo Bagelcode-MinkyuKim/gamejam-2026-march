@@ -7,7 +7,7 @@ export const MOBILE_VIEWPORT = {
   height: 768,
 } as const
 
-export const MINI_GAME_STAGE_HEIGHT = 320
+export const MINI_GAME_STAGE_HEIGHT = 420
 
 export const HUB_BOOTSTRAP_CONFIG = {
   initialCoins: 30,

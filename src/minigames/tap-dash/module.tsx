@@ -9,7 +9,6 @@ const ROUND_DURATION_MS = 8000
 const TICK_MS = 100
 const COMBO_WINDOW_MS = 280
 const IMPACT_LIFETIME_MS = 620
-const FEVER_THRESHOLD = 5
 
 interface TapImpact {
   readonly id: number
@@ -29,9 +28,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
-  const [taps, setTaps] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
-  const [combo, setCombo] = useState(0)
   const [impacts, setImpacts] = useState<TapImpact[]>([])
   const [isZoneHitActive, setZoneHitActive] = useState(false)
 
@@ -79,6 +76,19 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
       cleanupTimerIdsRef.current = []
     }
   }, [onFinish])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onExit()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onExit])
 
   const createImpact = (x: number, y: number, currentCombo: number) => {
     const id = impactIdRef.current++
@@ -131,27 +141,14 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
     comboRef.current = nextCombo
     lastTapAtRef.current = now
 
-    setCombo(nextCombo)
-    setTaps((prev) => {
-      const next = prev + 1
-      tapsRef.current = next
-      return next
-    })
+    tapsRef.current += 1
 
     createImpact(x, y, nextCombo)
     activateZoneHit()
   }
 
-  const comboLabel = combo >= FEVER_THRESHOLD ? `FEVER x${combo}` : `콤보 x${combo}`
-
   return (
     <section className="mini-game-panel tap-dash-panel" aria-label="tap-dash-game">
-      <div className="tap-dash-hud">
-        <p className="mini-game-stat">남은 시간: {(remainingMs / 1000).toFixed(1)}초</p>
-        <p className="mini-game-stat">현재 점수: {taps}</p>
-        <p className={`tap-combo-label ${combo >= FEVER_THRESHOLD ? 'fever' : ''}`}>{comboLabel}</p>
-      </div>
-
       <div
         className={`tap-touch-zone ${isZoneHitActive ? 'hit' : ''}`}
         role="button"
@@ -202,10 +199,6 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
           </span>
         ))}
       </div>
-
-      <button className="text-button" type="button" onClick={onExit}>
-        허브로 돌아가기
-      </button>
     </section>
   )
 }
