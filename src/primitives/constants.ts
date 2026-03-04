@@ -11,7 +11,7 @@ export const MINI_GAME_STAGE_HEIGHT = 320
 
 export const HUB_BOOTSTRAP_CONFIG = {
   initialCoins: 30,
-  starterUnlockedGameIds: ['tap-dash'] as MiniGameId[],
+  starterUnlockedGameIds: ['run-run', 'tap-dash'] as MiniGameId[],
 }
 
 export const CURRENCY_LABEL = 'Bagel Coin'

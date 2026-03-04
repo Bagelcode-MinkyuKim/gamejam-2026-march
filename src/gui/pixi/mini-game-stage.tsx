@@ -43,6 +43,14 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
     characterImageSrc: laneDodgeCharacter,
     particleColors: ['#bbf7d0', '#6ee7b7'],
   },
+  'run-run': {
+    backgroundColor: 0x2c1612,
+    glowColor: '#fb7185',
+    accentColor: '#ef4444',
+    backgroundImageSrc: stageBackground,
+    characterImageSrc: tapDashCharacter,
+    particleColors: ['#fda4af', '#fdba74'],
+  },
 }
 
 const PARTICLE_DELAYS = ['0ms', '120ms', '240ms', '360ms', '480ms', '600ms'] as const
