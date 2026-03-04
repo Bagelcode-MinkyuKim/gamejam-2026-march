@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
@@ -6,8 +7,10 @@ import { miniGameManifests, miniGameModuleById } from '../minigames/registry'
 import { LocalStorageProgressStore } from '../infrastructure/local-storage-progress-store'
 import { projectHubUi } from '../view-model/hub-ui-model'
 import { MiniGameStage } from './pixi/mini-game-stage'
+import type { StageTransitionState } from './pixi/mini-game-stage'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
+const STAGE_TRANSITION_MS = 420
 
 export function GameHubApp() {
   const useCases = useMemo(() => {
@@ -15,15 +18,24 @@ export function GameHubApp() {
     return new GameHubUseCases(store, miniGameManifests, HUB_BOOTSTRAP_CONFIG)
   }, [])
 
+  const transitionTimerRef = useRef<number | null>(null)
+
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null)
   const [selectedGameId, setSelectedGameId] = useState<MiniGameId>(DEFAULT_SELECTED_GAME_ID)
   const [activeGameId, setActiveGameId] = useState<MiniGameId | null>(null)
+  const [stageTransitionState, setStageTransitionState] = useState<StageTransitionState>('idle')
   const [lastReward, setLastReward] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     void reload(useCases, DEFAULT_SELECTED_GAME_ID, null, setSnapshot, setError)
   }, [useCases])
+
+  useEffect(() => {
+    return () => {
+      clearTransitionTimer(transitionTimerRef)
+    }
+  }, [])
 
   const uiModel = snapshot ? projectHubUi(snapshot) : null
 
@@ -57,13 +69,28 @@ export function GameHubApp() {
       return
     }
 
+    setLastReward(null)
     setActiveGameId(selectedGameId)
+    setStageTransitionState('enter')
+
     await reload(useCases, selectedGameId, selectedGameId, setSnapshot, setError)
+    scheduleTransition(transitionTimerRef, () => {
+      setStageTransitionState('idle')
+    })
   }
 
   const exitMiniGame = async () => {
-    setActiveGameId(null)
-    await reload(useCases, selectedGameId, null, setSnapshot, setError)
+    if (activeGameId === null) {
+      return
+    }
+
+    setStageTransitionState('exit')
+
+    scheduleTransition(transitionTimerRef, () => {
+      setActiveGameId(null)
+      setStageTransitionState('idle')
+      void reload(useCases, selectedGameId, null, setSnapshot, setError)
+    })
   }
 
   const finishMiniGame = async (result: MiniGameResult) => {
@@ -74,9 +101,14 @@ export function GameHubApp() {
     try {
       const response = await useCases.completeGame(activeGameId, result, selectedGameId)
       setSnapshot(response.snapshot)
-      setActiveGameId(null)
       setLastReward(response.earnedCoins)
       setError(null)
+
+      setStageTransitionState('exit')
+      scheduleTransition(transitionTimerRef, () => {
+        setActiveGameId(null)
+        setStageTransitionState('idle')
+      })
     } catch (caught) {
       setError(toMessage(caught))
     }
@@ -101,7 +133,11 @@ export function GameHubApp() {
 
         {activeGameId !== null && activeModule ? (
           <>
-            <MiniGameStage gameId={activeGameId} title={activeModule.manifest.title} />
+            <MiniGameStage
+              gameId={activeGameId}
+              title={activeModule.manifest.title}
+              transitionState={stageTransitionState}
+            />
             <activeModule.Component onFinish={finishMiniGame} onExit={exitMiniGame} />
           </>
         ) : (
@@ -150,6 +186,26 @@ export function GameHubApp() {
       </section>
     </main>
   )
+}
+
+function clearTransitionTimer(timerRef: MutableRefObject<number | null>): void {
+  if (timerRef.current !== null) {
+    window.clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+}
+
+function scheduleTransition(
+  timerRef: MutableRefObject<number | null>,
+  callback: () => void,
+  delayMs = STAGE_TRANSITION_MS,
+): void {
+  clearTransitionTimer(timerRef)
+
+  timerRef.current = window.setTimeout(() => {
+    timerRef.current = null
+    callback()
+  }, delayMs)
 }
 
 async function reload(
