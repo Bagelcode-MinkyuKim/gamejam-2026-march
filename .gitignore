@@ -1,4 +1,22 @@
+# 의존성
+node_modules/
 
+# PixiJS 패키지 매니저 캐시 (.pixi/)
+.pixi/
 
-#Ignore vscode AI rules
-.github/instructions/codacy.instructions.md
+# Three.js / 번들러 캐시
+.cache/
+.parcel-cache/
+dist/
+
+# 빌드 출력물
+*.apk
+*.zip
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# 로컬 전용 설정
+*.local.*
+*.local
