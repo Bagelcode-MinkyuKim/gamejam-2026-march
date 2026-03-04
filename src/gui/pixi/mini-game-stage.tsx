@@ -51,6 +51,14 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
     characterImageSrc: tapDashCharacter,
     particleColors: ['#fda4af', '#fdba74'],
   },
+  'same-character': {
+    backgroundColor: 0x2b1e10,
+    glowColor: '#fbbf24',
+    accentColor: '#f59e0b',
+    backgroundImageSrc: stageBackground,
+    characterImageSrc: tapDashCharacter,
+    particleColors: ['#fde68a', '#f59e0b'],
+  },
 }
 
 const PARTICLE_DELAYS = ['0ms', '120ms', '240ms', '360ms', '480ms', '600ms'] as const
