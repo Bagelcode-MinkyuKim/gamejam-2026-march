@@ -974,8 +974,9 @@ img {
   fill: none;
   stroke: #7b4f2d;
   stroke-width: calc(var(--road-stroke, 96px) + 18px);
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  stroke-miterlimit: 8;
   opacity: 0.42;
 }
 
@@ -983,16 +984,18 @@ img {
   fill: none;
   stroke: #fff5d8;
   stroke-width: var(--road-stroke, 96px);
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  stroke-miterlimit: 8;
 }
 
 .zigzag-road-inner {
   fill: none;
   stroke: rgba(255, 255, 255, 0.42);
   stroke-width: calc(var(--road-stroke, 96px) - 20px);
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  stroke-miterlimit: 8;
 }
 
 .zigzag-player {
@@ -1003,6 +1006,15 @@ img {
 
 .zigzag-player-shadow {
   fill: rgba(49, 61, 18, 0.33);
+}
+
+.zigzag-wall-sprite {
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 1px rgba(26, 46, 8, 0.35));
+}
+
+.zigzag-player-sprite {
+  image-rendering: pixelated;
 }
 
 .zigzag-tap-hint {
