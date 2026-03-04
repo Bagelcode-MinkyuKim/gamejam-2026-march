@@ -35,6 +35,7 @@ export function createEmptyScoreMap(): Record<MiniGameId, number> {
     'tap-dash': 0,
     'timing-shot': 0,
     'lane-dodge': 0,
+    'run-run': 0,
     'same-character': 0,
   }
 }

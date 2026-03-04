@@ -1,7 +1,7 @@
 import type { IProgressStore } from './ports/progress-store'
 import { completeMiniGame, toHubSnapshot, unlockMiniGame } from '../domain/hub-policy'
 import { createInitialProgress } from '../primitives/validation'
-import type { HubSnapshot, MiniGameId, MiniGameManifest, MiniGameResult } from '../primitives/types'
+import type { HubSnapshot, MiniGameId, MiniGameManifest, MiniGameResult, PlayerProgress } from '../primitives/types'
 
 export interface HubBootstrapConfig {
   readonly initialCoins: number
@@ -61,7 +61,11 @@ export class GameHubUseCases {
     const loaded = await this.progressStore.load()
 
     if (loaded !== null) {
-      return loaded
+      const migrated = this.addMissingStarterUnlocks(loaded)
+      if (migrated !== loaded) {
+        await this.progressStore.save(migrated)
+      }
+      return migrated
     }
 
     const created = createInitialProgress(
@@ -71,5 +75,20 @@ export class GameHubUseCases {
 
     await this.progressStore.save(created)
     return created
+  }
+
+  private addMissingStarterUnlocks(progress: PlayerProgress): PlayerProgress {
+    const missing = this.bootstrapConfig.starterUnlockedGameIds.filter(
+      (starterId) => !progress.unlockedMiniGameIds.includes(starterId),
+    )
+
+    if (missing.length === 0) {
+      return progress
+    }
+
+    return {
+      ...progress,
+      unlockedMiniGameIds: [...progress.unlockedMiniGameIds, ...missing],
+    }
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { GameHubUseCases } from './game-hub-use-cases'
 import { InMemoryProgressStore } from '../infrastructure/in-memory-progress-store'
+import { createInitialProgress } from '../primitives/validation'
 import type { MiniGameManifest } from '../primitives/types'
 
 const manifests: MiniGameManifest[] = [
@@ -30,6 +31,15 @@ const manifests: MiniGameManifest[] = [
     baseReward: 18,
     scoreRewardMultiplier: 1,
     accentColor: '#22c55e',
+  },
+  {
+    id: 'run-run',
+    title: '달려달려',
+    description: 'desc',
+    unlockCost: 60,
+    baseReward: 14,
+    scoreRewardMultiplier: 1,
+    accentColor: '#ef4444',
   },
 ]
 
@@ -79,5 +89,17 @@ describe('GameHubUseCases', () => {
     expect(result.earnedCoins).toBe(18)
     expect(result.snapshot.coins).toBe(48)
     expect(result.snapshot.cards.find((card) => card.manifest.id === 'tap-dash')?.playCount).toBe(1)
+  })
+
+  it('기존 저장 데이터에도 스타터 해금 목록을 자동 반영한다', async () => {
+    const store = new InMemoryProgressStore(createInitialProgress(30, ['tap-dash']))
+    const useCases = new GameHubUseCases(store, manifests, {
+      initialCoins: 30,
+      starterUnlockedGameIds: ['run-run', 'tap-dash'],
+    })
+
+    const snapshot = await useCases.loadHub('run-run', null)
+
+    expect(snapshot.cards.find((card) => card.manifest.id === 'run-run')?.unlocked).toBe(true)
   })
 })

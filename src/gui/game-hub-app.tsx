@@ -21,6 +21,7 @@ const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
   'timing-shot': timingShotCharacterIcon,
   'lane-dodge': laneDodgeCharacterIcon,
   'same-character': sameCharacterIcon,
+  'run-run': tapDashCharacterIcon,
 }
 const GAME_SHELL_STYLE = {
   '--lobby-bg-image': `url("${lobbyBackgroundImage}")`,
