@@ -1,20 +1,26 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
+import tapDashCharacterSprite from '../../../assets/images/character-tap-dash-pixel-transparent.png'
+import tapBurstSprite from '../../../assets/images/tap-dash-burst-pixel-transparent.png'
 import tapPopStripSprite from '../../../assets/images/tap-dash-pop-strip-pixel-transparent.png'
 import tapRingSheetSprite from '../../../assets/images/tap-dash-ring-sheet-pixel-transparent.png'
 import tapSparkSheetSprite from '../../../assets/images/tap-dash-spark-sheet-pixel-transparent.png'
 
-const ROUND_DURATION_MS = 8000
+const ROUND_DURATION_MS = 30000
 const TICK_MS = 100
-const COMBO_WINDOW_MS = 280
 const IMPACT_LIFETIME_MS = 620
+const TARGET_SPAWN_X_MIN = 24
+const TARGET_SPAWN_X_MAX = 76
+const TARGET_SPAWN_Y_MIN = 22
+const TARGET_SPAWN_Y_MAX = 82
+
+const TARGET_BASE_IMAGES = [tapBurstSprite, tapRingSheetSprite, tapPopStripSprite, tapSparkSheetSprite] as const
 
 interface TapImpact {
   readonly id: number
   readonly x: number
   readonly y: number
-  readonly combo: number
   readonly rotationDeg: number
   readonly ringScale: number
   readonly sparkScale: number
@@ -23,8 +29,33 @@ interface TapImpact {
   readonly sparkRotationDeg: number
 }
 
+interface TapTarget {
+  readonly id: number
+  readonly x: number
+  readonly y: number
+  readonly baseImage: string
+  readonly rotationDeg: number
+  readonly scale: number
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function randomBetween(min: number, max: number): number {
+  return min + Math.random() * (max - min)
+}
+
+function createTarget(targetId: number): TapTarget {
+  const baseImage = TARGET_BASE_IMAGES[Math.floor(Math.random() * TARGET_BASE_IMAGES.length)]
+  return {
+    id: targetId,
+    x: randomBetween(TARGET_SPAWN_X_MIN, TARGET_SPAWN_X_MAX),
+    y: randomBetween(TARGET_SPAWN_Y_MIN, TARGET_SPAWN_Y_MAX),
+    baseImage,
+    rotationDeg: randomBetween(-14, 14),
+    scale: randomBetween(0.92, 1.1),
+  }
 }
 
 function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
@@ -32,15 +63,16 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [impacts, setImpacts] = useState<TapImpact[]>([])
   const [isZoneHitActive, setZoneHitActive] = useState(false)
+  const [target, setTarget] = useState<TapTarget>(() => createTarget(0))
 
   const startedAtRef = useRef(0)
   const finishedRef = useRef(false)
   const tapsRef = useRef(0)
-  const comboRef = useRef(0)
   const impactIdRef = useRef(0)
-  const lastTapAtRef = useRef(0)
+  const targetIdRef = useRef(1)
   const cleanupTimerIdsRef = useRef<number[]>([])
   const zoneHitTimerRef = useRef<number | null>(null)
+  const zoneRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     startedAtRef.current = window.performance.now()
@@ -91,8 +123,9 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
     }
   }, [onExit])
 
-  const createImpact = (x: number, y: number, currentCombo: number) => {
-    const id = impactIdRef.current++
+  const createImpact = useCallback((x: number, y: number) => {
+    const impactId = impactIdRef.current++
+    const id = impactId
     const rotationDeg = ((id * 47) % 40) - 20
     const ringScale = 0.9 + ((id * 13) % 5) * 0.06
     const sparkScale = 0.72 + ((id * 17) % 5) * 0.08
@@ -102,7 +135,7 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
 
     setImpacts((prev) => [
       ...prev,
-      { id, x, y, combo: currentCombo, rotationDeg, ringScale, sparkScale, sparkOffsetX, sparkOffsetY, sparkRotationDeg },
+      { id, x, y, rotationDeg, ringScale, sparkScale, sparkOffsetX, sparkOffsetY, sparkRotationDeg },
     ])
 
     const cleanupTimerId = window.setTimeout(() => {
@@ -111,9 +144,9 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
     }, IMPACT_LIFETIME_MS)
 
     cleanupTimerIdsRef.current.push(cleanupTimerId)
-  }
+  }, [])
 
-  const activateZoneHit = () => {
+  const activateZoneHit = useCallback(() => {
     setZoneHitActive(true)
 
     if (zoneHitTimerRef.current !== null) {
@@ -124,47 +157,79 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
       setZoneHitActive(false)
       zoneHitTimerRef.current = null
     }, 110)
-  }
+  }, [])
 
-  const handleZonePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handleTargetPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (remainingMs === 0 || finishedRef.current) {
       return
     }
 
-    const zoneRect = event.currentTarget.getBoundingClientRect()
+    event.preventDefault()
+    event.stopPropagation()
+
+    const zoneRect = zoneRef.current?.getBoundingClientRect()
+    if (!zoneRect) {
+      return
+    }
+
     const x = clamp(((event.clientX - zoneRect.left) / zoneRect.width) * 100, 0, 100)
     const y = clamp(((event.clientY - zoneRect.top) / zoneRect.height) * 100, 0, 100)
-
-    const now = window.performance.now()
-    const elapsed = now - lastTapAtRef.current
-    const nextCombo = elapsed <= COMBO_WINDOW_MS ? comboRef.current + 1 : 1
-
-    comboRef.current = nextCombo
-    lastTapAtRef.current = now
 
     tapsRef.current += 1
     setCurrentScore(tapsRef.current)
 
-    createImpact(x, y, nextCombo)
+    createImpact(x, y)
     activateZoneHit()
+    setTarget(createTarget(targetIdRef.current))
+    targetIdRef.current += 1
   }
 
+  const remainingSeconds = Math.ceil(remainingMs / 1000)
+  const timeGaugePercent = useMemo(
+    () => clamp((remainingMs / ROUND_DURATION_MS) * 100, 0, 100),
+    [remainingMs],
+  )
   const displayedBestScore = Math.max(bestScore, currentScore)
 
   return (
     <section className="mini-game-panel tap-dash-panel" aria-label="tap-dash-game">
       <div
         className={`tap-touch-zone ${isZoneHitActive ? 'hit' : ''}`}
-        role="button"
-        tabIndex={0}
+        ref={zoneRef}
         aria-label="tap-touch-zone"
-        onPointerDown={handleZonePointerDown}
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="tap-dash-score-overlay" aria-live="polite">
           <p className="tap-dash-current-score">{currentScore}</p>
           <p className="tap-dash-best-score">BEST {displayedBestScore}</p>
         </div>
+        <div className="tap-dash-time-overlay" aria-live="polite">
+          <p className="tap-dash-time-label">{remainingSeconds}s</p>
+          <div className="tap-dash-time-gauge" role="progressbar" aria-valuemin={0} aria-valuemax={30} aria-valuenow={remainingSeconds}>
+            <span className="tap-dash-time-fill" style={{ width: `${timeGaugePercent}%` }} />
+          </div>
+        </div>
+
+        <button
+          className="tap-target-button"
+          type="button"
+          onPointerDown={handleTargetPointerDown}
+          onContextMenu={(event) => event.preventDefault()}
+          style={
+            {
+              left: `${target.x}%`,
+              top: `${target.y}%`,
+              '--tap-target-rotate': `${target.rotationDeg}deg`,
+              '--tap-target-scale': `${target.scale}`,
+            } as CSSProperties
+          }
+          aria-label="tap-target-character"
+        >
+          <span className="tap-target-stack">
+            <img className="tap-target-base" src={target.baseImage} alt="" aria-hidden />
+            <img className="tap-target-character" src={tapDashCharacterSprite} alt="" aria-hidden />
+          </span>
+        </button>
 
         {impacts.map((impact) => (
           <span
@@ -204,7 +269,7 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
               }
               aria-hidden
             />
-            <span className="tap-impact-score">{impact.combo > 1 ? `+1 x${impact.combo}` : '+1'}</span>
+            <span className="tap-impact-score">+1</span>
           </span>
         ))}
       </div>
@@ -216,7 +281,7 @@ export const tapDashModule: MiniGameModule = {
   manifest: {
     id: 'tap-dash',
     title: 'Tap Dash',
-    description: '짧은 시간 동안 연타해서 점수를 올리는 반응형 게임',
+    description: '30초 동안 랜덤 타겟에 등장하는 캐릭터를 탭해 점수를 쌓는 미니게임',
     unlockCost: 0,
     baseReward: 8,
     scoreRewardMultiplier: 1.2,
