@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MutableRefObject } from 'react'
+import type { CSSProperties, MutableRefObject } from 'react'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
@@ -8,6 +8,7 @@ import { LocalStorageProgressStore } from '../infrastructure/local-storage-progr
 import { projectHubUi } from '../view-model/hub-ui-model'
 import { MiniGameStage } from './pixi/mini-game-stage'
 import type { StageTransitionState } from './pixi/mini-game-stage'
+import lobbyBackgroundImage from '../../assets/images/bg-lobby-bright-pixel.png'
 import tapDashCharacterIcon from '../../assets/images/character-tap-dash-pixel-transparent.png'
 import timingShotCharacterIcon from '../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacterIcon from '../../assets/images/character-lane-dodge-pixel-transparent.png'
@@ -19,13 +20,9 @@ const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
   'timing-shot': timingShotCharacterIcon,
   'lane-dodge': laneDodgeCharacterIcon,
 }
-
-interface TapDashResultSummary {
-  readonly score: number
-  readonly bestScore: number
-  readonly earnedCoins: number
-  readonly isNewRecord: boolean
-}
+const GAME_SHELL_STYLE = {
+  '--lobby-bg-image': `url("${lobbyBackgroundImage}")`,
+} as CSSProperties
 
 export function GameHubApp() {
   const useCases = useMemo(() => {
@@ -40,8 +37,8 @@ export function GameHubApp() {
   const [isLobbyGamePicked, setIsLobbyGamePicked] = useState(false)
   const [activeGameId, setActiveGameId] = useState<MiniGameId | null>(null)
   const [stageTransitionState, setStageTransitionState] = useState<StageTransitionState>('idle')
+  const [resultGameId, setResultGameId] = useState<MiniGameId | null>(null)
   const [lastReward, setLastReward] = useState<number | null>(null)
-  const [lastTapDashResult, setLastTapDashResult] = useState<TapDashResultSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -77,25 +74,51 @@ export function GameHubApp() {
     }
   }
 
-  const startSelectedGame = async () => {
-    if (snapshot === null || selectedCard === null) {
+  const startGameById = async (gameId: MiniGameId) => {
+    if (snapshot === null) {
       return
     }
 
-    if (!selectedCard.unlocked) {
+    const gameCard = snapshot.cards.find((card) => card.manifest.id === gameId)
+    if (gameCard === undefined) {
+      setError('선택한 미니게임 정보를 찾을 수 없습니다.')
+      return
+    }
+
+    if (!gameCard.unlocked) {
       setError('잠긴 미니게임은 먼저 해금해야 합니다.')
       return
     }
 
+    setSelectedGameId(gameId)
+    setIsLobbyGamePicked(true)
+    setResultGameId(null)
     setLastReward(null)
-    setLastTapDashResult(null)
-    setActiveGameId(selectedGameId)
+    setActiveGameId(gameId)
     setStageTransitionState('enter')
 
-    await reload(useCases, selectedGameId, selectedGameId, setSnapshot, setError)
+    await reload(useCases, gameId, gameId, setSnapshot, setError)
     scheduleTransition(transitionTimerRef, () => {
       setStageTransitionState('idle')
     })
+  }
+
+  const startSelectedGame = async () => {
+    await startGameById(selectedGameId)
+  }
+
+  const retryLastGame = async () => {
+    if (resultGameId === null) {
+      return
+    }
+
+    await startGameById(resultGameId)
+  }
+
+  const openMainMenu = async () => {
+    setResultGameId(null)
+    setLastReward(null)
+    await reload(useCases, selectedGameId, null, setSnapshot, setError)
   }
 
   const exitMiniGame = async () => {
@@ -124,21 +147,10 @@ export function GameHubApp() {
       setLastReward(response.earnedCoins)
       setError(null)
 
-      if (finishedGameId === 'tap-dash') {
-        const tapDashCard = response.snapshot.cards.find((card) => card.manifest.id === 'tap-dash')
-        if (tapDashCard) {
-          setLastTapDashResult({
-            score: result.score,
-            bestScore: tapDashCard.bestScore,
-            earnedCoins: response.earnedCoins,
-            isNewRecord: response.newBestScore,
-          })
-        }
-      }
-
       setStageTransitionState('exit')
       scheduleTransition(transitionTimerRef, () => {
         setActiveGameId(null)
+        setResultGameId(finishedGameId)
         setStageTransitionState('idle')
       })
     } catch (caught) {
@@ -147,9 +159,10 @@ export function GameHubApp() {
   }
 
   const activeModule = activeGameId ? miniGameModuleById[activeGameId] : null
+  const isResultActionView = activeGameId === null && resultGameId !== null
 
   return (
-    <main className="game-shell">
+    <main className="game-shell" style={GAME_SHELL_STYLE}>
       <section className="hub-frame" aria-label="mini-game-hub">
         <header className="hub-header">
           <div>
@@ -159,7 +172,9 @@ export function GameHubApp() {
           <p className="coin-badge">{uiModel ? uiModel.coinLabel : '로딩중...'}</p>
         </header>
 
-        {lastReward !== null ? <p className="reward-toast">이번 라운드 보상 +{lastReward} 코인</p> : null}
+        {lastReward !== null && !isResultActionView ? (
+          <p className="reward-toast">이번 라운드 보상 +{lastReward} 코인</p>
+        ) : null}
         {error !== null ? <p className="error-toast">{error}</p> : null}
 
         {activeGameId !== null && activeModule ? (
@@ -171,25 +186,17 @@ export function GameHubApp() {
             />
             <activeModule.Component onFinish={finishMiniGame} onExit={exitMiniGame} />
           </>
+        ) : isResultActionView ? (
+          <section className="post-game-action-panel" aria-label="post-game-action-panel">
+            <button className="action-button" type="button" onClick={() => void retryLastGame()}>
+              다시 도전
+            </button>
+            <button className="action-button menu" type="button" onClick={() => void openMainMenu()}>
+              메인 메뉴
+            </button>
+          </section>
         ) : (
           <>
-            {lastTapDashResult !== null ? (
-              <section className="tap-result-panel" aria-label="tap-result-panel">
-                <h2>TapTap 결과</h2>
-                <p>이번 기록: {lastTapDashResult.score}</p>
-                <p>역대 최고: {lastTapDashResult.bestScore}</p>
-                <p>획득 코인: +{lastTapDashResult.earnedCoins}</p>
-                <p className={`tap-result-record ${lastTapDashResult.isNewRecord ? 'new' : 'keep'}`}>
-                  {lastTapDashResult.isNewRecord ? 'NEW RECORD 갱신!' : '최고 기록 유지'}
-                </p>
-                <div className="panel-actions">
-                  <button className="action-button" type="button" onClick={() => void startSelectedGame()}>
-                    다시 도전
-                  </button>
-                </div>
-              </section>
-            ) : null}
-
             <section className="lobby-icon-grid" aria-label="mini-game-icon-grid">
               {uiModel?.cards.map((card) => {
                 const isSelected = isLobbyGamePicked && card.id === selectedGameId

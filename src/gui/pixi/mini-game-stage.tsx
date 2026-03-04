@@ -2,6 +2,7 @@ import { Application } from '@pixi/react'
 import type { CSSProperties } from 'react'
 import type { MiniGameId } from '../../primitives/types'
 import { MOBILE_VIEWPORT, MINI_GAME_STAGE_HEIGHT } from '../../primitives/constants'
+import stageBackground from '../../../assets/images/bg-stage-bright-pixel.png'
 import tapDashCharacter from '../../../assets/images/character-tap-dash-pixel-transparent.png'
 import timingShotCharacter from '../../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacter from '../../../assets/images/character-lane-dodge-pixel-transparent.png'
@@ -12,31 +13,35 @@ interface StageVisualConfig {
   readonly backgroundColor: number
   readonly glowColor: string
   readonly accentColor: string
+  readonly backgroundImageSrc: string
   readonly characterImageSrc: string
   readonly particleColors: readonly [string, string]
 }
 
 const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
   'tap-dash': {
-    backgroundColor: 0x2a1235,
-    glowColor: '#f97316',
-    accentColor: '#fb7185',
+    backgroundColor: 0x0e1b30,
+    glowColor: '#fb923c',
+    accentColor: '#f97316',
+    backgroundImageSrc: stageBackground,
     characterImageSrc: tapDashCharacter,
-    particleColors: ['#fdba74', '#f472b6'],
+    particleColors: ['#fde68a', '#fda4af'],
   },
   'timing-shot': {
-    backgroundColor: 0x10243f,
-    glowColor: '#38bdf8',
-    accentColor: '#0ea5e9',
+    backgroundColor: 0x2f5a96,
+    glowColor: '#7dd3fc',
+    accentColor: '#38bdf8',
+    backgroundImageSrc: stageBackground,
     characterImageSrc: timingShotCharacter,
-    particleColors: ['#67e8f9', '#93c5fd'],
+    particleColors: ['#bae6fd', '#a5f3fc'],
   },
   'lane-dodge': {
-    backgroundColor: 0x102b1f,
-    glowColor: '#4ade80',
+    backgroundColor: 0x1f5e69,
+    glowColor: '#6ee7b7',
     accentColor: '#22c55e',
+    backgroundImageSrc: stageBackground,
     characterImageSrc: laneDodgeCharacter,
-    particleColors: ['#86efac', '#34d399'],
+    particleColors: ['#bbf7d0', '#6ee7b7'],
   },
 }
 
@@ -50,40 +55,48 @@ export interface MiniGameStageProps {
 
 export function MiniGameStage({ gameId, title, transitionState }: MiniGameStageProps) {
   const visual = STAGE_VISUAL_BY_GAME[gameId]
+  const isFocusedMode = gameId === 'tap-dash'
+  const stageHeight = isFocusedMode ? 160 : MINI_GAME_STAGE_HEIGHT
 
   return (
-    <div className={`pixi-stage-shell transition-${transitionState}`}>
+    <div
+      className={`pixi-stage-shell transition-${transitionState} ${isFocusedMode ? 'focus-mode' : ''}`}
+      style={{ '--stage-height': `${stageHeight}px` } as CSSProperties}
+    >
       <Application
         width={MOBILE_VIEWPORT.width}
-        height={MINI_GAME_STAGE_HEIGHT}
+        height={stageHeight}
         antialias
         backgroundColor={visual.backgroundColor}
       />
 
-      <div className="stage-vfx-layer" aria-hidden>
-        <div className="stage-gradient-glow" style={{ '--glow': visual.glowColor } as CSSProperties} />
-        <div className="stage-energy-wave" style={{ '--accent': visual.accentColor } as CSSProperties} />
-        <div className="stage-particle-field">
-          {PARTICLE_DELAYS.map((delay, index) => (
-            <span
-              className="stage-particle"
-              key={`${gameId}-${index}`}
-              style={
-                {
-                  '--delay': delay,
-                  '--particle-a': visual.particleColors[0],
-                  '--particle-b': visual.particleColors[1],
-                } as CSSProperties
-              }
-            />
-          ))}
-        </div>
+      {isFocusedMode ? null : (
+        <div className="stage-vfx-layer" aria-hidden>
+          <img className="stage-background-image" src={visual.backgroundImageSrc} alt="" />
+          <div className="stage-gradient-glow" style={{ '--glow': visual.glowColor } as CSSProperties} />
+          <div className="stage-energy-wave" style={{ '--accent': visual.accentColor } as CSSProperties} />
+          <div className="stage-particle-field">
+            {PARTICLE_DELAYS.map((delay, index) => (
+              <span
+                className="stage-particle"
+                key={`${gameId}-${index}`}
+                style={
+                  {
+                    '--delay': delay,
+                    '--particle-a': visual.particleColors[0],
+                    '--particle-b': visual.particleColors[1],
+                  } as CSSProperties
+                }
+              />
+            ))}
+          </div>
 
-        <img className="stage-character" src={visual.characterImageSrc} alt={`${title} character`} />
-      </div>
+          <img className="stage-character" src={visual.characterImageSrc} alt={`${title} character`} />
+        </div>
+      )}
 
       <div className="pixi-stage-overlay">
-        <p className="pixi-stage-label">NOW PLAYING</p>
+        <p className="pixi-stage-label">{isFocusedMode ? 'FOCUS MODE' : 'NOW PLAYING'}</p>
         <h2>{title}</h2>
       </div>
     </div>

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
-import tapBurstSprite from '../../../assets/images/tap-dash-burst-pixel-transparent.png'
 import tapPopStripSprite from '../../../assets/images/tap-dash-pop-strip-pixel-transparent.png'
+import tapRingSheetSprite from '../../../assets/images/tap-dash-ring-sheet-pixel-transparent.png'
+import tapSparkSheetSprite from '../../../assets/images/tap-dash-spark-sheet-pixel-transparent.png'
 
 const ROUND_DURATION_MS = 8000
 const TICK_MS = 100
@@ -16,6 +17,11 @@ interface TapImpact {
   readonly y: number
   readonly combo: number
   readonly rotationDeg: number
+  readonly ringScale: number
+  readonly sparkScale: number
+  readonly sparkOffsetX: number
+  readonly sparkOffsetY: number
+  readonly sparkRotationDeg: number
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -77,8 +83,16 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
   const createImpact = (x: number, y: number, currentCombo: number) => {
     const id = impactIdRef.current++
     const rotationDeg = ((id * 47) % 40) - 20
+    const ringScale = 0.9 + ((id * 13) % 5) * 0.06
+    const sparkScale = 0.72 + ((id * 17) % 5) * 0.08
+    const sparkOffsetX = ((id * 29) % 21) - 10
+    const sparkOffsetY = ((id * 31) % 21) - 10
+    const sparkRotationDeg = ((id * 71) % 360) - 180
 
-    setImpacts((prev) => [...prev, { id, x, y, combo: currentCombo, rotationDeg }])
+    setImpacts((prev) => [
+      ...prev,
+      { id, x, y, combo: currentCombo, rotationDeg, ringScale, sparkScale, sparkOffsetX, sparkOffsetY, sparkRotationDeg },
+    ])
 
     const cleanupTimerId = window.setTimeout(() => {
       setImpacts((prev) => prev.filter((impact) => impact.id !== id))
@@ -132,9 +146,6 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
 
   return (
     <section className="mini-game-panel tap-dash-panel" aria-label="tap-dash-game">
-      <h3>Tap Dash</h3>
-      <p className="mini-game-description">8초 동안 화면을 마구 터치해서 팡팡 터뜨리세요.</p>
-
       <div className="tap-dash-hud">
         <p className="mini-game-stat">남은 시간: {(remainingMs / 1000).toFixed(1)}초</p>
         <p className="mini-game-stat">현재 점수: {taps}</p>
@@ -149,10 +160,6 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
         onPointerDown={handleZonePointerDown}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <p className="tap-touch-instruction">화면 아무 곳이나 터치!</p>
-
-        {combo >= FEVER_THRESHOLD ? <span className="tap-fever-badge">FEVER TIME</span> : null}
-
         {impacts.map((impact) => (
           <span
             className="tap-impact"
@@ -164,11 +171,33 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
             } as CSSProperties}
           >
             <span
-              className="tap-pop-strip"
-              style={{ backgroundImage: `url(${tapPopStripSprite})` }}
+              className="tap-ring-sheet"
+              style={
+                {
+                  '--tap-ring-sheet': `url(${tapRingSheetSprite})`,
+                  '--ring-scale': `${impact.ringScale}`,
+                } as CSSProperties
+              }
               aria-hidden
             />
-            <img className="tap-burst-image" src={tapBurstSprite} alt="" aria-hidden />
+            <span
+              className="tap-pop-strip"
+              style={{ '--tap-pop-sheet': `url(${tapPopStripSprite})` } as CSSProperties}
+              aria-hidden
+            />
+            <span
+              className="tap-spark-sheet"
+              style={
+                {
+                  '--tap-spark-sheet': `url(${tapSparkSheetSprite})`,
+                  '--spark-scale': `${impact.sparkScale}`,
+                  '--spark-offset-x': `${impact.sparkOffsetX}px`,
+                  '--spark-offset-y': `${impact.sparkOffsetY}px`,
+                  '--spark-rotate': `${impact.sparkRotationDeg}deg`,
+                } as CSSProperties
+              }
+              aria-hidden
+            />
             <span className="tap-impact-score">{impact.combo > 1 ? `+1 x${impact.combo}` : '+1'}</span>
           </span>
         ))}
