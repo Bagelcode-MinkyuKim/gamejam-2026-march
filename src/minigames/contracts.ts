@@ -4,6 +4,7 @@ import type { MiniGameManifest, MiniGameResult } from '../primitives/types'
 export interface MiniGameSessionProps {
   readonly onFinish: (result: MiniGameResult) => void
   readonly onExit: () => void
+  readonly bestScore?: number
 }
 
 export interface MiniGameModule {

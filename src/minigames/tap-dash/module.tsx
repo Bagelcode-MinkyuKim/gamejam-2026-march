@@ -27,7 +27,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
+function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+  const [currentScore, setCurrentScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [impacts, setImpacts] = useState<TapImpact[]>([])
   const [isZoneHitActive, setZoneHitActive] = useState(false)
@@ -142,10 +143,13 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
     lastTapAtRef.current = now
 
     tapsRef.current += 1
+    setCurrentScore(tapsRef.current)
 
     createImpact(x, y, nextCombo)
     activateZoneHit()
   }
+
+  const displayedBestScore = Math.max(bestScore, currentScore)
 
   return (
     <section className="mini-game-panel tap-dash-panel" aria-label="tap-dash-game">
@@ -157,6 +161,11 @@ function TapDashGame({ onFinish, onExit }: MiniGameSessionProps) {
         onPointerDown={handleZonePointerDown}
         onContextMenu={(event) => event.preventDefault()}
       >
+        <div className="tap-dash-score-overlay" aria-live="polite">
+          <p className="tap-dash-current-score">{currentScore}</p>
+          <p className="tap-dash-best-score">BEST {displayedBestScore}</p>
+        </div>
+
         {impacts.map((impact) => (
           <span
             className="tap-impact"

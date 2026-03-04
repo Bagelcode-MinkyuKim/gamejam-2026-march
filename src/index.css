@@ -588,6 +588,34 @@ img {
   animation: zone-hit 130ms steps(3, end);
 }
 
+.tap-dash-score-overlay {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.tap-dash-current-score {
+  margin: 0;
+  font-size: clamp(1.9rem, 12vw, 3.5rem);
+  line-height: 1;
+  color: #1f2937;
+  text-shadow:
+    2px 2px 0 rgba(255, 255, 255, 0.82),
+    4px 4px 0 rgba(75, 85, 99, 0.25);
+}
+
+.tap-dash-best-score {
+  margin: 4px 0 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 2px solid rgba(75, 85, 99, 0.46);
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.58rem;
+  color: #374151;
+}
+
 .tap-impact {
   position: absolute;
   transform: translate(-50%, -50%);

@@ -196,6 +196,7 @@ export function GameHubApp() {
   }
 
   const activeModule = activeGameId ? miniGameModuleById[activeGameId] : null
+  const activeCard = activeGameId ? snapshot?.cards.find((card) => card.manifest.id === activeGameId) ?? null : null
   const isResultActionView = activeGameId === null && resultGameId !== null
   const isCountdownActive = activeGameId !== null && countdownStepIndex !== null
   const countdownLabel = isCountdownActive ? GAME_START_COUNTDOWN_LABELS[countdownStepIndex] : null
@@ -235,7 +236,11 @@ export function GameHubApp() {
                 <p className="game-countdown-text">{countdownLabel}</p>
               </section>
             ) : (
-              <activeModule.Component onFinish={finishMiniGame} onExit={exitMiniGame} />
+              <activeModule.Component
+                onFinish={finishMiniGame}
+                onExit={exitMiniGame}
+                bestScore={activeCard?.bestScore ?? 0}
+              />
             )}
           </>
         ) : isResultActionView ? (
