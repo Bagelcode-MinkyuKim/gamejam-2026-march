@@ -1,6 +1,6 @@
 import type { IProgressStore } from '../application/ports/progress-store'
 import { GameHubError } from '../primitives/errors'
-import { assertValidProgress } from '../primitives/validation'
+import { assertValidProgress, migrateProgressForCurrentMiniGames } from '../primitives/validation'
 import type { PlayerProgress } from '../primitives/types'
 
 export class LocalStorageProgressStore implements IProgressStore {
@@ -24,8 +24,14 @@ export class LocalStorageProgressStore implements IProgressStore {
       throw new GameHubError('INVALID_PROGRESS', `Stored progress is not valid JSON: ${String(error)}`)
     }
 
-    assertValidProgress(parsed)
-    return parsed
+    const migrated = migrateProgressForCurrentMiniGames(parsed)
+    assertValidProgress(migrated)
+
+    if (migrated !== parsed) {
+      window.localStorage.setItem(this.storageKey, JSON.stringify(migrated))
+    }
+
+    return migrated
   }
 
   async save(progress: PlayerProgress): Promise<void> {

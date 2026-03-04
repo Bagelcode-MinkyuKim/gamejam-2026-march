@@ -3,6 +3,7 @@ import type { MiniGameId, PlayerProgress } from './types'
 import { MINI_GAME_IDS } from './types'
 
 const miniGameIdSet = new Set<string>(MINI_GAME_IDS)
+const ALWAYS_UNLOCKED_GAME_IDS: ReadonlyArray<MiniGameId> = ['same-character']
 
 function assertFiniteNumber(value: unknown, label: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -40,17 +41,19 @@ export function createEmptyScoreMap(): Record<MiniGameId, number> {
 
 export function createInitialProgress(initialCoins: number, unlockedMiniGameIds: MiniGameId[]): PlayerProgress {
   assertNonNegativeNumber(initialCoins, 'initialCoins')
-  if (unlockedMiniGameIds.length === 0) {
+  const normalizedUnlockedMiniGameIds = [...new Set([...unlockedMiniGameIds, ...ALWAYS_UNLOCKED_GAME_IDS])]
+
+  if (normalizedUnlockedMiniGameIds.length === 0) {
     throw new GameHubError('INVALID_CONFIG', 'At least one starter mini game is required')
   }
 
-  for (const id of unlockedMiniGameIds) {
+  for (const id of normalizedUnlockedMiniGameIds) {
     assertMiniGameId(id, 'starterUnlockedGameIds[]')
   }
 
   return {
     coins: initialCoins,
-    unlockedMiniGameIds: [...new Set(unlockedMiniGameIds)],
+    unlockedMiniGameIds: normalizedUnlockedMiniGameIds,
     playCounts: createEmptyScoreMap(),
     bestScores: createEmptyScoreMap(),
   }
@@ -75,5 +78,52 @@ export function assertValidProgress(value: unknown): asserts value is PlayerProg
   for (const id of MINI_GAME_IDS) {
     assertNonNegativeNumber(value.playCounts[id], `progress.playCounts.${id}`)
     assertNonNegativeNumber(value.bestScores[id], `progress.bestScores.${id}`)
+  }
+}
+
+export function migrateProgressForCurrentMiniGames(value: unknown): unknown {
+  assertRecord(value, 'progress')
+
+  const source = value as Record<string, unknown>
+  if (!Array.isArray(source.unlockedMiniGameIds)) {
+    throw new GameHubError('INVALID_PROGRESS', 'progress.unlockedMiniGameIds must be an array')
+  }
+  assertRecord(source.playCounts, 'progress.playCounts')
+  assertRecord(source.bestScores, 'progress.bestScores')
+
+  const nextUnlockedMiniGameIds = [...source.unlockedMiniGameIds]
+  const nextPlayCounts: Record<string, unknown> = { ...source.playCounts }
+  const nextBestScores: Record<string, unknown> = { ...source.bestScores }
+
+  let changed = false
+
+  for (const id of ALWAYS_UNLOCKED_GAME_IDS) {
+    if (!nextUnlockedMiniGameIds.some((candidate) => candidate === id)) {
+      nextUnlockedMiniGameIds.push(id)
+      changed = true
+    }
+  }
+
+  for (const id of MINI_GAME_IDS) {
+    if (!(id in nextPlayCounts)) {
+      nextPlayCounts[id] = 0
+      changed = true
+    }
+
+    if (!(id in nextBestScores)) {
+      nextBestScores[id] = 0
+      changed = true
+    }
+  }
+
+  if (!changed) {
+    return value
+  }
+
+  return {
+    ...source,
+    unlockedMiniGameIds: nextUnlockedMiniGameIds,
+    playCounts: nextPlayCounts,
+    bestScores: nextBestScores,
   }
 }

@@ -6,6 +6,7 @@ import stageBackground from '../../../assets/images/bg-stage-bright-pixel.png'
 import tapDashCharacter from '../../../assets/images/character-tap-dash-pixel-transparent.png'
 import timingShotCharacter from '../../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacter from '../../../assets/images/character-lane-dodge-pixel-transparent.png'
+import sameCharacterStageImage from '../../../assets/images/same-character/park-sangmin.png'
 
 export type StageTransitionState = 'idle' | 'enter' | 'exit'
 
@@ -47,7 +48,8 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
     backgroundColor: 0x2b1e10,
     glowColor: '#fbbf24',
     accentColor: '#f59e0b',
-    characterImageSrc: tapDashCharacter,
+    backgroundImageSrc: stageBackground,
+    characterImageSrc: sameCharacterStageImage,
     particleColors: ['#fde68a', '#f59e0b'],
   },
 }

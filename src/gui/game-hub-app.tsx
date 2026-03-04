@@ -12,6 +12,7 @@ import lobbyBackgroundImage from '../../assets/images/bg-lobby-bright-pixel.png'
 import tapDashCharacterIcon from '../../assets/images/character-tap-dash-pixel-transparent.png'
 import timingShotCharacterIcon from '../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacterIcon from '../../assets/images/character-lane-dodge-pixel-transparent.png'
+import sameCharacterIcon from '../../assets/images/same-character/seo-taiji.png'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
 const STAGE_TRANSITION_MS = 420
@@ -19,6 +20,7 @@ const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
   'tap-dash': tapDashCharacterIcon,
   'timing-shot': timingShotCharacterIcon,
   'lane-dodge': laneDodgeCharacterIcon,
+  'same-character': sameCharacterIcon,
 }
 const GAME_SHELL_STYLE = {
   '--lobby-bg-image': `url("${lobbyBackgroundImage}")`,

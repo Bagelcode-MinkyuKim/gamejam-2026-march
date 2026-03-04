@@ -1,22 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
+import parkSangminImage from '../../../assets/images/same-character/park-sangmin.png'
+import songChangsikImage from '../../../assets/images/same-character/song-changsik.png'
+import taeJinaImage from '../../../assets/images/same-character/tae-jina.png'
+import parkWankyuImage from '../../../assets/images/same-character/park-wankyu.png'
+import kimYeonjaImage from '../../../assets/images/same-character/kim-yeonja.png'
+import seoTaijiImage from '../../../assets/images/same-character/seo-taiji.png'
 
-const LANE_LABELS = ['LEFT', 'CENTER', 'RIGHT'] as const
-const LANE_COUNT = LANE_LABELS.length
-const GAME_DURATION_MS = 32000
-const ROUND_DURATION_MS = 1400
+const LANE_COUNT = 3
+const STACK_ROWS = 4
+const GAME_DURATION_MS = 40000
+const MAX_TIME_MS = 99000
+const TIME_BONUS_ON_MATCH_MS = 10000
+const TURN_DURATION_MS = 1000
 const TICK_MS = 50
-const MAX_MISSES = 5
+const STAR_GAIN_ON_MATCH = 24
+const STAR_LOSS_ON_MISS = 30
+const FEVER_DURATION_MS = 6000
+const INCOMING_QUEUE_SIZE = 5
 
 const CHARACTER_POOL = [
-  { id: 'red-cat', name: 'Red Cat', badge: 'CAT', color: '#ef4444' },
-  { id: 'mint-bear', name: 'Mint Bear', badge: 'BEAR', color: '#22c55e' },
-  { id: 'blue-fox', name: 'Blue Fox', badge: 'FOX', color: '#22d3ee' },
-  { id: 'gold-pup', name: 'Gold Pup', badge: 'PUP', color: '#f59e0b' },
+  { id: 'park-sangmin', name: '박상민', color: '#ef4444', imageSrc: parkSangminImage },
+  { id: 'song-changsik', name: '송창식', color: '#22c55e', imageSrc: songChangsikImage },
+  { id: 'tae-jina', name: '태진아', color: '#22d3ee', imageSrc: taeJinaImage },
+  { id: 'park-wankyu', name: '박완규', color: '#f59e0b', imageSrc: parkWankyuImage },
+  { id: 'kim-yeonja', name: '김연자', color: '#ec4899', imageSrc: kimYeonjaImage },
+  { id: 'seo-taiji', name: '서태지', color: '#8b5cf6', imageSrc: seoTaijiImage },
 ] as const
 
 type CharacterToken = (typeof CHARACTER_POOL)[number]
+type JudgeState = 'ready' | 'match' | 'miss'
 
 function clamp(min: number, value: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -27,38 +41,52 @@ function randomCharacter(): CharacterToken {
   return CHARACTER_POOL[index]
 }
 
-function createInitialLanes(): CharacterToken[] {
-  return Array.from({ length: LANE_COUNT }, randomCharacter)
+function createInitialStacks(): CharacterToken[][] {
+  return Array.from({ length: LANE_COUNT }, () => Array.from({ length: STACK_ROWS }, randomCharacter))
+}
+
+function createIncomingQueue(): CharacterToken[] {
+  return Array.from({ length: INCOMING_QUEUE_SIZE }, randomCharacter)
+}
+
+function nextIncomingQueue(currentQueue: CharacterToken[]): CharacterToken[] {
+  return [...currentQueue.slice(1), randomCharacter()]
 }
 
 function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
-  const [laneIndex, setLaneIndex] = useState(1)
-  const [laneCharacters, setLaneCharacters] = useState<CharacterToken[]>(() => createInitialLanes())
-  const [incomingCharacter, setIncomingCharacter] = useState<CharacterToken>(() => randomCharacter())
-  const [remainingRoundMs, setRemainingRoundMs] = useState(ROUND_DURATION_MS)
-  const [remainingGameMs, setRemainingGameMs] = useState(GAME_DURATION_MS)
+  const [selectedLane, setSelectedLane] = useState(1)
+  const [laneStacks, setLaneStacks] = useState<CharacterToken[][]>(() => createInitialStacks())
+  const [incomingQueue, setIncomingQueue] = useState<CharacterToken[]>(() => createIncomingQueue())
+  const [turnRemainingMs, setTurnRemainingMs] = useState(TURN_DURATION_MS)
+  const [remainingMs, setRemainingMs] = useState(GAME_DURATION_MS)
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [bestCombo, setBestCombo] = useState(0)
-  const [misses, setMisses] = useState(0)
-  const [lastJudge, setLastJudge] = useState<'READY' | 'MATCH' | 'MISS'>('READY')
+  const [starGauge, setStarGauge] = useState(0)
+  const [feverRemainingMs, setFeverRemainingMs] = useState(0)
+  const [judge, setJudge] = useState<JudgeState>('ready')
+  const [burstText, setBurstText] = useState<string | null>(null)
+  const [timeBonusFlashMs, setTimeBonusFlashMs] = useState(0)
 
-  const laneIndexRef = useRef(laneIndex)
-  const laneCharactersRef = useRef<CharacterToken[]>(laneCharacters)
-  const incomingCharacterRef = useRef<CharacterToken>(incomingCharacter)
-  const remainingRoundMsRef = useRef(remainingRoundMs)
-  const remainingGameMsRef = useRef(remainingGameMs)
+  const selectedLaneRef = useRef(selectedLane)
+  const laneStacksRef = useRef<CharacterToken[][]>(laneStacks)
+  const incomingQueueRef = useRef<CharacterToken[]>(incomingQueue)
+  const turnRemainingMsRef = useRef(turnRemainingMs)
+  const remainingMsRef = useRef(remainingMs)
   const scoreRef = useRef(score)
   const comboRef = useRef(combo)
   const bestComboRef = useRef(bestCombo)
-  const missesRef = useRef(misses)
+  const starGaugeRef = useRef(starGauge)
+  const feverRemainingMsRef = useRef(feverRemainingMs)
+  const timeBonusFlashMsRef = useRef(timeBonusFlashMs)
+  const burstMsRef = useRef(0)
   const finishedRef = useRef(false)
   const startedAtRef = useRef(0)
 
-  const setLanePosition = useCallback((nextIndex: number) => {
-    const clamped = clamp(0, nextIndex, LANE_COUNT - 1)
-    laneIndexRef.current = clamped
-    setLaneIndex(clamped)
+  const chooseLane = useCallback((nextLane: number) => {
+    const clamped = clamp(0, nextLane, LANE_COUNT - 1)
+    selectedLaneRef.current = clamped
+    setSelectedLane(clamped)
   }, [])
 
   const finishGame = useCallback(() => {
@@ -68,58 +96,78 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
 
     finishedRef.current = true
     const elapsedMs = Math.max(TICK_MS, Math.round(window.performance.now() - startedAtRef.current))
-    const chainBonus = bestComboRef.current * 4
+    const comboBonus = bestComboRef.current * 5
+
     onFinish({
-      score: scoreRef.current + chainBonus,
+      score: scoreRef.current + comboBonus,
       durationMs: elapsedMs,
     })
   }, [onFinish])
 
-  const resolveRound = useCallback((): boolean => {
-    const selectedCharacter = laneCharactersRef.current[laneIndexRef.current]
-    const isMatch = selectedCharacter.id === incomingCharacterRef.current.id
+  const resolveTurn = useCallback((): void => {
+    const laneIndex = selectedLaneRef.current
+    const topCharacter = laneStacksRef.current[laneIndex][0]
+    const currentIncoming = incomingQueueRef.current[0]
+    const isMatch = topCharacter.id === currentIncoming.id
 
     if (isMatch) {
       const nextCombo = comboRef.current + 1
-      const gainedScore = 12 + nextCombo * 6
+      const nextBestCombo = Math.max(bestComboRef.current, nextCombo)
+      const scoreBase = feverRemainingMsRef.current > 0 ? 30 : 18
+      const gainedScore = scoreBase + nextCombo * 6
       const nextScore = scoreRef.current + gainedScore
 
       comboRef.current = nextCombo
+      bestComboRef.current = nextBestCombo
       scoreRef.current = nextScore
       setCombo(nextCombo)
+      setBestCombo(nextBestCombo)
       setScore(nextScore)
 
-      if (nextCombo > bestComboRef.current) {
-        bestComboRef.current = nextCombo
-        setBestCombo(nextCombo)
+      const nextRemainingMs = Math.min(MAX_TIME_MS, remainingMsRef.current + TIME_BONUS_ON_MATCH_MS)
+      remainingMsRef.current = nextRemainingMs
+      setRemainingMs(nextRemainingMs)
+      timeBonusFlashMsRef.current = 700
+      setTimeBonusFlashMs(700)
+
+      let nextStarGauge = starGaugeRef.current + STAR_GAIN_ON_MATCH
+      if (nextStarGauge >= 100) {
+        nextStarGauge -= 100
+        feverRemainingMsRef.current = FEVER_DURATION_MS
+        setFeverRemainingMs(FEVER_DURATION_MS)
+        burstMsRef.current = 900
+        setBurstText('오옷!')
+      } else if (nextCombo >= 3) {
+        burstMsRef.current = 700
+        setBurstText('오옷!')
       }
 
-      const nextLaneCharacters = laneCharactersRef.current.map((character, index) =>
-        index === laneIndexRef.current ? randomCharacter() : character,
-      )
-      laneCharactersRef.current = nextLaneCharacters
-      setLaneCharacters(nextLaneCharacters)
-      setLastJudge('MATCH')
+      starGaugeRef.current = nextStarGauge
+      setStarGauge(nextStarGauge)
+
+      const currentLane = laneStacksRef.current[laneIndex]
+      const nextLaneStack = [randomCharacter(), ...currentLane.slice(0, STACK_ROWS - 1)]
+      const nextStacks = laneStacksRef.current.map((stack, index) => (index === laneIndex ? nextLaneStack : stack))
+      laneStacksRef.current = nextStacks
+      setLaneStacks(nextStacks)
+
+      setJudge('match')
     } else {
       comboRef.current = 0
       setCombo(0)
 
-      const nextMisses = missesRef.current + 1
-      missesRef.current = nextMisses
-      setMisses(nextMisses)
-      setLastJudge('MISS')
-
-      if (nextMisses >= MAX_MISSES) {
-        finishGame()
-        return true
-      }
+      const nextStarGauge = Math.max(0, starGaugeRef.current - STAR_LOSS_ON_MISS)
+      starGaugeRef.current = nextStarGauge
+      setStarGauge(nextStarGauge)
+      setJudge('miss')
     }
 
-    const nextIncoming = randomCharacter()
-    incomingCharacterRef.current = nextIncoming
-    setIncomingCharacter(nextIncoming)
-    return false
-  }, [finishGame])
+    const nextQueue = nextIncomingQueue(incomingQueueRef.current)
+    incomingQueueRef.current = nextQueue
+    setIncomingQueue(nextQueue)
+    turnRemainingMsRef.current = TURN_DURATION_MS
+    setTurnRemainingMs(TURN_DURATION_MS)
+  }, [])
 
   useEffect(() => {
     startedAtRef.current = window.performance.now()
@@ -130,23 +178,33 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
         return
       }
 
-      remainingGameMsRef.current = Math.max(0, remainingGameMsRef.current - TICK_MS)
-      remainingRoundMsRef.current = Math.max(0, remainingRoundMsRef.current - TICK_MS)
-      setRemainingGameMs(remainingGameMsRef.current)
-      setRemainingRoundMs(remainingRoundMsRef.current)
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - TICK_MS)
+      setRemainingMs(remainingMsRef.current)
 
-      if (remainingRoundMsRef.current === 0) {
-        const ended = resolveRound()
-        if (ended) {
-          window.clearInterval(timer)
-          return
-        }
-
-        remainingRoundMsRef.current = ROUND_DURATION_MS
-        setRemainingRoundMs(ROUND_DURATION_MS)
+      if (feverRemainingMsRef.current > 0) {
+        feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - TICK_MS)
+        setFeverRemainingMs(feverRemainingMsRef.current)
       }
 
-      if (remainingGameMsRef.current === 0) {
+      if (timeBonusFlashMsRef.current > 0) {
+        timeBonusFlashMsRef.current = Math.max(0, timeBonusFlashMsRef.current - TICK_MS)
+        setTimeBonusFlashMs(timeBonusFlashMsRef.current)
+      }
+
+      if (burstMsRef.current > 0) {
+        burstMsRef.current = Math.max(0, burstMsRef.current - TICK_MS)
+        if (burstMsRef.current === 0) {
+          setBurstText(null)
+        }
+      }
+
+      turnRemainingMsRef.current = Math.max(0, turnRemainingMsRef.current - TICK_MS)
+      setTurnRemainingMs(turnRemainingMsRef.current)
+      if (turnRemainingMsRef.current === 0) {
+        resolveTurn()
+      }
+
+      if (remainingMsRef.current === 0) {
         finishGame()
         window.clearInterval(timer)
       }
@@ -155,83 +213,149 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
     return () => {
       window.clearInterval(timer)
     }
-  }, [finishGame, resolveRound])
+  }, [finishGame, resolveTurn])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (finishedRef.current) {
+        return
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        chooseLane(selectedLaneRef.current - 1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        chooseLane(selectedLaneRef.current + 1)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [chooseLane])
 
   const moveLeft = () => {
     if (finishedRef.current) {
       return
     }
-    setLanePosition(laneIndexRef.current - 1)
+    chooseLane(selectedLaneRef.current - 1)
   }
 
   const moveRight = () => {
     if (finishedRef.current) {
       return
     }
-    setLanePosition(laneIndexRef.current + 1)
+    chooseLane(selectedLaneRef.current + 1)
   }
 
-  const roundProgress = Math.round(((ROUND_DURATION_MS - remainingRoundMs) / ROUND_DURATION_MS) * 100)
-  const lifeLeft = MAX_MISSES - misses
+  const turnFillPercent = (turnRemainingMs / TURN_DURATION_MS) * 100
+  const leftPreview = laneStacks[0]?.slice(0, 2) ?? []
+  const rightPreview = laneStacks[2]?.slice(0, 2) ?? []
 
   return (
     <section className="mini-game-panel same-character-panel" aria-label="same-character-game">
-      <h3>니편내편</h3>
-      <p className="mini-game-description">좌우 버튼으로 라인을 옮기며 내려오는 캐릭터와 같은 캐릭터를 맞추세요.</p>
-
-      <div className="same-character-hud">
-        <p className="mini-game-stat">남은 시간: {(remainingGameMs / 1000).toFixed(1)}초</p>
-        <p className="mini-game-stat">점수: {score}</p>
-        <p className="mini-game-stat">콤보: x{combo} (최고 x{bestCombo})</p>
-        <p className="mini-game-stat">남은 기회: {lifeLeft}</p>
+      <div className="same-character-score-strip">
+        <p>⭐ {starGauge}</p>
+        <p>{score.toLocaleString()}</p>
+        <p>{Math.ceil(remainingMs / 1000)}</p>
       </div>
 
-      <div className="same-character-drop-track" role="presentation">
-        <div className="same-character-drop-fill" style={{ width: `${roundProgress}%` }} />
+      <div className="same-character-top-row">
+        <div className="same-character-star-meter" role="presentation">
+          <div className="same-character-star-fill" style={{ width: `${starGauge}%` }} />
+        </div>
+        {timeBonusFlashMs > 0 ? <p className="same-character-time-bonus">+10s</p> : <p className="same-character-time-bonus"> </p>}
       </div>
 
-      <p className="same-character-incoming">
-        내려오는 캐릭터:
-        <span className="same-character-chip" style={{ '--character-color': incomingCharacter.color } as CSSProperties}>
-          {incomingCharacter.badge}
-        </span>
-        {incomingCharacter.name}
-      </p>
+      <div className="same-character-turn-track" role="presentation">
+        <div className="same-character-turn-fill" style={{ width: `${turnFillPercent}%` }} />
+      </div>
 
-      <div className="same-character-lanes">
-        {laneCharacters.map((character, index) => (
-          <div
-            className={`same-character-lane ${laneIndex === index ? 'selected' : ''}`}
-            key={`${index}-${character.id}`}
-          >
-            <p className="same-character-lane-label">{LANE_LABELS[index]}</p>
-            <span
-              className="same-character-chip"
-              style={{ '--character-color': character.color } as CSSProperties}
-            >
-              {character.badge}
-            </span>
-            <p className="same-character-name">{character.name}</p>
-          </div>
-        ))}
+      <div className="same-character-track" role="presentation">
+        <div className="same-character-road-guide" />
+        <div className="same-character-combo-pop">
+          <strong>{combo}</strong>
+          <span>COMBO</span>
+        </div>
+        <div className="same-character-side-group left" aria-hidden>
+          {leftPreview.map((character, index) => (
+            <img
+              className={`same-character-side-avatar ${index === 0 ? 'primary' : 'secondary'}`}
+              key={`left-preview-${character.id}-${index}`}
+              src={character.imageSrc}
+              alt=""
+            />
+          ))}
+        </div>
+        <div className="same-character-side-group right" aria-hidden>
+          {rightPreview.map((character, index) => (
+            <img
+              className={`same-character-side-avatar ${index === 0 ? 'primary' : 'secondary'}`}
+              key={`right-preview-${character.id}-${index}`}
+              src={character.imageSrc}
+              alt=""
+            />
+          ))}
+        </div>
+
+        <div className="same-character-incoming-line">
+          {[...incomingQueue].reverse().map((character, reverseIndex) => {
+            const queueIndex = incomingQueue.length - 1 - reverseIndex
+            const isCurrent = queueIndex === 0
+            return (
+              <div
+                className={`same-character-incoming-item ${isCurrent ? 'active' : ''} ${feverRemainingMs > 0 && isCurrent ? 'fever' : ''}`}
+                key={`incoming-${queueIndex}-${character.id}`}
+                style={
+                  {
+                    borderColor: character.color,
+                    '--queue-layer': reverseIndex,
+                    zIndex: reverseIndex + 1,
+                  } as CSSProperties
+                }
+              >
+                <img
+                  className={`same-character-avatar ${isCurrent ? 'large' : ''}`}
+                  src={character.imageSrc}
+                  alt={character.name}
+                />
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="same-character-stacks">
+          {laneStacks.map((stack, laneIndex) => (
+            <div className={`same-character-lane ${selectedLane === laneIndex ? 'selected' : ''}`} key={`lane-${laneIndex}`}>
+              {stack.map((character, rowIndex) => (
+                <div
+                  className={`same-character-stack-item ${rowIndex === 0 ? 'target' : ''}`}
+                  key={`${laneIndex}-${rowIndex}-${character.id}`}
+                  style={{ '--stack-level': STACK_ROWS - rowIndex - 1 } as CSSProperties}
+                >
+                  <img className="same-character-avatar" src={character.imageSrc} alt={character.name} />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {burstText !== null ? <p className="same-character-burst">{burstText}</p> : null}
       </div>
 
       <div className="same-character-controls">
-        <button className="lane-button" type="button" onClick={moveLeft}>
-          ← 왼쪽
+        <button className="same-character-arrow" type="button" onClick={moveLeft} aria-label="move-left">
+          ←
         </button>
-        <button className="lane-button" type="button" onClick={moveRight}>
-          오른쪽 →
+        <button className="same-character-arrow" type="button" onClick={moveRight} aria-label="move-right">
+          →
         </button>
       </div>
 
-      <p className={`same-character-judge ${lastJudge.toLowerCase()}`}>
-        {lastJudge === 'MATCH' ? 'MATCH! 콤보 상승' : lastJudge === 'MISS' ? 'MISS! 라인을 다시 맞춰보세요' : 'READY'}
-      </p>
+      <p className={`same-character-judge ${judge}`}>{judge === 'match' ? '오옷!' : judge === 'miss' ? '앗!' : ''}</p>
 
-      <button className="text-button" type="button" onClick={finishGame}>
-        라운드 종료
-      </button>
       <button className="text-button" type="button" onClick={onExit}>
         허브로 돌아가기
       </button>
@@ -243,7 +367,7 @@ export const sameCharacterModule: MiniGameModule = {
   manifest: {
     id: 'same-character',
     title: '니편내편',
-    description: '좌우 이동으로 같은 캐릭터를 맞춰 콤보를 쌓는 게임',
+    description: '중앙 대기열 캐릭터가 차례로 전진할 때 좌우 이동으로 같은 줄을 맞추는 콤보 게임',
     unlockCost: 140,
     baseReward: 24,
     scoreRewardMultiplier: 0.7,
