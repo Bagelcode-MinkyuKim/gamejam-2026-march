@@ -933,6 +933,10 @@ img {
   flex: 1;
   height: 100%;
   min-height: 520px;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .run-run-svg {
@@ -943,6 +947,7 @@ img {
 .run-run-board .zigzag-svg {
   height: 100%;
   min-height: 100%;
+  pointer-events: none;
 }
 
 .run-run-hud {
