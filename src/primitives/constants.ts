@@ -14,7 +14,7 @@ export const MAX_FRAME_DELTA_MS = DEFAULT_FRAME_MS * 4
 
 export const HUB_BOOTSTRAP_CONFIG = {
   initialCoins: 30,
-  starterUnlockedGameIds: ['run-run', 'tap-dash'] as MiniGameId[],
+  starterUnlockedGameIds: ['gogunbuntu', 'run-run', 'tap-dash'] as MiniGameId[],
 }
 
 export const CURRENCY_LABEL = 'Bagel Coin'

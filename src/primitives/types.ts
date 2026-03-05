@@ -1,4 +1,4 @@
-export const MINI_GAME_IDS = ['tap-dash', 'timing-shot', 'lane-dodge', 'run-run', 'same-character'] as const
+export const MINI_GAME_IDS = ['tap-dash', 'timing-shot', 'lane-dodge', 'run-run', 'same-character', 'gogunbuntu'] as const
 
 export type MiniGameId = (typeof MINI_GAME_IDS)[number]
 

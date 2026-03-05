@@ -6,6 +6,7 @@ import tapDashCharacter from '../../../assets/images/character-tap-dash-pixel-tr
 import timingShotCharacter from '../../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacter from '../../../assets/images/character-lane-dodge-pixel-transparent.png'
 import sameCharacterStageImage from '../../../assets/images/same-character/park-sangmin.png'
+import gogunbuntuStageImage from '../../../assets/images/gogunbuntu/dot-characters/kim-yeonja.png'
 
 export type StageTransitionState = 'idle' | 'enter' | 'exit'
 
@@ -34,6 +35,10 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
   'same-character': {
     backgroundColor: 0xe8e4da,
     characterImageSrc: sameCharacterStageImage,
+  },
+  'gogunbuntu': {
+    backgroundColor: 0x0f172a,
+    characterImageSrc: gogunbuntuStageImage,
   },
 }
 

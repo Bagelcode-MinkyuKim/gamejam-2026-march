@@ -37,6 +37,7 @@ export function createEmptyScoreMap(): Record<MiniGameId, number> {
     'lane-dodge': 0,
     'run-run': 0,
     'same-character': 0,
+    'gogunbuntu': 0,
   }
 }
 

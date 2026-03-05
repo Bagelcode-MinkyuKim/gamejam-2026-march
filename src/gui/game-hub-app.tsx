@@ -10,6 +10,7 @@ import tapDashCharacterIcon from '../../assets/images/character-tap-dash-pixel-t
 import timingShotCharacterIcon from '../../assets/images/character-timing-shot-pixel-transparent.png'
 import laneDodgeCharacterIcon from '../../assets/images/character-lane-dodge-pixel-transparent.png'
 import sameCharacterIcon from '../../assets/images/same-character/seo-taiji.png'
+import gogunbuntuCharacterIcon from '../../assets/images/gogunbuntu/dot-characters/park-sangmin.png'
 import defaultBgmLoop from '../../assets/sounds/default-bgm-loop.mp3'
 import gameplayBgmLoop from '../../assets/sounds/gameplay-bgm-loop.mp3'
 import resultBgmLoop from '../../assets/sounds/result-bgm-loop.mp3'
@@ -31,6 +32,7 @@ const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
   'lane-dodge': laneDodgeCharacterIcon,
   'same-character': sameCharacterIcon,
   'run-run': tapDashCharacterIcon,
+  'gogunbuntu': gogunbuntuCharacterIcon,
 }
 const COUNTDOWN_GUIDE_BY_GAME_ID: Record<MiniGameId, string> = {
   'tap-dash': '등장하는 타겟을 연속 터치하고, 하트 아이템으로 시간을 크게 벌어보세요.',
@@ -38,6 +40,7 @@ const COUNTDOWN_GUIDE_BY_GAME_ID: Record<MiniGameId, string> = {
   'lane-dodge': '레인을 바꿔 장애물을 피하고 오래 버틸수록 점수가 올라갑니다.',
   'run-run': '좌우 전환 타이밍을 맞춰 코스 밖으로 벗어나지 않게 달리세요.',
   'same-character': '같은 캐릭터를 빠르게 찾아 선택하면 콤보가 쌓입니다.',
+  'gogunbuntu': '점프로 높이를 맞추고 훅을 던져 스윙하며 지형을 돌파하세요.',
 }
 
 interface RoundSettlement {

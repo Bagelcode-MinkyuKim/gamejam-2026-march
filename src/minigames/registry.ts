@@ -5,6 +5,7 @@ import { timingShotModule } from './timing-shot/module'
 import { laneDodgeModule } from './lane-dodge/module'
 import { runRunModule } from './run-run/module'
 import { sameCharacterModule } from './same-character/module'
+import { gogunbuntuModule } from './gogunbuntu/module'
 
 export const miniGameModules: MiniGameModule[] = [
   tapDashModule,
@@ -12,6 +13,7 @@ export const miniGameModules: MiniGameModule[] = [
   laneDodgeModule,
   runRunModule,
   sameCharacterModule,
+  gogunbuntuModule,
 ]
 
 export const miniGameManifests: MiniGameManifest[] = miniGameModules.map((module) => module.manifest)
@@ -22,4 +24,5 @@ export const miniGameModuleById: Record<MiniGameId, MiniGameModule> = {
   'lane-dodge': laneDodgeModule,
   'run-run': runRunModule,
   'same-character': sameCharacterModule,
+  'gogunbuntu': gogunbuntuModule,
 }
