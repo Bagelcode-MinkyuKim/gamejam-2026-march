@@ -5,16 +5,14 @@ describe('validation migrateProgressForCurrentMiniGames', () => {
   it('기존 저장 데이터에 신규 게임 키가 없으면 0점으로 보정한다', () => {
     const legacyProgress = {
       coins: 120,
-      unlockedMiniGameIds: ['tap-dash', 'timing-shot'],
+      unlockedMiniGameIds: ['tap-dash', 'run-run'],
       playCounts: {
         'tap-dash': 3,
-        'timing-shot': 2,
-        'lane-dodge': 1,
+        'run-run': 2,
       },
       bestScores: {
         'tap-dash': 33,
-        'timing-shot': 61,
-        'lane-dodge': 21,
+        'run-run': 61,
       },
     }
 

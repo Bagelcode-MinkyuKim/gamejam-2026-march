@@ -1,0 +1,20 @@
+```json
+{
+  "totalScore": 90,
+  "completionScore": 90,
+  "qualityScore": 88,
+  "styleScore": 92,
+  "strengths": [
+    "Excellent composition; the large 'Z' shaped path immediately conveys the gameplay mechanic and fits the icon format perfectly.",
+    "Color palette captures the 'warm rustic Korean arcade' mood effectively with good contrast.",
+    "Characters are readable against the background and convey a sense of movement.",
+    "Adheres strictly to the 'no text' and 'centered composition' requirements."
+  ],
+  "issues": [
+    "Character likeness is slightly generic; while they fit the retro vibe, specific traits (like Park Wankyu's long hair or Seo Taiji's signature 90s fashion) could be more distinct.",
+    "Minor pixel grid inconsistencies (mixels) are present on the diagonal road lines, typical of AI generation.",
+    "The road dash markings are somewhat uneven in spacing."
+  ],
+  "revisedPrompt": "Create a lobby icon for the 'Run Run' mini game in strict 16-bit pixel art. Center a bold orange zigzag road on a dark background. Place 4 distinct chibi pixel characters running on the road: 1) Man with a beanie and baggy clothes (90s Seo Taiji style), 2) Man with long flowing black hair and sunglasses (Park Wankyu style), 3) Woman in a sparkly trot dress with a microphone (Kim Yeonja style), 4) Man with a fedora and sunglasses (Park Sangmin style). Ensure distinct silhouettes and iconic accessories for each. Warm retro arcade colors, chunky uniform outlines, clean pixel grid, high contrast, no text."
+}
+```

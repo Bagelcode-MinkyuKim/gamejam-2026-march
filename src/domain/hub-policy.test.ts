@@ -14,19 +14,19 @@ const manifests: MiniGameManifest[] = [
     accentColor: '#f97316',
   },
   {
-    id: 'timing-shot',
-    title: 'Timing Shot',
+    id: 'run-run',
+    title: 'Run Run',
     description: 'desc',
-    unlockCost: 45,
+    unlockCost: 60,
     baseReward: 12,
     scoreRewardMultiplier: 1,
     accentColor: '#0284c7',
   },
   {
-    id: 'lane-dodge',
-    title: 'Lane Dodge',
+    id: 'gogunbuntu',
+    title: '고군분투',
     description: 'desc',
-    unlockCost: 90,
+    unlockCost: 120,
     baseReward: 18,
     scoreRewardMultiplier: 1,
     accentColor: '#22c55e',
@@ -36,17 +36,17 @@ const manifests: MiniGameManifest[] = [
 describe('hub-policy', () => {
   it('해금 시 코인이 차감되고 상태가 열린다', () => {
     const progress = createInitialProgress(100, ['tap-dash'])
-    const result = unlockMiniGame(progress, manifests, 'timing-shot')
+    const result = unlockMiniGame(progress, manifests, 'run-run')
 
-    expect(result.spentCoins).toBe(45)
-    expect(result.updatedProgress.coins).toBe(55)
-    expect(result.updatedProgress.unlockedMiniGameIds).toContain('timing-shot')
+    expect(result.spentCoins).toBe(60)
+    expect(result.updatedProgress.coins).toBe(40)
+    expect(result.updatedProgress.unlockedMiniGameIds).toContain('run-run')
   })
 
   it('코인이 부족하면 해금에 실패한다', () => {
     const progress = createInitialProgress(10, ['tap-dash'])
 
-    expect(() => unlockMiniGame(progress, manifests, 'timing-shot')).toThrowError(/Need 45 coins/)
+    expect(() => unlockMiniGame(progress, manifests, 'run-run')).toThrowError(/Need 60 coins/)
   })
 
   it('플레이 완료 시 보상, 플레이 횟수, 최고점이 갱신된다', () => {
@@ -65,7 +65,7 @@ describe('hub-policy', () => {
   it('잠긴 게임은 활성 상태 스냅샷을 만들 수 없다', () => {
     const progress = createInitialProgress(30, ['tap-dash'])
 
-    expect(() => toHubSnapshot(progress, manifests, 'timing-shot', 'timing-shot')).toThrowError(
+    expect(() => toHubSnapshot(progress, manifests, 'run-run', 'run-run')).toThrowError(
       /Cannot activate a locked mini game/,
     )
   })

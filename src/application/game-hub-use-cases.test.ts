@@ -15,17 +15,17 @@ const manifests: MiniGameManifest[] = [
     accentColor: '#f97316',
   },
   {
-    id: 'timing-shot',
-    title: 'Timing Shot',
+    id: 'run-run',
+    title: 'Run Run',
     description: 'desc',
-    unlockCost: 45,
+    unlockCost: 60,
     baseReward: 12,
     scoreRewardMultiplier: 1,
     accentColor: '#0284c7',
   },
   {
-    id: 'lane-dodge',
-    title: 'Lane Dodge',
+    id: 'same-character',
+    title: 'Same Character',
     description: 'desc',
     unlockCost: 90,
     baseReward: 18,
@@ -33,10 +33,10 @@ const manifests: MiniGameManifest[] = [
     accentColor: '#22c55e',
   },
   {
-    id: 'run-run',
-    title: '달려달려',
+    id: 'gogunbuntu',
+    title: '고군분투',
     description: 'desc',
-    unlockCost: 60,
+    unlockCost: 120,
     baseReward: 14,
     scoreRewardMultiplier: 1,
     accentColor: '#ef4444',
@@ -57,7 +57,7 @@ describe('GameHubUseCases', () => {
 
     expect(snapshot.coins).toBe(30)
     expect(snapshot.cards.find((card) => card.manifest.id === 'tap-dash')?.unlocked).toBe(true)
-    expect(snapshot.cards.find((card) => card.manifest.id === 'timing-shot')?.unlocked).toBe(false)
+    expect(snapshot.cards.find((card) => card.manifest.id === 'run-run')?.unlocked).toBe(false)
   })
 
   it('해금 후 해당 게임이 열린다', async () => {
@@ -67,10 +67,10 @@ describe('GameHubUseCases', () => {
       starterUnlockedGameIds: ['tap-dash'],
     })
 
-    const snapshot = await useCases.unlockGame('timing-shot', 'timing-shot', null)
+    const snapshot = await useCases.unlockGame('run-run', 'run-run', null)
 
-    expect(snapshot.coins).toBe(55)
-    expect(snapshot.cards.find((card) => card.manifest.id === 'timing-shot')?.unlocked).toBe(true)
+    expect(snapshot.coins).toBe(40)
+    expect(snapshot.cards.find((card) => card.manifest.id === 'run-run')?.unlocked).toBe(true)
   })
 
   it('플레이 완료 시 보상 코인이 반영된다', async () => {

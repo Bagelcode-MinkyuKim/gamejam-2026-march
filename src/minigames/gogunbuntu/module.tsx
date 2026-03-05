@@ -18,30 +18,35 @@ import bgmLoop from '../../../assets/sounds/gogunbuntu/gogunbuntu-bgm-loop.mp3'
 
 const STAGE_VIEW_WIDTH = 360
 const STAGE_VIEW_HEIGHT = 560
-const GROUND_SCREEN_OFFSET = 86
+const GROUND_SCREEN_OFFSET = 160
 
 const PLAYER_WIDTH = 86
 const PLAYER_HEIGHT = 86
-const PLAYER_FEET_OFFSET = 16
+const PLAYER_FEET_OFFSET = 4
 const PLAYER_COLLIDER_RADIUS = 17
 const PLAYER_START_X = 60
-const PLAYER_START_Y = 20
+const PLAYER_START_Y = 0
 
-const BASE_RUN_SPEED = 188
-const MAX_RUN_SPEED = 436
-const RUN_ACCELERATION = 84
-const AIR_DRAG = 0.9992
+const BASE_RUN_SPEED = 220
+const MAX_RUN_SPEED = 360
+const RUN_ACCELERATION = 60
+const AIR_DRAG = 0.996
 
-const GRAVITY = -2250
-const JUMP_VELOCITY = 968
-const JUMP_CUTOFF_MULTIPLIER = 0.4
-const COYOTE_TIME_MS = 134
-const JUMP_BUFFER_MS = 150
+const GRAVITY_UP = -1600
+const GRAVITY_DOWN = -3000
+const GRAVITY_APEX = -900
+const APEX_THRESHOLD = 100
+const JUMP_VELOCITY = 760
+const JUMP_CUTOFF_MULTIPLIER = 0.55
+const JUMP_CUT_GRACE_MS = 100
+const COYOTE_TIME_MS = 140
+const JUMP_BUFFER_MS = 140
 
 const HOOK_RANGE = 332
 const HOOK_MIN_LENGTH = 72
-const HOOK_RELEASE_BOOST = 228
-const HOOK_PULL_ACCEL = 586
+const HOOK_RELEASE_BOOST = 90
+const HOOK_PULL_ACCEL = 280
+const HOOK_MAX_SPEED = 480
 const CHAIN_COMBO_WINDOW_MS = 2050
 
 const MIN_SEGMENT_LENGTH = 220
@@ -88,12 +93,28 @@ const GOGUNBUNTU_PLAYER_SKINS = [
 ] as const
 
 type EffectKind = 'spark' | 'smoke'
+type SegmentGimmick = 'normal' | 'crumble' | 'spring' | 'ice' | 'conveyor' | 'moving' | 'narrow' | 'boost' | 'gravity' | 'vanish' | 'trampoline'
+
+const CRUMBLE_DELAY_MS = 400
+const SPRING_BOOST = 1100
+const ICE_DRAG = 0.97
+const CONVEYOR_SPEED = 120
+const MOVING_AMPLITUDE = 50
+const MOVING_PERIOD_MS = 2000
+const BOOST_SPEED_BONUS = 200
+const GRAVITY_FLIP_BOOST = 650
+const VANISH_ON_MS = 1400
+const VANISH_OFF_MS = 800
+const TRAMPOLINE_BOUNCE = 520
 
 interface GroundSegment {
   readonly id: number
   readonly startX: number
   readonly endX: number
   readonly y: number
+  readonly gimmick: SegmentGimmick
+  crumbleTimer: number
+  crumbleActive: boolean
 }
 
 interface AnchorPoint {
@@ -102,11 +123,16 @@ interface AnchorPoint {
   readonly y: number
 }
 
+type ObstacleKind = 'spike' | 'laser' | 'swinger' | 'wall'
+
 interface Obstacle {
   readonly id: number
   readonly x: number
   readonly y: number
   readonly radius: number
+  readonly kind: ObstacleKind
+  readonly width: number
+  readonly height: number
 }
 
 interface CoinPickup {
@@ -124,11 +150,17 @@ interface FxBurst {
   readonly lifetimeMs: number
 }
 
+const HOOK_EXTEND_SPEED = 1800
+const HOOK_MIN_SPEED_FLOOR = 200
+
 interface RopeState {
   readonly active: boolean
   readonly anchorX: number
   readonly anchorY: number
   readonly length: number
+  readonly maxLength: number
+  readonly extending: boolean
+  currentLength: number
 }
 
 interface WorldModel {
@@ -151,6 +183,7 @@ interface WorldModel {
   jumpHeld: boolean
   jumpCutRequested: boolean
   jumpQueued: boolean
+  jumpStartMs: number
   hookQueued: boolean
   hookTargetX: number | null
   hookTargetY: number | null
@@ -219,7 +252,7 @@ function distanceBetween(ax: number, ay: number, bx: number, by: number): number
 function getGroundSegmentAtX(segments: GroundSegment[], x: number): GroundSegment | null {
   for (let index = segments.length - 1; index >= 0; index -= 1) {
     const segment = segments[index]
-    if (x >= segment.startX && x <= segment.endX) {
+    if (x >= segment.startX && x <= segment.endX && !segment.crumbleActive) {
       return segment
     }
   }
@@ -264,8 +297,8 @@ function getRunProgress(playerX: number): number {
 
 function createInitialModel(): WorldModel {
   const initialSegments: GroundSegment[] = [
-    { id: 0, startX: -240, endX: 420, y: 0 },
-    { id: 1, startX: 500, endX: 880, y: 12 },
+    { id: 0, startX: -240, endX: 420, y: 0, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
+    { id: 1, startX: 500, endX: 880, y: 12, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
   ]
 
   return {
@@ -288,6 +321,7 @@ function createInitialModel(): WorldModel {
     jumpHeld: false,
     jumpCutRequested: false,
     jumpQueued: false,
+    jumpStartMs: 0,
     hookQueued: false,
     hookTargetX: null,
     hookTargetY: null,
@@ -296,6 +330,9 @@ function createInitialModel(): WorldModel {
       anchorX: 0,
       anchorY: 0,
       length: 0,
+      maxLength: 0,
+      extending: false,
+      currentLength: 0,
     },
     statusText: '점프와 훅으로 지형을 돌파하세요.',
     nextGroundId: 2,
@@ -361,8 +398,10 @@ function extendWorld(model: WorldModel, minAheadX: number): void {
       MAX_SEGMENT_LENGTH - 44 * runProgress,
     )
 
-    const adaptiveGapMin = MIN_GAP_LENGTH * lerpNumber(0.56, 1.02, runProgress)
-    const adaptiveGapMax = MAX_GAP_LENGTH * lerpNumber(0.52, 0.96, runProgress)
+    const speedRatio = model.speed / BASE_RUN_SPEED
+    const speedScale = clampNumber(speedRatio * speedRatio, 1, 4)
+    const adaptiveGapMin = MIN_GAP_LENGTH * lerpNumber(0.7, 1.2, runProgress) * speedScale
+    const adaptiveGapMax = MAX_GAP_LENGTH * lerpNumber(0.65, 1.1, runProgress) * speedScale
     const gapLength = randomBetween(adaptiveGapMin, adaptiveGapMax)
 
     const nextStartX = previous.endX + gapLength
@@ -371,16 +410,46 @@ function extendWorld(model: WorldModel, minAheadX: number): void {
     const climbVariance = lerpNumber(34, 56, runProgress)
     const nextY = clampNumber(previous.y + randomBetween(-fallVariance, climbVariance), GROUND_MIN_HEIGHT, GROUND_MAX_HEIGHT)
 
+    const gimmickRoll = Math.random()
+    let gimmick: SegmentGimmick = 'normal'
+    if (runProgress > 0.1) {
+      if (gimmickRoll < 0.10 * runProgress) {
+        gimmick = 'crumble'
+      } else if (gimmickRoll < 0.18 * runProgress) {
+        gimmick = 'spring'
+      } else if (gimmickRoll < 0.26 * runProgress) {
+        gimmick = 'ice'
+      } else if (gimmickRoll < 0.34 * runProgress) {
+        gimmick = 'conveyor'
+      } else if (gimmickRoll < 0.44 * runProgress) {
+        gimmick = 'moving'
+      } else if (gimmickRoll < 0.52 * runProgress) {
+        gimmick = 'narrow'
+      } else if (gimmickRoll < 0.58 * runProgress) {
+        gimmick = 'boost'
+      } else if (gimmickRoll < 0.64 * runProgress) {
+        gimmick = 'gravity'
+      } else if (gimmickRoll < 0.72 * runProgress) {
+        gimmick = 'vanish'
+      } else if (gimmickRoll < 0.78 * runProgress) {
+        gimmick = 'trampoline'
+      }
+    }
+
+    const finalEndX = gimmick === 'narrow' ? nextStartX + Math.min(segmentLength, 90) : nextEndX
     const nextSegment: GroundSegment = {
       id: segmentIndex,
       startX: nextStartX,
-      endX: nextEndX,
+      endX: finalEndX,
       y: nextY,
+      gimmick,
+      crumbleTimer: 0,
+      crumbleActive: false,
     }
 
     model.groundSegments = [...model.groundSegments, nextSegment]
     model.nextGroundId += 1
-    model.lastGeneratedX = nextEndX
+    model.lastGeneratedX = finalEndX
 
     const gapCenterX = previous.endX + gapLength * 0.5 + randomBetween(-18, 18)
     const earlyAnchorLowering = lerpNumber(32, 0, runProgress)
@@ -399,15 +468,43 @@ function extendWorld(model: WorldModel, minAheadX: number): void {
 
     const obstacleChance = lerpNumber(0.12, 0.56, runProgress)
     if (Math.random() < obstacleChance) {
-      const obstacleX = nextStartX + randomBetween(72, Math.max(108, nextEndX - nextStartX - 78))
-      const obstacleY = nextY + randomBetween(OBSTACLE_MIN_HEIGHT, OBSTACLE_MAX_HEIGHT)
+      const obstacleX = nextStartX + randomBetween(72, Math.max(108, finalEndX - nextStartX - 78))
+      const kindRoll = Math.random()
+      let obstacleKind: ObstacleKind = 'spike'
+      let obsW = OBSTACLE_SIZE
+      let obsH = OBSTACLE_SIZE
+      let obsY = nextY + randomBetween(OBSTACLE_MIN_HEIGHT, OBSTACLE_MAX_HEIGHT)
+      let obsR = OBSTACLE_COLLIDER_RADIUS
+
+      if (kindRoll < 0.4) {
+        obstacleKind = 'spike'
+      } else if (kindRoll < 0.6) {
+        obstacleKind = 'laser'
+        obsW = 12
+        obsH = randomBetween(80, 160)
+        obsY = nextY + obsH * 0.5 + 20
+        obsR = 8
+      } else if (kindRoll < 0.8) {
+        obstacleKind = 'swinger'
+        obsY = nextY + randomBetween(140, 260)
+      } else {
+        obstacleKind = 'wall'
+        obsW = 24
+        obsH = randomBetween(60, 120)
+        obsY = nextY + obsH * 0.5
+        obsR = 14
+      }
+
       model.obstacles = [
         ...model.obstacles,
         {
           id: model.nextObstacleId,
           x: obstacleX,
-          y: obstacleY,
-          radius: OBSTACLE_COLLIDER_RADIUS,
+          y: obsY,
+          radius: obsR,
+          kind: obstacleKind,
+          width: obsW,
+          height: obsH,
         },
       ]
       model.nextObstacleId += 1
@@ -460,6 +557,7 @@ function performJump(model: WorldModel): boolean {
   model.playerVy = JUMP_VELOCITY
   model.grounded = false
   model.coyoteMs = 0
+  model.jumpStartMs = model.elapsedMs
   model.jumpBufferMs = 0
   model.statusText = '점프!'
   return true
@@ -498,6 +596,9 @@ function tryAttachHook(model: WorldModel): boolean {
     anchorX: chosen.anchor.x,
     anchorY: chosen.anchor.y,
     length: ropeLength,
+    maxLength: ropeLength,
+    extending: true,
+    currentLength: 0,
   }
 
   const withinComboWindow = model.elapsedMs - model.lastHookAttachAtMs <= CHAIN_COMBO_WINDOW_MS
@@ -537,6 +638,11 @@ function releaseHook(model: WorldModel): void {
   model.playerVy += tangentY * HOOK_RELEASE_BOOST * 0.75
 
   const releaseSpeed = Math.hypot(model.playerVx, model.playerVy)
+  if (releaseSpeed > HOOK_MAX_SPEED) {
+    const capScale = HOOK_MAX_SPEED / releaseSpeed
+    model.playerVx *= capScale
+    model.playerVy *= capScale
+  }
   const comboReleaseBonus = Math.max(0, model.comboChain - 1) * 5
   if (releaseSpeed >= 580) {
     const releaseBonus = SCORE_TRICK_BONUS + comboReleaseBonus
@@ -551,6 +657,9 @@ function releaseHook(model: WorldModel): void {
     anchorX: 0,
     anchorY: 0,
     length: 0,
+    maxLength: 0,
+    extending: false,
+    currentLength: 0,
   }
   pushBurst(model, 'spark', model.playerX, model.playerY + 10)
 }
@@ -658,6 +767,46 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     model.jumpQueued = true
   }, [])
 
+  const triggerActionPress = useCallback(
+    (clientX?: number, clientY?: number) => {
+      if (finishedRef.current) {
+        return
+      }
+
+      unlockAudio()
+      const model = modelRef.current
+
+      if (model.rope.active) {
+        return
+      }
+
+      const canAttemptJump = model.grounded || model.coyoteMs > 0
+      if (canAttemptJump) {
+        model.jumpHeld = true
+        queueJump()
+        return
+      }
+
+      if (typeof clientX === 'number' && typeof clientY === 'number') {
+        queueHookFromScreenPoint(clientX, clientY)
+      } else {
+        model.hookQueued = true
+      }
+    },
+    [queueHookFromScreenPoint, queueJump, unlockAudio],
+  )
+
+  const triggerActionRelease = useCallback(() => {
+    const model = modelRef.current
+    if (model.jumpHeld) {
+      model.jumpHeld = false
+      model.jumpCutRequested = true
+    }
+    if (model.rope.active) {
+      model.hookQueued = true
+    }
+  }, [])
+
   useEffect(() => {
     const stageElement = stageRef.current
     if (stageElement === null) {
@@ -719,29 +868,25 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         return
       }
 
-      if (event.code === 'Space' || event.code === 'KeyK') {
-        event.preventDefault()
-        unlockAudio()
-        const model = modelRef.current
-        model.hookQueued = true
+      const isActionKey =
+        event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW' || event.code === 'KeyK'
+      if (!isActionKey || event.repeat) {
         return
       }
 
-      if (event.code === 'ArrowUp' || event.code === 'KeyW') {
-        event.preventDefault()
-        unlockAudio()
-        const model = modelRef.current
-        model.jumpHeld = true
-        model.jumpQueued = true
-      }
+      event.preventDefault()
+      triggerActionPress()
     }
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'ArrowUp' || event.code === 'KeyW') {
-        const model = modelRef.current
-        model.jumpHeld = false
-        model.jumpCutRequested = true
+      const isActionKey =
+        event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW' || event.code === 'KeyK'
+      if (!isActionKey) {
+        return
       }
+
+      event.preventDefault()
+      triggerActionRelease()
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -751,7 +896,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [unlockAudio])
+  }, [triggerActionPress, triggerActionRelease])
 
   useEffect(() => {
     const model = modelRef.current
@@ -770,183 +915,317 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
-      const deltaSec = deltaMs / 1000
       const currentModel = modelRef.current
+      const simulationStepCount = Math.max(1, Math.ceil(deltaMs / DEFAULT_FRAME_MS))
+      const simulationDeltaMs = deltaMs / simulationStepCount
 
-      currentModel.elapsedMs += deltaMs
-      const runProgress = getRunProgress(currentModel.playerX)
-      const targetSpeed = lerpNumber(BASE_RUN_SPEED, MAX_RUN_SPEED, runProgress)
-      currentModel.speed = Math.min(targetSpeed, currentModel.speed + RUN_ACCELERATION * deltaSec)
+      for (let simulationStep = 0; simulationStep < simulationStepCount; simulationStep += 1) {
+        const deltaSec = simulationDeltaMs / 1000
+        currentModel.elapsedMs += simulationDeltaMs
+        const runProgress = getRunProgress(currentModel.playerX)
+        const targetSpeed = lerpNumber(BASE_RUN_SPEED, MAX_RUN_SPEED, runProgress)
+        currentModel.speed = Math.min(targetSpeed, currentModel.speed + RUN_ACCELERATION * deltaSec)
 
-      if (currentModel.coyoteMs > 0) {
-        currentModel.coyoteMs = Math.max(0, currentModel.coyoteMs - deltaMs)
-      }
-      if (currentModel.jumpBufferMs > 0) {
-        currentModel.jumpBufferMs = Math.max(0, currentModel.jumpBufferMs - deltaMs)
-      }
-
-      if (currentModel.jumpQueued) {
-        const didJump = performJump(currentModel)
-        if (didJump) {
-          playSfx(jumpAudioRef.current, 0.46)
-        } else {
-          currentModel.jumpBufferMs = JUMP_BUFFER_MS
+        if (currentModel.coyoteMs > 0) {
+          currentModel.coyoteMs = Math.max(0, currentModel.coyoteMs - simulationDeltaMs)
         }
-      }
-      currentModel.jumpQueued = false
+        if (currentModel.jumpBufferMs > 0) {
+          currentModel.jumpBufferMs = Math.max(0, currentModel.jumpBufferMs - simulationDeltaMs)
+        }
 
-      if (currentModel.hookQueued) {
-        if (currentModel.rope.active) {
-          releaseHook(currentModel)
-        } else {
-          const didAttach = tryAttachHook(currentModel)
-          if (didAttach) {
-            playSfx(hookShootAudioRef.current, 0.48)
+        if (currentModel.jumpQueued) {
+          const didJump = performJump(currentModel)
+          if (didJump) {
+            playSfx(jumpAudioRef.current, 0.46)
+          } else {
+            currentModel.jumpBufferMs = JUMP_BUFFER_MS
           }
         }
-      }
-      currentModel.hookQueued = false
-      currentModel.hookTargetX = null
-      currentModel.hookTargetY = null
+        currentModel.jumpQueued = false
 
-      if (currentModel.jumpCutRequested && currentModel.playerVy > 0) {
-        currentModel.playerVy *= JUMP_CUTOFF_MULTIPLIER
-      }
-      currentModel.jumpCutRequested = false
-
-      if (currentModel.rope.active) {
-        currentModel.playerVx += 60 * deltaSec
-        currentModel.playerVy += GRAVITY * deltaSec
-
-        currentModel.playerX += currentModel.playerVx * deltaSec
-        currentModel.playerY += currentModel.playerVy * deltaSec
-
-        const deltaX = currentModel.playerX - currentModel.rope.anchorX
-        const deltaY = currentModel.playerY - currentModel.rope.anchorY
-        const distance = Math.hypot(deltaX, deltaY) || 1
-        const normalX = deltaX / distance
-        const normalY = deltaY / distance
-
-        currentModel.playerX = currentModel.rope.anchorX + normalX * currentModel.rope.length
-        currentModel.playerY = currentModel.rope.anchorY + normalY * currentModel.rope.length
-
-        const radialVelocity = currentModel.playerVx * normalX + currentModel.playerVy * normalY
-        currentModel.playerVx -= normalX * radialVelocity
-        currentModel.playerVy -= normalY * radialVelocity
-
-        let tangentX = -normalY
-        let tangentY = normalX
-        if (tangentX < 0) {
-          tangentX *= -1
-          tangentY *= -1
-        }
-        currentModel.playerVx += tangentX * HOOK_PULL_ACCEL * deltaSec
-        currentModel.playerVy += tangentY * HOOK_PULL_ACCEL * deltaSec
-
-        currentModel.grounded = false
-      } else {
-        const previousGrounded = currentModel.grounded
-        const targetGround = getGroundSegmentAtX(currentModel.groundSegments, currentModel.playerX)
-
-        if (currentModel.grounded) {
-          currentModel.playerVx = Math.max(currentModel.playerVx, currentModel.speed)
-          if (targetGround === null) {
-            currentModel.grounded = false
-            currentModel.coyoteMs = COYOTE_TIME_MS
-          }
-        }
-
-        if (!currentModel.grounded) {
-          currentModel.playerVy += GRAVITY * deltaSec
-          currentModel.playerVx = Math.max(currentModel.playerVx * AIR_DRAG, currentModel.speed * 0.72)
-        }
-
-        currentModel.playerX += currentModel.playerVx * deltaSec
-        currentModel.playerY += currentModel.playerVy * deltaSec
-
-        const landingGround = getGroundSegmentAtX(currentModel.groundSegments, currentModel.playerX)
-        if (landingGround !== null && currentModel.playerY <= landingGround.y && currentModel.playerVy <= 0) {
-          currentModel.playerY = landingGround.y
-          currentModel.playerVy = 0
-          currentModel.grounded = true
-          currentModel.coyoteMs = COYOTE_TIME_MS
-          if (!previousGrounded) {
-            currentModel.comboChain = 0
-            currentModel.statusText = '착지 성공. 다시 점프/훅!'
-          }
-
-          if (currentModel.jumpBufferMs > 0) {
-            const didBufferedJump = performJump(currentModel)
-            if (didBufferedJump) {
-              playSfx(jumpAudioRef.current, 0.46)
+        if (currentModel.hookQueued) {
+          if (currentModel.rope.active) {
+            releaseHook(currentModel)
+          } else {
+            const didAttach = tryAttachHook(currentModel)
+            if (didAttach) {
+              playSfx(hookShootAudioRef.current, 0.48)
             }
           }
-        } else {
-          if (previousGrounded) {
-            currentModel.coyoteMs = COYOTE_TIME_MS
+        }
+        currentModel.hookQueued = false
+        currentModel.hookTargetX = null
+        currentModel.hookTargetY = null
+
+        if (currentModel.jumpCutRequested && currentModel.playerVy > 0) {
+          const timeSinceJump = currentModel.elapsedMs - currentModel.jumpStartMs
+          if (timeSinceJump >= JUMP_CUT_GRACE_MS) {
+            currentModel.playerVy *= JUMP_CUTOFF_MULTIPLIER
           }
+        }
+        currentModel.jumpCutRequested = false
+
+        if (currentModel.rope.active) {
+          if (currentModel.rope.extending) {
+            currentModel.rope.currentLength = Math.min(
+              currentModel.rope.currentLength + HOOK_EXTEND_SPEED * deltaSec,
+              currentModel.rope.maxLength,
+            )
+            if (currentModel.rope.currentLength >= currentModel.rope.maxLength) {
+              currentModel.rope = { ...currentModel.rope, extending: false }
+            }
+          }
+
+          const activeLength = currentModel.rope.extending
+            ? currentModel.rope.currentLength
+            : currentModel.rope.length
+
+          currentModel.playerVx += 60 * deltaSec
+          let ropeGravity: number
+          if (Math.abs(currentModel.playerVy) < APEX_THRESHOLD) {
+            ropeGravity = GRAVITY_APEX
+          } else if (currentModel.playerVy > 0) {
+            ropeGravity = GRAVITY_UP
+          } else {
+            ropeGravity = GRAVITY_DOWN
+          }
+          currentModel.playerVy += ropeGravity * deltaSec
+
+          currentModel.playerX += currentModel.playerVx * deltaSec
+          currentModel.playerY += currentModel.playerVy * deltaSec
+
+          const deltaX = currentModel.playerX - currentModel.rope.anchorX
+          const deltaY = currentModel.playerY - currentModel.rope.anchorY
+          const distance = Math.hypot(deltaX, deltaY) || 1
+          const normalX = deltaX / distance
+          const normalY = deltaY / distance
+
+          if (distance > activeLength) {
+            currentModel.playerX = currentModel.rope.anchorX + normalX * activeLength
+            currentModel.playerY = currentModel.rope.anchorY + normalY * activeLength
+          }
+
+          const radialVelocity = currentModel.playerVx * normalX + currentModel.playerVy * normalY
+          currentModel.playerVx -= normalX * radialVelocity
+          currentModel.playerVy -= normalY * radialVelocity
+
+          let tangentX = -normalY
+          let tangentY = normalX
+          if (tangentX < 0) {
+            tangentX *= -1
+            tangentY *= -1
+          }
+          currentModel.playerVx += tangentX * HOOK_PULL_ACCEL * deltaSec
+          currentModel.playerVy += tangentY * HOOK_PULL_ACCEL * deltaSec
+
+          const ropeSpeed = Math.hypot(currentModel.playerVx, currentModel.playerVy)
+          if (ropeSpeed > HOOK_MAX_SPEED) {
+            const ropeScale = HOOK_MAX_SPEED / ropeSpeed
+            currentModel.playerVx *= ropeScale
+            currentModel.playerVy *= ropeScale
+          }
+
           currentModel.grounded = false
+        } else {
+          const previousGrounded = currentModel.grounded
+          const targetGround = getGroundSegmentAtX(currentModel.groundSegments, currentModel.playerX)
+
+          if (currentModel.grounded) {
+            if (targetGround === null) {
+              currentModel.grounded = false
+              currentModel.coyoteMs = COYOTE_TIME_MS
+            } else {
+              currentModel.playerY = targetGround.y
+
+              switch (targetGround.gimmick) {
+                case 'crumble':
+                  targetGround.crumbleTimer += simulationDeltaMs
+                  if (!targetGround.crumbleActive && targetGround.crumbleTimer >= CRUMBLE_DELAY_MS) {
+                    targetGround.crumbleActive = true
+                    currentModel.grounded = false
+                    currentModel.coyoteMs = 0
+                    currentModel.statusText = '발판 붕괴!'
+                  }
+                  break
+                case 'spring':
+                  currentModel.playerVy = SPRING_BOOST
+                  currentModel.grounded = false
+                  currentModel.coyoteMs = 0
+                  currentModel.statusText = '스프링!'
+                  pushBurst(currentModel, 'spark', currentModel.playerX, currentModel.playerY)
+                  break
+                case 'ice':
+                  currentModel.playerVx = Math.max(currentModel.playerVx * ICE_DRAG, currentModel.speed * 0.6)
+                  break
+                case 'conveyor':
+                  currentModel.playerVx += CONVEYOR_SPEED * deltaSec
+                  break
+                case 'moving': {
+                  const phase = (currentModel.elapsedMs % MOVING_PERIOD_MS) / MOVING_PERIOD_MS
+                  const movingY = targetGround.y + Math.sin(phase * Math.PI * 2) * MOVING_AMPLITUDE
+                  currentModel.playerY = movingY
+                  break
+                }
+                case 'boost':
+                  currentModel.playerVx = Math.max(currentModel.playerVx, currentModel.speed + BOOST_SPEED_BONUS)
+                  break
+                case 'gravity':
+                  currentModel.playerVy = GRAVITY_FLIP_BOOST
+                  currentModel.grounded = false
+                  currentModel.coyoteMs = 0
+                  pushBurst(currentModel, 'spark', currentModel.playerX, currentModel.playerY)
+                  break
+                case 'vanish': {
+                  const vanishCycle = VANISH_ON_MS + VANISH_OFF_MS
+                  const vanishPhase = currentModel.elapsedMs % vanishCycle
+                  if (vanishPhase >= VANISH_ON_MS) {
+                    currentModel.grounded = false
+                    currentModel.coyoteMs = 0
+                  }
+                  break
+                }
+                case 'trampoline':
+                  currentModel.playerVy = TRAMPOLINE_BOUNCE
+                  currentModel.grounded = false
+                  currentModel.coyoteMs = COYOTE_TIME_MS
+                  break
+                default:
+                  break
+              }
+
+              if (currentModel.grounded) {
+                currentModel.playerVx = Math.max(currentModel.playerVx, currentModel.speed)
+              }
+            }
+          }
+
+          if (!currentModel.grounded) {
+            let gravity: number
+            if (Math.abs(currentModel.playerVy) < APEX_THRESHOLD) {
+              gravity = GRAVITY_APEX
+            } else if (currentModel.playerVy > 0) {
+              gravity = GRAVITY_UP
+            } else {
+              gravity = GRAVITY_DOWN
+            }
+            currentModel.playerVy += gravity * deltaSec
+            const frameDrag = Math.pow(AIR_DRAG, simulationDeltaMs / DEFAULT_FRAME_MS)
+            currentModel.playerVx = Math.max(currentModel.playerVx * frameDrag, Math.max(currentModel.speed * 0.85, HOOK_MIN_SPEED_FLOOR))
+          }
+
+          currentModel.playerX += currentModel.playerVx * deltaSec
+          currentModel.playerY += currentModel.playerVy * deltaSec
+
+          let landingGround = getGroundSegmentAtX(currentModel.groundSegments, currentModel.playerX)
+          if (landingGround !== null && landingGround.gimmick === 'vanish') {
+            const vanishCycle = VANISH_ON_MS + VANISH_OFF_MS
+            const vanishPhase = currentModel.elapsedMs % vanishCycle
+            if (vanishPhase >= VANISH_ON_MS) {
+              landingGround = null
+            }
+          }
+          let landingY = landingGround !== null ? landingGround.y : 0
+          if (landingGround !== null && landingGround.gimmick === 'moving') {
+            const landPhase = (currentModel.elapsedMs % MOVING_PERIOD_MS) / MOVING_PERIOD_MS
+            landingY = landingGround.y + Math.sin(landPhase * Math.PI * 2) * MOVING_AMPLITUDE
+          }
+          if (landingGround !== null && currentModel.playerY <= landingY && currentModel.playerVy <= 0) {
+            currentModel.playerY = landingY
+            currentModel.playerVy = 0
+            currentModel.grounded = true
+            currentModel.coyoteMs = COYOTE_TIME_MS
+            if (!previousGrounded) {
+              currentModel.comboChain = 0
+              currentModel.statusText = '착지 성공. 다시 점프/훅!'
+            }
+
+            if (currentModel.jumpBufferMs > 0) {
+              const didBufferedJump = performJump(currentModel)
+              if (didBufferedJump) {
+                playSfx(jumpAudioRef.current, 0.46)
+              }
+            }
+          } else {
+            if (previousGrounded) {
+              currentModel.coyoteMs = COYOTE_TIME_MS
+            }
+            currentModel.grounded = false
+          }
         }
-      }
 
-      if (currentModel.elapsedMs - currentModel.lastTrailSpawnMs >= TRAIL_INTERVAL_MS && Math.abs(currentModel.playerVx) > 290) {
-        currentModel.lastTrailSpawnMs = currentModel.elapsedMs
-        pushBurst(currentModel, 'smoke', currentModel.playerX - 18, currentModel.playerY + 8)
-      }
-
-      let didCollectCoin = false
-      currentModel.coins = currentModel.coins.filter((coin) => {
-        const isHit = collideCircles(
-          currentModel.playerX,
-          currentModel.playerY + 14,
-          PLAYER_COLLIDER_RADIUS,
-          coin.x,
-          coin.y,
-          COIN_RADIUS,
-        )
-
-        if (isHit) {
-          currentModel.coinsCollected += 1
-          currentModel.statusText = `코인 획득 +${SCORE_COIN_BONUS}`
-          pushBurst(currentModel, 'spark', coin.x, coin.y)
-          didCollectCoin = true
-          return false
+        if (
+          currentModel.elapsedMs - currentModel.lastTrailSpawnMs >= TRAIL_INTERVAL_MS &&
+          Math.abs(currentModel.playerVx) > 290
+        ) {
+          currentModel.lastTrailSpawnMs = currentModel.elapsedMs
+          pushBurst(currentModel, 'smoke', currentModel.playerX - 18, currentModel.playerY + 8)
         }
 
-        return true
-      })
+        let didCollectCoin = false
+        currentModel.coins = currentModel.coins.filter((coin) => {
+          const isHit = collideCircles(
+            currentModel.playerX,
+            currentModel.playerY + 14,
+            PLAYER_COLLIDER_RADIUS,
+            coin.x,
+            coin.y,
+            COIN_RADIUS,
+          )
 
-      if (didCollectCoin) {
-        playSfx(coinAudioRef.current, 0.55)
+          if (isHit) {
+            currentModel.coinsCollected += 1
+            currentModel.statusText = `코인 획득 +${SCORE_COIN_BONUS}`
+            pushBurst(currentModel, 'spark', coin.x, coin.y)
+            didCollectCoin = true
+            return false
+          }
+
+          return true
+        })
+
+        if (didCollectCoin) {
+          playSfx(coinAudioRef.current, 0.55)
+        }
+
+        const isObstacleHit = currentModel.obstacles.some((obstacle) => {
+          let obsX = obstacle.x
+          if (obstacle.kind === 'swinger') {
+            const swingPhase = (currentModel.elapsedMs % 1600) / 1600
+            obsX = obstacle.x + Math.sin(swingPhase * Math.PI * 2) * 40
+          }
+          if (obstacle.kind === 'wall' || obstacle.kind === 'laser') {
+            const dx = Math.abs(currentModel.playerX - obsX)
+            const dy = Math.abs((currentModel.playerY + 10) - obstacle.y)
+            return dx < (obstacle.width * 0.5 + PLAYER_COLLIDER_RADIUS) &&
+                   dy < (obstacle.height * 0.5 + PLAYER_COLLIDER_RADIUS)
+          }
+          return collideCircles(
+            currentModel.playerX,
+            currentModel.playerY + 10,
+            PLAYER_COLLIDER_RADIUS,
+            obsX,
+            obstacle.y,
+            obstacle.radius,
+          )
+        })
+
+        if (isObstacleHit) {
+          finishRound('장애물 충돌!', true)
+          animationFrameRef.current = null
+          return
+        }
+
+        if (currentModel.playerY < -GROUND_SCREEN_OFFSET - PLAYER_HEIGHT) {
+          finishRound('낙사! 발판에서 떨어졌습니다.', true)
+          animationFrameRef.current = null
+          return
+        }
+
+        currentModel.cameraX = Math.max(0, currentModel.playerX - CAMERA_LEAD_X)
+        extendWorld(currentModel, currentModel.cameraX + WORLD_AHEAD_PADDING)
+        trimWorld(currentModel)
+        updateScore(currentModel)
       }
-
-      const isObstacleHit = currentModel.obstacles.some((obstacle) => {
-        return collideCircles(
-          currentModel.playerX,
-          currentModel.playerY + 10,
-          PLAYER_COLLIDER_RADIUS,
-          obstacle.x,
-          obstacle.y,
-          obstacle.radius,
-        )
-      })
-
-      if (isObstacleHit) {
-        finishRound('장애물 충돌!', true)
-        animationFrameRef.current = null
-        return
-      }
-
-      if (currentModel.playerY < -280) {
-        finishRound('추락했습니다.', true)
-        animationFrameRef.current = null
-        return
-      }
-
-      currentModel.cameraX = Math.max(0, currentModel.playerX - CAMERA_LEAD_X)
-      extendWorld(currentModel, currentModel.cameraX + WORLD_AHEAD_PADDING)
-      trimWorld(currentModel)
-      updateScore(currentModel)
       setRenderState(buildRenderState(currentModel))
 
       animationFrameRef.current = window.requestAnimationFrame(step)
@@ -966,42 +1245,26 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const handleStagePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault()
-      if (finishedRef.current) {
-        return
-      }
-
-      unlockAudio()
-      queueHookFromScreenPoint(event.clientX, event.clientY)
+      triggerActionPress(event.clientX, event.clientY)
     },
-    [queueHookFromScreenPoint, unlockAudio],
+    [triggerActionPress],
   )
 
-  const handleJumpButton = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
+  const handleStagePointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      triggerActionRelease()
+    },
+    [triggerActionRelease],
+  )
 
-    unlockAudio()
-    const model = modelRef.current
-    model.jumpHeld = true
-    queueJump()
-  }, [queueJump, unlockAudio])
-
-  const handleJumpButtonRelease = useCallback(() => {
-    const model = modelRef.current
-    model.jumpHeld = false
-    model.jumpCutRequested = true
-  }, [])
-
-  const handleHookButton = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
-
-    unlockAudio()
-    const model = modelRef.current
-    model.hookQueued = true
-  }, [unlockAudio])
+  const handleStagePointerCancel = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      triggerActionRelease()
+    },
+    [triggerActionRelease],
+  )
 
   const viewportScale = stageViewport.scale
   const playerRenderWidth = PLAYER_WIDTH * viewportScale
@@ -1021,11 +1284,17 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   }, [playerRenderHeight, playerRenderWidth, renderState.cameraX, renderState.playerX, renderState.playerY, stageViewport, viewportScale])
 
   const displayedBestScore = Math.max(bestScore, renderState.score)
-  const playerRotation = clampNumber(renderState.playerVy * 0.023, -32, 28)
 
   return (
     <section className="mini-game-panel gogunbuntu-panel" aria-label="gogunbuntu-game">
-      <div className="gogunbuntu-stage" ref={stageRef} onPointerDown={handleStagePointerDown} role="presentation">
+      <div
+        className="gogunbuntu-stage"
+        ref={stageRef}
+        onPointerDown={handleStagePointerDown}
+        onPointerUp={handleStagePointerUp}
+        onPointerCancel={handleStagePointerCancel}
+        role="presentation"
+      >
         <div
           className="gogunbuntu-bg-layer far"
           style={{
@@ -1042,32 +1311,55 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         />
 
         <svg className="gogunbuntu-rope-overlay" viewBox={`0 0 ${stageViewport.width} ${stageViewport.height}`} aria-hidden>
-          {renderState.rope.active ? (
-            <line
-              x1={worldToScreen(renderState.playerX, renderState.playerY + 20, renderState.cameraX, stageViewport).x}
-              y1={worldToScreen(renderState.playerX, renderState.playerY + 20, renderState.cameraX, stageViewport).y}
-              x2={worldToScreen(renderState.rope.anchorX, renderState.rope.anchorY, renderState.cameraX, stageViewport).x}
-              y2={worldToScreen(renderState.rope.anchorX, renderState.rope.anchorY, renderState.cameraX, stageViewport).y}
-              className="gogunbuntu-rope-line"
-              style={{
-                strokeWidth: clampNumber(viewportScale * 3.8, 2.2, 6.6),
-              }}
-            />
-          ) : null}
+          {renderState.rope.active ? (() => {
+            const playerPt = worldToScreen(renderState.playerX, renderState.playerY + 20, renderState.cameraX, stageViewport)
+            const anchorPt = worldToScreen(renderState.rope.anchorX, renderState.rope.anchorY, renderState.cameraX, stageViewport)
+            let endX = anchorPt.x
+            let endY = anchorPt.y
+            if (renderState.rope.extending && renderState.rope.maxLength > 0) {
+              const progress = renderState.rope.currentLength / renderState.rope.maxLength
+              endX = lerpNumber(playerPt.x, anchorPt.x, progress)
+              endY = lerpNumber(playerPt.y, anchorPt.y, progress)
+            }
+            return (
+              <line
+                x1={playerPt.x}
+                y1={playerPt.y}
+                x2={endX}
+                y2={endY}
+                className="gogunbuntu-rope-line"
+                style={{
+                  strokeWidth: clampNumber(viewportScale * 3.8, 2.2, 6.6),
+                }}
+              />
+            )
+          })() : null}
         </svg>
 
         {renderState.groundSegments.map((segment) => {
-          const left = stageViewport.originX + (segment.startX - renderState.cameraX) * viewportScale
+          let segmentY = segment.y
+          if (segment.gimmick === 'moving') {
+            const phase = (renderState.elapsedMs % MOVING_PERIOD_MS) / MOVING_PERIOD_MS
+            segmentY = segment.y + Math.sin(phase * Math.PI * 2) * MOVING_AMPLITUDE
+          }
+          const topLeft = worldToScreen(segment.startX, segmentY, renderState.cameraX, stageViewport)
           const width = (segment.endX - segment.startX) * viewportScale
-          const bottom = stageViewport.originY + (GROUND_SCREEN_OFFSET + segment.y - 8) * viewportScale
+          const gimmickClass = segment.gimmick !== 'normal' ? ` gimmick-${segment.gimmick}` : ''
+          const crumbledClass = segment.crumbleActive ? ' crumbled' : ''
+          let vanishHidden = ''
+          if (segment.gimmick === 'vanish') {
+            const vanishCycle = VANISH_ON_MS + VANISH_OFF_MS
+            const vanishPhase = renderState.elapsedMs % vanishCycle
+            vanishHidden = vanishPhase >= VANISH_ON_MS ? ' vanish-off' : ' vanish-on'
+          }
           return (
             <div
-              className="gogunbuntu-ground-segment"
+              className={`gogunbuntu-ground-segment${gimmickClass}${crumbledClass}${vanishHidden}`}
               key={segment.id}
               style={{
-                left,
+                left: topLeft.x,
+                top: topLeft.y,
                 width,
-                bottom,
                 height: groundRenderHeight,
               }}
             />
@@ -1093,10 +1385,48 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         })}
 
         {renderState.obstacles.map((obstacle) => {
-          const point = worldToScreen(obstacle.x, obstacle.y, renderState.cameraX, stageViewport)
+          let obsRenderX = obstacle.x
+          if (obstacle.kind === 'swinger') {
+            const swingPhase = (renderState.elapsedMs % 1600) / 1600
+            obsRenderX = obstacle.x + Math.sin(swingPhase * Math.PI * 2) * 40
+          }
+          const point = worldToScreen(obsRenderX, obstacle.y, renderState.cameraX, stageViewport)
+          const obsW = obstacle.width * viewportScale
+          const obsH = obstacle.height * viewportScale
+
+          if (obstacle.kind === 'laser') {
+            return (
+              <div
+                className="gogunbuntu-obstacle-laser"
+                key={obstacle.id}
+                style={{
+                  left: point.x - obsW * 0.5,
+                  top: point.y - obsH * 0.5,
+                  width: obsW,
+                  height: obsH,
+                }}
+              />
+            )
+          }
+
+          if (obstacle.kind === 'wall') {
+            return (
+              <div
+                className="gogunbuntu-obstacle-wall"
+                key={obstacle.id}
+                style={{
+                  left: point.x - obsW * 0.5,
+                  top: point.y - obsH * 0.5,
+                  width: obsW,
+                  height: obsH,
+                }}
+              />
+            )
+          }
+
           return (
             <img
-              className="gogunbuntu-obstacle"
+              className={`gogunbuntu-obstacle${obstacle.kind === 'swinger' ? ' swinger' : ''}`}
               key={obstacle.id}
               src={gogunbuntuObstacle}
               alt="obstacle"
@@ -1156,51 +1486,21 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             top: playerScreen.top,
             width: playerRenderWidth,
             height: playerRenderHeight,
-            transform: `rotate(${playerRotation.toFixed(2)}deg)`,
+            transform: `rotate(${clampNumber(
+              renderState.rope.active
+                ? Math.atan2(-renderState.playerVy, renderState.playerVx) * (180 / Math.PI) * 0.4
+                : renderState.playerVy * -0.006,
+              -30, 25,
+            ).toFixed(1)}deg)`,
           }}
         />
 
         <div className="gogunbuntu-hud">
           <p className="gogunbuntu-score">{renderState.score.toLocaleString()}</p>
           <p className="gogunbuntu-best">BEST {displayedBestScore.toLocaleString()}</p>
-          <p className="gogunbuntu-meta">캐릭터 {selectedPlayerSkin.name}</p>
           <p className="gogunbuntu-meta">
-            속도 {Math.round(renderState.speed)} · 코인 {renderState.coinsCollected} · 체인 x{Math.max(1, renderState.comboChain)}
+            {Math.round(renderState.playerVx * 0.36)} km/h · 코인 {renderState.coinsCollected} · 체인 x{Math.max(1, renderState.comboChain)}
           </p>
-        </div>
-
-        <p className="gogunbuntu-status">{renderState.statusText}</p>
-        <p className="gogunbuntu-hint">훅: 터치/Space/K · 점프: W/↑</p>
-
-        <div className="gogunbuntu-controls">
-          <button
-            className="gogunbuntu-control-button hook"
-            type="button"
-            onPointerDown={(event) => {
-              event.stopPropagation()
-              handleHookButton()
-            }}
-          >
-            훅
-          </button>
-          <button
-            className="gogunbuntu-control-button jump"
-            type="button"
-            onPointerDown={(event) => {
-              event.stopPropagation()
-              handleJumpButton()
-            }}
-            onPointerUp={(event) => {
-              event.stopPropagation()
-              handleJumpButtonRelease()
-            }}
-            onPointerCancel={(event) => {
-              event.stopPropagation()
-              handleJumpButtonRelease()
-            }}
-          >
-            점프
-          </button>
         </div>
 
         <div className="gogunbuntu-stage-actions">

@@ -22,10 +22,13 @@ import taeRun16 from '../../../assets/images/Sequence/Tae Run/Tae Run 16.png'
 import taeRun17 from '../../../assets/images/Sequence/Tae Run/Tae Run 17.png'
 import taeRun18 from '../../../assets/images/Sequence/Tae Run/Tae Run 18.png'
 import taeRun19 from '../../../assets/images/Sequence/Tae Run/Tae Run 19.png'
-import wallHuman01 from '../../../assets/images/Human 01.png'
-import wallHuman02 from '../../../assets/images/Human 02.png'
-import wallHuman03 from '../../../assets/images/Human 03.png'
-import wallHuman04 from '../../../assets/images/Human 04.png'
+import kimYeonjaSprite from '../../../assets/images/same-character/kim-yeonja.png'
+import parkSangminSprite from '../../../assets/images/same-character/park-sangmin.png'
+import parkWankyuSprite from '../../../assets/images/same-character/park-wankyu.png'
+import seoTaijiSprite from '../../../assets/images/same-character/seo-taiji.png'
+import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
+import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
+import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
 const START_SPEED = 36.4
 const MAX_SPEED = 100.8
@@ -77,10 +80,10 @@ const WALL_START_OFFSET = 0
 const WALL_INNER_EDGE_OFFSET = 2.5
 
 const WALL_CHARACTERS = [
-  { src: wallHuman01, pixelWidth: 335, pixelHeight: 410 },
-  { src: wallHuman02, pixelWidth: 186, pixelHeight: 429 },
-  { src: wallHuman03, pixelWidth: 209, pixelHeight: 403 },
-  { src: wallHuman04, pixelWidth: 229, pixelHeight: 439 },
+  { src: kimYeonjaSprite, pixelWidth: 512, pixelHeight: 512 },
+  { src: parkSangminSprite, pixelWidth: 512, pixelHeight: 512 },
+  { src: parkWankyuSprite, pixelWidth: 512, pixelHeight: 512 },
+  { src: seoTaijiSprite, pixelWidth: 512, pixelHeight: 512 },
 ] as const
 
 const WALL_CHARACTER_PATTERN = [0, 1, 2, 3, 2, 1] as const
@@ -819,6 +822,21 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const finishedRef = useRef(false)
   const animationFrameRef = useRef<number | null>(null)
   const lastFrameAtRef = useRef<number | null>(null)
+  const speedRef = useRef(START_SPEED)
+  const turnAudioRef = useRef<HTMLAudioElement | null>(null)
+  const turnStrongAudioRef = useRef<HTMLAudioElement | null>(null)
+  const crashAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  const playSfx = useCallback((source: HTMLAudioElement | null, volume: number, playbackRate = 1) => {
+    if (source === null) {
+      return
+    }
+
+    source.currentTime = 0
+    source.volume = volume
+    source.playbackRate = playbackRate
+    void source.play().catch(() => {})
+  }, [])
 
   const playerScreenPoint = useMemo(() => worldToScreen(player, cameraAnchor), [player, cameraAnchor])
 
@@ -887,9 +905,11 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
       if (hasDirectionChanged) {
         setTurnCount((previous) => previous + 1)
         setStatusText(nextDirection === 'left' ? '좌측으로 이동 중' : '우측으로 이동 중')
+        const turnRate = 0.94 + (speedRef.current / MAX_SPEED) * 0.22
+        playSfx(turnAudioRef.current, 0.4, turnRate)
       }
     },
-    [],
+    [playSfx],
   )
 
   const toggleMoveDirection = useCallback(() => {
@@ -951,6 +971,27 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   }, [setMoveDirection, toggleMoveDirection])
 
   useEffect(() => {
+    const turnAudio = new Audio(tapHitSfx)
+    turnAudio.preload = 'auto'
+    turnAudioRef.current = turnAudio
+
+    const turnStrongAudio = new Audio(tapHitStrongSfx)
+    turnStrongAudio.preload = 'auto'
+    turnStrongAudioRef.current = turnStrongAudio
+
+    const crashAudio = new Audio(gameOverHitSfx)
+    crashAudio.preload = 'auto'
+    crashAudioRef.current = crashAudio
+
+    return () => {
+      for (const audio of [turnAudio, turnStrongAudio, crashAudio]) {
+        audio.pause()
+        audio.currentTime = 0
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     lastFrameAtRef.current = null
 
     const step = (now: number) => {
@@ -969,6 +1010,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
 
       const elapsedSeconds = elapsedMsRef.current / 1000
       const currentSpeed = Math.min(MAX_SPEED, START_SPEED + elapsedSeconds * ACCEL_PER_SECOND)
+      speedRef.current = currentSpeed
       setSpeed(currentSpeed)
 
       const movedDistance = currentSpeed * (deltaMs / 1000)
@@ -1007,6 +1049,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
 
       if (!isSafe) {
         setStatusText('벽에 닿았습니다. 라운드 종료!')
+        playSfx(crashAudioRef.current, 0.62, 0.95)
         finishRound()
         animationFrameRef.current = null
         return
@@ -1023,7 +1066,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
       }
       lastFrameAtRef.current = null
     }
-  }, [finishRound])
+  }, [finishRound, playSfx])
 
   const displayedBestScore = Math.max(bestScore, score)
 
@@ -1092,7 +1135,10 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
             className="run-run-action-button"
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
-            onClick={finishRound}
+            onClick={() => {
+              playSfx(turnStrongAudioRef.current, 0.5, 1)
+              finishRound()
+            }}
           >
             종료
           </button>

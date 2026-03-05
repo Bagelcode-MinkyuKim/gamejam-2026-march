@@ -3,11 +3,12 @@ import type { CSSProperties } from 'react'
 import type { MiniGameId } from '../../primitives/types'
 import { MOBILE_VIEWPORT, MINI_GAME_STAGE_HEIGHT } from '../../primitives/constants'
 import tapDashCharacter from '../../../assets/images/character-tap-dash-pixel-transparent.png'
-import timingShotCharacter from '../../../assets/images/character-timing-shot-pixel-transparent.png'
-import laneDodgeCharacter from '../../../assets/images/character-lane-dodge-pixel-transparent.png'
 import sameCharacterStageImage from '../../../assets/images/same-character/park-sangmin.png'
 import gogunbuntuStageImage from '../../../assets/images/gogunbuntu/dot-characters/kim-yeonja.png'
 import comboFormulaStageImage from '../../../assets/images/same-character/park-wankyu.png'
+import chamChamChamStageImage from '../../../assets/images/same-character/tae-jina.png'
+import dungaDungaStageImage from '../../../assets/images/same-character/kim-yeonja.png'
+import musicMemoryStageImage from '../../../assets/images/same-character/song-changsik.png'
 
 export type StageTransitionState = 'idle' | 'enter' | 'exit'
 
@@ -20,14 +21,6 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
   'tap-dash': {
     backgroundColor: 0xeeece6,
     characterImageSrc: tapDashCharacter,
-  },
-  'timing-shot': {
-    backgroundColor: 0xe9e7e2,
-    characterImageSrc: timingShotCharacter,
-  },
-  'lane-dodge': {
-    backgroundColor: 0xece9e3,
-    characterImageSrc: laneDodgeCharacter,
   },
   'run-run': {
     backgroundColor: 0xe7e2d8,
@@ -44,6 +37,30 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
   'combo-formula': {
     backgroundColor: 0xdef3fb,
     characterImageSrc: comboFormulaStageImage,
+  },
+  'cham-cham-cham': {
+    backgroundColor: 0xfde8ec,
+    characterImageSrc: chamChamChamStageImage,
+  },
+  'intense-cheer': {
+    backgroundColor: 0x1a1a2e,
+    characterImageSrc: chamChamChamStageImage,
+  },
+  'dunga-dunga': {
+    backgroundColor: 0xfef3c7,
+    characterImageSrc: dungaDungaStageImage,
+  },
+  'fierce-cheer': {
+    backgroundColor: 0x1a0533,
+    characterImageSrc: chamChamChamStageImage,
+  },
+  'music-memory': {
+    backgroundColor: 0x2d1b4e,
+    characterImageSrc: musicMemoryStageImage,
+  },
+  'dodge-ball': {
+    backgroundColor: 0x0f172a,
+    characterImageSrc: musicMemoryStageImage,
   },
 }
 

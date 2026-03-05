@@ -1,18 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MutableRefObject } from 'react'
+import type { CSSProperties, MutableRefObject } from 'react'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
 import { miniGameManifests, miniGameModuleById } from '../minigames/registry'
 import { LocalStorageProgressStore } from '../infrastructure/local-storage-progress-store'
 import { projectHubUi } from '../view-model/hub-ui-model'
-import tapDashCharacterIcon from '../../assets/images/character-tap-dash-pixel-transparent.png'
-import timingShotCharacterIcon from '../../assets/images/character-timing-shot-pixel-transparent.png'
-import laneDodgeCharacterIcon from '../../assets/images/character-lane-dodge-pixel-transparent.png'
-import sameCharacterIcon from '../../assets/images/same-character/seo-taiji.png'
-import gogunbuntuCharacterIcon from '../../assets/images/gogunbuntu/dot-characters/park-sangmin.png'
-import comboFormulaCharacterIcon from '../../assets/images/same-character/park-wankyu.png'
-import defaultBgmLoop from '../../assets/sounds/default-bgm-loop.mp3'
+import lobbyTapDashIcon from '../../assets/images/generated/lobby-icons/lobby-tap-dash.png'
+import lobbyRunRunIcon from '../../assets/images/generated/lobby-icons/lobby-run-run.png'
+import lobbySameCharacterIcon from '../../assets/images/generated/lobby-icons/lobby-same-character.png'
+import lobbyGogunbuntuIcon from '../../assets/images/generated/lobby-icons/lobby-gogunbuntu.png'
+import lobbyComboFormulaIcon from '../../assets/images/generated/lobby-icons/lobby-combo-formula.png'
+import lobbyChamChamChamIcon from '../../assets/images/generated/lobby-icons/lobby-cham-cham-cham.png'
+import lobbyDungaDungaIcon from '../../assets/images/generated/lobby-icons/lobby-dunga-dunga.png'
+import lobbyIntenseCheerIcon from '../../assets/images/generated/lobby-icons/lobby-intense-cheer.png'
+import lobbyFierceCheerIcon from '../../assets/images/generated/lobby-icons/lobby-fierce-cheer.png'
+import lobbyStarCatchIcon from '../../assets/images/generated/lobby-icons/lobby-star-catch.png'
+import lobbyNumberSortIcon from '../../assets/images/generated/lobby-icons/lobby-number-sort.png'
+import lobbyRhythmTapIcon from '../../assets/images/generated/lobby-icons/lobby-rhythm-tap.png'
+import lobbyPatternLockIcon from '../../assets/images/generated/lobby-icons/lobby-pattern-lock.png'
+import lobbyConnectFourIcon from '../../assets/images/generated/lobby-icons/lobby-connect-four.png'
+import lobbyMineSweepMiniIcon from '../../assets/images/generated/lobby-icons/lobby-mine-sweep-mini.png'
+import lobbyRockScissorsIcon from '../../assets/images/generated/lobby-icons/lobby-rock-scissors.png'
+import lobbyStackTowerIcon from '../../assets/images/generated/lobby-icons/lobby-stack-tower.png'
+import lobbyBallBounceMiniIcon from '../../assets/images/generated/lobby-icons/lobby-ball-bounce-mini.png'
+import lobbyCannonShotIcon from '../../assets/images/generated/lobby-icons/lobby-cannon-shot.png'
+import lobbyBeatCatchIcon from '../../assets/images/generated/lobby-icons/lobby-beat-catch.png'
+import lobbySpotDiffIcon from '../../assets/images/generated/lobby-icons/lobby-spot-diff.png'
+import lobbyMazeRunIcon from '../../assets/images/generated/lobby-icons/lobby-maze-run.png'
+import lobbyDrumCircleIcon from '../../assets/images/generated/lobby-icons/lobby-drum-circle.png'
+import lobbyTreasureDigIcon from '../../assets/images/generated/lobby-icons/lobby-treasure-dig.png'
+import lobbyIceSlideIcon from '../../assets/images/generated/lobby-icons/lobby-ice-slide.png'
+import lobbySequenceMasterIcon from '../../assets/images/generated/lobby-icons/lobby-sequence-master.png'
+import lobbyDanceStepIcon from '../../assets/images/generated/lobby-icons/lobby-dance-step.png'
+import lobbyKaraokePitchIcon from '../../assets/images/generated/lobby-icons/lobby-karaoke-pitch.png'
+import lobbyCardFlipSpeedIcon from '../../assets/images/generated/lobby-icons/lobby-card-flip-speed.png'
+import lobbyPaintMixIcon from '../../assets/images/generated/lobby-icons/lobby-paint-mix.png'
+import lobbyEmojiMatchIcon from '../../assets/images/generated/lobby-icons/lobby-emoji-match.png'
+import lobbyTornadoRunIcon from '../../assets/images/generated/lobby-icons/lobby-tornado-run.png'
+import lobbyDodgeBallIcon from '../../assets/images/generated/lobby-icons/lobby-dodge-ball.png'
+import lobbyCookingRushIcon from '../../assets/images/generated/lobby-icons/lobby-cooking-rush.png'
+import kimYeonjaCastSprite from '../../assets/images/same-character/kim-yeonja.png'
+import parkSangminCastSprite from '../../assets/images/same-character/park-sangmin.png'
+import parkWankyuCastSprite from '../../assets/images/same-character/park-wankyu.png'
+import seoTaijiCastSprite from '../../assets/images/same-character/seo-taiji.png'
+import lobbyBgmLoop from '../../assets/sounds/lobby-bgm-loop.mp3'
 import gameplayBgmLoop from '../../assets/sounds/gameplay-bgm-loop.mp3'
 import resultBgmLoop from '../../assets/sounds/result-bgm-loop.mp3'
 import countdownTickSfx from '../../assets/sounds/countdown-tick.mp3'
@@ -27,23 +59,80 @@ const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
 const GAME_START_COUNTDOWN_STEP_MS = 1000
 const GAME_OVER_OVERLAY_MS = 1100
 const RESULT_ROLL_DURATION_MS = 1200
-const LOBBY_ICON_BY_GAME_ID: Record<MiniGameId, string> = {
-  'tap-dash': tapDashCharacterIcon,
-  'timing-shot': timingShotCharacterIcon,
-  'lane-dodge': laneDodgeCharacterIcon,
-  'same-character': sameCharacterIcon,
-  'run-run': tapDashCharacterIcon,
-  'gogunbuntu': gogunbuntuCharacterIcon,
-  'combo-formula': comboFormulaCharacterIcon,
+const IN_GAME_MODULE_BGM_IDS = new Set<MiniGameId>(['tap-dash', 'same-character', 'gogunbuntu'])
+const LIVE_CAST = [
+  { name: '김연자', imageSrc: kimYeonjaCastSprite },
+  { name: '박상민', imageSrc: parkSangminCastSprite },
+  { name: '박완규', imageSrc: parkWankyuCastSprite },
+  { name: '서태지', imageSrc: seoTaijiCastSprite },
+] as const
+const LIVE_FX_SPARKS = [
+  { left: '8%', top: '18%', delay: '0s', duration: '2.6s' },
+  { left: '16%', top: '46%', delay: '0.35s', duration: '3.1s' },
+  { left: '24%', top: '74%', delay: '0.8s', duration: '2.8s' },
+  { left: '78%', top: '22%', delay: '0.42s', duration: '3.2s' },
+  { left: '88%', top: '40%', delay: '1s', duration: '2.7s' },
+  { left: '84%', top: '70%', delay: '0.2s', duration: '3s' },
+] as const
+const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
+  'tap-dash': lobbyTapDashIcon,
+  'same-character': lobbySameCharacterIcon,
+  'run-run': lobbyRunRunIcon,
+  'gogunbuntu': lobbyGogunbuntuIcon,
+  'combo-formula': lobbyComboFormulaIcon,
+  'cham-cham-cham': lobbyChamChamChamIcon,
+  'intense-cheer': lobbyIntenseCheerIcon,
+  'dunga-dunga': lobbyDungaDungaIcon,
+  'fierce-cheer': lobbyFierceCheerIcon,
+  'star-catch': lobbyStarCatchIcon,
+  'number-sort': lobbyNumberSortIcon,
+  'rhythm-tap': lobbyRhythmTapIcon,
+  'pattern-lock': lobbyPatternLockIcon,
+  'connect-four': lobbyConnectFourIcon,
+  'mine-sweep-mini': lobbyMineSweepMiniIcon,
+  'rock-scissors': lobbyRockScissorsIcon,
+  'stack-tower': lobbyStackTowerIcon,
+  'ball-bounce-mini': lobbyBallBounceMiniIcon,
+  'cannon-shot': lobbyCannonShotIcon,
+  'drum-circle': lobbyDrumCircleIcon,
+  'sequence-master': lobbySequenceMasterIcon,
+  'maze-run': lobbyMazeRunIcon,
+  'spot-diff': lobbySpotDiffIcon,
+  'treasure-dig': lobbyTreasureDigIcon,
+  'dance-step': lobbyDanceStepIcon,
+  'beat-catch': lobbyBeatCatchIcon,
+  'karaoke-pitch': lobbyKaraokePitchIcon,
+  'card-flip-speed': lobbyCardFlipSpeedIcon,
+  'ice-slide': lobbyIceSlideIcon,
+  'paint-mix': lobbyPaintMixIcon,
+  'emoji-match': lobbyEmojiMatchIcon,
+  'cooking-rush': lobbyCookingRushIcon,
+  'tornado-run': lobbyTornadoRunIcon,
+  'dodge-ball': lobbyDodgeBallIcon,
 }
-const COUNTDOWN_GUIDE_BY_GAME_ID: Record<MiniGameId, string> = {
+const FALLBACK_LOBBY_ICONS = [
+  kimYeonjaCastSprite,
+  parkSangminCastSprite,
+  parkWankyuCastSprite,
+  seoTaijiCastSprite,
+] as const
+function getLobbyIcon(gameId: MiniGameId): string {
+  const custom = CUSTOM_LOBBY_ICONS[gameId]
+  if (custom) return custom
+  let hash = 0
+  for (let i = 0; i < gameId.length; i++) hash = ((hash << 5) - hash + gameId.charCodeAt(i)) | 0
+  return FALLBACK_LOBBY_ICONS[Math.abs(hash) % FALLBACK_LOBBY_ICONS.length]
+}
+const COUNTDOWN_GUIDE_BY_GAME_ID: Partial<Record<MiniGameId, string>> = {
   'tap-dash': '등장하는 타겟을 연속 터치하고, 하트 아이템으로 시간을 크게 벌어보세요.',
   'gogunbuntu': '점프로 높이를 맞추고 훅을 던져 스윙하며 지형을 돌파하세요.',
   'same-character': '중앙 대기열 캐릭터를 같은 줄에 맞춰 연속 콤보를 만들어보세요.',
   'combo-formula': '조합 순서를 입력하고 OK를 눌러 배수 콤보와 피버를 쌓으세요.',
   'run-run': '좌우 전환 타이밍을 맞춰 코스 밖으로 벗어나지 않게 달리세요.',
-  'timing-shot': '타이밍에 맞춰 정확하게 탭해서 높은 점수를 노리세요.',
-  'lane-dodge': '레인을 바꿔 장애물을 피하고 오래 버틸수록 점수가 올라갑니다.',
+  'cham-cham-cham': '참참참! 공격은 방향을 맞추고, 수비는 빠르게 피하세요. 체력 3칸!',
+  'intense-cheer': '좌/우 터치로 점프하며 위로 올라가세요! 장애물을 피하고 하트와 코인을 모으세요.',
+  'dunga-dunga': '구멍에서 출몰하는 가수를 터치! 피버 게이지를 채워 황금 가수를 노려보세요.',
+  'fierce-cheer': '공을 좌우 벽에 번갈아 닿게 해서 점수를 올리세요! 20초 제한!',
 }
 
 interface RoundSettlement {
@@ -220,14 +309,15 @@ export function GameHubApp() {
       return
     }
 
-    const isTapDashLivePlay = activeGameId === 'tap-dash' && countdownStepIndex === null
-    if (isTapDashLivePlay) {
+    const isModuleBgmLivePlay =
+      activeGameId !== null && countdownStepIndex === null && IN_GAME_MODULE_BGM_IDS.has(activeGameId)
+    if (isModuleBgmLivePlay) {
       stopBackgroundAudio(bgmAudioRef, bgmTrackRef)
       return
     }
 
-    const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : defaultBgmLoop
-    const nextVolume = activeGameId !== null ? 0.26 : resultGameId !== null ? 0.32 : 0.3
+    const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : lobbyBgmLoop
+    const nextVolume = activeGameId !== null ? 0.3 : resultGameId !== null ? 0.32 : 0.34
     playBackgroundAudio(nextTrack, nextVolume, bgmAudioRef, bgmTrackRef)
   }, [activeGameId, countdownStepIndex, isAudioReady, resultGameId])
 
@@ -415,7 +505,7 @@ export function GameHubApp() {
   const isResultActionView = activeGameId === null && resultGameId !== null
   const isCountdownActive = activeGameId !== null && countdownStepIndex !== null
   const countdownLabel = isCountdownActive ? GAME_START_COUNTDOWN_LABELS[countdownStepIndex] : null
-  const countdownGuide = activeGameId ? COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] : null
+  const countdownGuide = activeGameId ? (COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] ?? miniGameModuleById[activeGameId].manifest.description) : null
   const resultTitle = settlement ? miniGameModuleById[settlement.gameId].manifest.title : 'Mini Game'
   const displayedSettlementScore = isRollingDone && settlement ? settlement.score : rollingScore
   const displayedSettlementCoins = isRollingDone && settlement ? settlement.earnedCoins : rollingCoins
@@ -441,6 +531,29 @@ export function GameHubApp() {
 
         {activeGameId !== null && activeModule ? (
           <section className="game-live-shell" aria-label="mini-game-live-shell">
+            <div className={`game-live-fx-layer ${isCountdownActive ? 'countdown' : ''}`} aria-hidden>
+              {LIVE_FX_SPARKS.map((spark, index) => (
+                <span
+                  className="game-live-fx-spark"
+                  key={`spark-${index}`}
+                  style={
+                    {
+                      left: spark.left,
+                      top: spark.top,
+                      '--spark-delay': spark.delay,
+                      '--spark-duration': spark.duration,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </div>
+            <div className={`game-live-cast-overlay ${isCountdownActive ? 'countdown' : ''}`} aria-hidden>
+              {LIVE_CAST.map((cast, index) => (
+                <span className="game-live-cast-item" key={cast.name} style={{ '--cast-index': `${index}` } as CSSProperties}>
+                  <img src={cast.imageSrc} alt="" />
+                </span>
+              ))}
+            </div>
             {isCountdownActive && countdownLabel !== null ? (
               <section
                 className={`game-countdown-panel ${isInGameView ? 'game-immersive' : ''}`}
@@ -531,7 +644,7 @@ export function GameHubApp() {
                     onClick={() => void selectGame(card.id)}
                   >
                     <span className="lobby-icon-thumb">
-                      <img src={LOBBY_ICON_BY_GAME_ID[card.id]} alt={`${card.title} icon`} />
+                      <img src={getLobbyIcon(card.id)} alt={`${card.title} icon`} />
                     </span>
                     <span className="lobby-icon-title">{card.title}</span>
                     <span className={`lobby-icon-state ${card.unlocked ? 'open' : 'locked'}`}>

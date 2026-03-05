@@ -31,15 +31,11 @@ function assertRecord(value: unknown, label: string): asserts value is Record<st
 }
 
 export function createEmptyScoreMap(): Record<MiniGameId, number> {
-  return {
-    'tap-dash': 0,
-    'timing-shot': 0,
-    'lane-dodge': 0,
-    'run-run': 0,
-    'same-character': 0,
-    'gogunbuntu': 0,
-    'combo-formula': 0,
+  const map = {} as Record<MiniGameId, number>
+  for (const id of MINI_GAME_IDS) {
+    map[id] = 0
   }
+  return map
 }
 
 export function createInitialProgress(initialCoins: number, unlockedMiniGameIds: MiniGameId[]): PlayerProgress {
@@ -94,11 +90,17 @@ export function migrateProgressForCurrentMiniGames(value: unknown): unknown {
   assertRecord(source.playCounts, 'progress.playCounts')
   assertRecord(source.bestScores, 'progress.bestScores')
 
-  const nextUnlockedMiniGameIds = [...source.unlockedMiniGameIds]
+  let changed = false
+
+  const nextUnlockedMiniGameIds = source.unlockedMiniGameIds.filter(
+    (id): id is MiniGameId => typeof id === 'string' && miniGameIdSet.has(id),
+  )
+  if (nextUnlockedMiniGameIds.length !== source.unlockedMiniGameIds.length) {
+    changed = true
+  }
+
   const nextPlayCounts: Record<string, unknown> = { ...source.playCounts }
   const nextBestScores: Record<string, unknown> = { ...source.bestScores }
-
-  let changed = false
 
   for (const id of ALWAYS_UNLOCKED_GAME_IDS) {
     if (!nextUnlockedMiniGameIds.some((candidate) => candidate === id)) {
