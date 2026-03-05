@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
+import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 
 const TARGET_VALUE = 73
 const MAX_TIME_MS = 9000
-const STEP_MS = 40
+const GAUGE_SPEED_PER_MS = 0.1
 
 function clamp(min: number, value: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -16,13 +17,27 @@ function TimingShotGame({ onFinish, onExit }: MiniGameSessionProps) {
   const gaugeRef = useRef(0)
   const elapsedRef = useRef(0)
   const finishedRef = useRef(false)
+  const animationFrameRef = useRef<number | null>(null)
+  const lastFrameAtRef = useRef<number | null>(null)
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      elapsedRef.current += STEP_MS
+    const step = (now: number) => {
+      if (finishedRef.current) {
+        animationFrameRef.current = null
+        return
+      }
+
+      if (lastFrameAtRef.current === null) {
+        lastFrameAtRef.current = now
+      }
+
+      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameAtRef.current = now
+
+      elapsedRef.current += deltaMs
       setElapsedMs(elapsedRef.current)
 
-      const candidate = gaugeRef.current + directionRef.current * 4
+      const candidate = gaugeRef.current + directionRef.current * GAUGE_SPEED_PER_MS * deltaMs
       if (candidate >= 100) {
         directionRef.current = -1
         gaugeRef.current = 100
@@ -34,15 +49,27 @@ function TimingShotGame({ onFinish, onExit }: MiniGameSessionProps) {
       }
       setGauge(gaugeRef.current)
 
-      if (elapsedRef.current >= MAX_TIME_MS && !finishedRef.current) {
+      if (elapsedRef.current >= MAX_TIME_MS) {
         finishedRef.current = true
         const distance = Math.abs(gaugeRef.current - TARGET_VALUE)
         const score = clamp(0, 100 - distance * 2, 100)
-        onFinish({ score, durationMs: elapsedRef.current })
+        onFinish({ score, durationMs: Math.round(elapsedRef.current) })
+        animationFrameRef.current = null
+        return
       }
-    }, STEP_MS)
 
-    return () => window.clearInterval(timer)
+      animationFrameRef.current = window.requestAnimationFrame(step)
+    }
+
+    animationFrameRef.current = window.requestAnimationFrame(step)
+
+    return () => {
+      if (animationFrameRef.current !== null) {
+        window.cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      lastFrameAtRef.current = null
+    }
   }, [onFinish])
 
   const stop = () => {
@@ -53,7 +80,7 @@ function TimingShotGame({ onFinish, onExit }: MiniGameSessionProps) {
     finishedRef.current = true
     const distance = Math.abs(gaugeRef.current - TARGET_VALUE)
     const score = clamp(0, 100 - distance * 2, 100)
-    onFinish({ score, durationMs: elapsedRef.current > 0 ? elapsedRef.current : STEP_MS })
+    onFinish({ score, durationMs: elapsedRef.current > 0 ? Math.round(elapsedRef.current) : Math.round(DEFAULT_FRAME_MS) })
   }
 
   return (

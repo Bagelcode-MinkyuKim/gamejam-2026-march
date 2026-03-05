@@ -172,6 +172,46 @@ codeb whoami   # 인증 상태 확인
 
 > **"캐릭터 3D 모델을 만들고 walk 애니메이션도 추가해 주세요"**
 
+### 4-4. 이중 에이전트 자동 품질 루프 (90점 이상까지 반복)
+
+`codeb` 리소스 생성 시 아래 2개 에이전트를 분리해 자동 반복 개선할 수 있습니다.
+
+- **Maker Agent**: 다음 생성 프롬프트를 설계하고 `codeb cg image generate` 실행
+- **Evaluator Agent**: 결과물을 채점하고 개선 프롬프트를 제안
+
+채점 항목(100점):
+
+- **완성도(completion)**: 요청한 오브젝트/요소가 충족되었는지
+- **퀄리티(quality)**: 선명도, 실루엣 가독성, 실제 게임 적용 품질
+- **풍(style)**: 요청한 아트 스타일/톤과 일치하는지
+
+`totalScore >= 90`이 될 때까지 자동 반복합니다.
+
+실행 예시:
+
+```bash
+npm run codeb:dual-agent -- \
+  --brief "모바일 러너 게임 주인공 토끼 캐릭터, 측면 질주 포즈" \
+  --style "16bit 픽셀아트, 명확한 실루엣, UI 톤과 일관" \
+  --asset-name "runner-rabbit" \
+  --output-dir "assets/images/generated" \
+  --remove-bg
+```
+
+주요 옵션:
+
+- `--target-score 90` (기본 90)
+- `--max-iterations 30` (기본 30)
+- `--image-model pro|flash`
+- `--maker-model openai` (예: `openai/gpt-4o`)
+- `--evaluator-model gemini-3-pro-preview`
+- `--generation-timeout-sec 900` (생성 대기 타임아웃)
+
+산출물:
+
+- 생성 이미지: `--output-dir` 하위 `*-iter-XX.png`
+- 평가 로그: `assets/reports/codeb-dual-agent/<asset-name>-<timestamp>/session-report.json`
+
 ---
 
 ## 5. 모바일에서 테스트하기

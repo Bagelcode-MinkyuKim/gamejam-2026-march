@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
+import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import parkSangminImage from '../../../assets/images/same-character/park-sangmin.png'
 import songChangsikImage from '../../../assets/images/same-character/song-changsik.png'
 import taeJinaImage from '../../../assets/images/same-character/tae-jina.png'
@@ -14,7 +15,6 @@ const GAME_DURATION_MS = 40000
 const MAX_TIME_MS = 99000
 const TIME_BONUS_ON_MATCH_MS = 10000
 const TURN_DURATION_MS = 1000
-const TICK_MS = 50
 const STAR_GAIN_ON_MATCH = 24
 const STAR_LOSS_ON_MISS = 30
 const FEVER_DURATION_MS = 6000
@@ -82,6 +82,8 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
   const burstMsRef = useRef(0)
   const finishedRef = useRef(false)
   const startedAtRef = useRef(0)
+  const animationFrameRef = useRef<number | null>(null)
+  const lastFrameAtRef = useRef<number | null>(null)
 
   const chooseLane = useCallback((nextLane: number) => {
     const clamped = clamp(0, nextLane, LANE_COUNT - 1)
@@ -95,7 +97,7 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
     }
 
     finishedRef.current = true
-    const elapsedMs = Math.max(TICK_MS, Math.round(window.performance.now() - startedAtRef.current))
+    const elapsedMs = Math.max(Math.round(DEFAULT_FRAME_MS), Math.round(window.performance.now() - startedAtRef.current))
     const comboBonus = bestComboRef.current * 5
 
     onFinish({
@@ -171,34 +173,41 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
 
   useEffect(() => {
     startedAtRef.current = window.performance.now()
+    lastFrameAtRef.current = null
 
-    const timer = window.setInterval(() => {
+    const step = (now: number) => {
       if (finishedRef.current) {
-        window.clearInterval(timer)
+        animationFrameRef.current = null
         return
       }
 
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - TICK_MS)
+      if (lastFrameAtRef.current === null) {
+        lastFrameAtRef.current = now
+      }
+      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameAtRef.current = now
+
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
 
       if (feverRemainingMsRef.current > 0) {
-        feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - TICK_MS)
+        feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
         setFeverRemainingMs(feverRemainingMsRef.current)
       }
 
       if (timeBonusFlashMsRef.current > 0) {
-        timeBonusFlashMsRef.current = Math.max(0, timeBonusFlashMsRef.current - TICK_MS)
+        timeBonusFlashMsRef.current = Math.max(0, timeBonusFlashMsRef.current - deltaMs)
         setTimeBonusFlashMs(timeBonusFlashMsRef.current)
       }
 
       if (burstMsRef.current > 0) {
-        burstMsRef.current = Math.max(0, burstMsRef.current - TICK_MS)
+        burstMsRef.current = Math.max(0, burstMsRef.current - deltaMs)
         if (burstMsRef.current === 0) {
           setBurstText(null)
         }
       }
 
-      turnRemainingMsRef.current = Math.max(0, turnRemainingMsRef.current - TICK_MS)
+      turnRemainingMsRef.current = Math.max(0, turnRemainingMsRef.current - deltaMs)
       setTurnRemainingMs(turnRemainingMsRef.current)
       if (turnRemainingMsRef.current === 0) {
         resolveTurn()
@@ -206,12 +215,21 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
 
       if (remainingMsRef.current === 0) {
         finishGame()
-        window.clearInterval(timer)
+        animationFrameRef.current = null
+        return
       }
-    }, TICK_MS)
+
+      animationFrameRef.current = window.requestAnimationFrame(step)
+    }
+
+    animationFrameRef.current = window.requestAnimationFrame(step)
 
     return () => {
-      window.clearInterval(timer)
+      if (animationFrameRef.current !== null) {
+        window.cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      lastFrameAtRef.current = null
     }
   }, [finishGame, resolveTurn])
 

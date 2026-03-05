@@ -64,20 +64,79 @@ def build_module_source(args: argparse.Namespace) -> str:
     component_name = to_component_name(args.id)
     module_name = to_module_name(args.id)
 
-    return f'''import {{ useState }} from 'react'
+    return f'''import {{ useEffect, useRef, useState }} from 'react'
 import type {{ MiniGameModule, MiniGameSessionProps }} from '../contracts'
+import {{ DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS }} from '../../primitives/constants'
+
+const ROUND_DURATION_MS = 3000
 
 function {component_name}({{ onFinish, onExit }}: MiniGameSessionProps) {{
   const [score, setScore] = useState(0)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const scoreRef = useRef(0)
+  const elapsedRef = useRef(0)
+  const finishedRef = useRef(false)
+  const animationFrameRef = useRef<number | null>(null)
+  const lastFrameAtRef = useRef<number | null>(null)
+
+  useEffect(() => {{
+    const step = (now: number) => {{
+      if (finishedRef.current) {{
+        animationFrameRef.current = null
+        return
+      }}
+
+      if (lastFrameAtRef.current === null) {{
+        lastFrameAtRef.current = now
+      }}
+
+      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameAtRef.current = now
+      elapsedRef.current += deltaMs
+      setElapsedMs(elapsedRef.current)
+
+      if (elapsedRef.current >= ROUND_DURATION_MS) {{
+        finishedRef.current = true
+        onFinish({{
+          score: scoreRef.current,
+          durationMs: Math.round(elapsedRef.current),
+        }})
+        animationFrameRef.current = null
+        return
+      }}
+
+      animationFrameRef.current = window.requestAnimationFrame(step)
+    }}
+
+    animationFrameRef.current = window.requestAnimationFrame(step)
+
+    return () => {{
+      if (animationFrameRef.current !== null) {{
+        window.cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }}
+      lastFrameAtRef.current = null
+    }}
+  }}, [onFinish])
 
   const handleScoreUp = () => {{
-    setScore((prev) => prev + 1)
+    if (finishedRef.current) {{
+      return
+    }}
+
+    scoreRef.current += 1
+    setScore(scoreRef.current)
   }}
 
   const finishGame = () => {{
+    if (finishedRef.current) {{
+      return
+    }}
+
+    finishedRef.current = true
     onFinish({{
-      score,
-      durationMs: 3000,
+      score: scoreRef.current,
+      durationMs: Math.round(Math.max(elapsedRef.current, DEFAULT_FRAME_MS)),
     }})
   }}
 
@@ -86,6 +145,8 @@ function {component_name}({{ onFinish, onExit }}: MiniGameSessionProps) {{
       <h3>{args.title}</h3>
       <p className="mini-game-description">{args.description}</p>
       <p className="mini-game-stat">현재 점수: {{score}}</p>
+      <p className="mini-game-stat">경과 시간: {{(elapsedMs / 1000).toFixed(1)}}초</p>
+      <p className="mini-game-stat">기본 루프: {{Math.round(1000 / DEFAULT_FRAME_MS)}} FPS</p>
       <button className="tap-button" type="button" onClick={{handleScoreUp}}>
         점수 +1
       </button>

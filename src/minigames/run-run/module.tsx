@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
+import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import runRunCharacter from '../../../assets/images/MrTae.png'
 import wallHuman01 from '../../../assets/images/Human 01.png'
 import wallHuman02 from '../../../assets/images/Human 02.png'
 import wallHuman03 from '../../../assets/images/Human 03.png'
 import wallHuman04 from '../../../assets/images/Human 04.png'
 
-const TICK_MS = 16
 const START_SPEED = 52
 const MAX_SPEED = 144
 const ACCEL_PER_SECOND = 21
@@ -318,6 +318,8 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const cameraRotationRef = useRef(0)
   const elapsedMsRef = useRef(0)
   const finishedRef = useRef(false)
+  const animationFrameRef = useRef<number | null>(null)
+  const lastFrameAtRef = useRef<number | null>(null)
 
   const centerPolyline = useMemo(() => {
     const roadNodes = toRoadCenterNodes(roadSegments)
@@ -378,7 +380,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
     }
 
     finishedRef.current = true
-    const finalDurationMs = elapsedMsRef.current > 0 ? elapsedMsRef.current : TICK_MS
+    const finalDurationMs = elapsedMsRef.current > 0 ? elapsedMsRef.current : Math.round(DEFAULT_FRAME_MS)
     const finalScore = toScore(playerRef.current)
     onFinish({
       score: finalScore,
@@ -451,24 +453,33 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   }, [setMoveDirection, toggleMoveDirection])
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    lastFrameAtRef.current = null
+
+    const step = (now: number) => {
       if (finishedRef.current) {
-        window.clearInterval(timer)
+        animationFrameRef.current = null
         return
       }
+
+      if (lastFrameAtRef.current === null) {
+        lastFrameAtRef.current = now
+      }
+      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameAtRef.current = now
 
       if (!isRunning) {
+        animationFrameRef.current = window.requestAnimationFrame(step)
         return
       }
 
-      elapsedMsRef.current += TICK_MS
+      elapsedMsRef.current += deltaMs
       setElapsedMs(elapsedMsRef.current)
 
       const elapsedSeconds = elapsedMsRef.current / 1000
       const currentSpeed = Math.min(MAX_SPEED, START_SPEED + elapsedSeconds * ACCEL_PER_SECOND)
       setSpeed(currentSpeed)
 
-      const movedPlayer = movePoint(playerRef.current, directionRef.current, currentSpeed * (TICK_MS / 1000))
+      const movedPlayer = movePoint(playerRef.current, directionRef.current, currentSpeed * (deltaMs / 1000))
       playerRef.current = movedPlayer
       setPlayer(movedPlayer)
 
@@ -494,11 +505,20 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
       if (!isSafe) {
         setStatusText('벽에 닿았습니다. 라운드 종료!')
         finishRound()
+        animationFrameRef.current = null
+        return
       }
-    }, TICK_MS)
+      animationFrameRef.current = window.requestAnimationFrame(step)
+    }
+
+    animationFrameRef.current = window.requestAnimationFrame(step)
 
     return () => {
-      window.clearInterval(timer)
+      if (animationFrameRef.current !== null) {
+        window.cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      lastFrameAtRef.current = null
     }
   }, [finishRound, isRunning])
 

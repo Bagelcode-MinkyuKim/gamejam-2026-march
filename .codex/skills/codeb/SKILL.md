@@ -15,6 +15,25 @@ codeb upgrade                      # 최신 버전 유지
 
 토큰 발급: https://aiproxy.backoffice.bagelgames.com/console/tokens
 
+## 프로젝트 기본 정책: 이중 에이전트 품질 루프 (이미지)
+
+이 프로젝트에서는 이미지 리소스 생성 시 아래 루프를 기본 적용한다.
+
+1. **Maker Agent**: 프롬프트 설계 + `codeb cg image generate`
+2. **Evaluator Agent**: `완성도/퀄리티/풍(style)` 100점 만점 채점
+3. **반복 개선**: 총점 90점 미만이면 개선 프롬프트로 재생성
+4. **종료 조건**: `totalScore >= 90`
+
+로컬 자동 실행:
+
+```bash
+npm run codeb:dual-agent -- \
+  --brief "요구사항" \
+  --style "원하는 풍/스타일" \
+  --asset-name "asset-name" \
+  --output-dir "assets/images/generated"
+```
+
 ---
 
 ## Part 1: 콘텐츠 생성 (codeb cg)
