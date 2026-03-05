@@ -38,6 +38,7 @@ export function createEmptyScoreMap(): Record<MiniGameId, number> {
     'run-run': 0,
     'same-character': 0,
     'gogunbuntu': 0,
+    'combo-formula': 0,
   }
 }
 

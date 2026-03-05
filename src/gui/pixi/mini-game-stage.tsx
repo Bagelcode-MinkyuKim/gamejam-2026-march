@@ -7,6 +7,7 @@ import timingShotCharacter from '../../../assets/images/character-timing-shot-pi
 import laneDodgeCharacter from '../../../assets/images/character-lane-dodge-pixel-transparent.png'
 import sameCharacterStageImage from '../../../assets/images/same-character/park-sangmin.png'
 import gogunbuntuStageImage from '../../../assets/images/gogunbuntu/dot-characters/kim-yeonja.png'
+import comboFormulaStageImage from '../../../assets/images/same-character/park-wankyu.png'
 
 export type StageTransitionState = 'idle' | 'enter' | 'exit'
 
@@ -39,6 +40,10 @@ const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
   'gogunbuntu': {
     backgroundColor: 0x0f172a,
     characterImageSrc: gogunbuntuStageImage,
+  },
+  'combo-formula': {
+    backgroundColor: 0xdef3fb,
+    characterImageSrc: comboFormulaStageImage,
   },
 }
 
