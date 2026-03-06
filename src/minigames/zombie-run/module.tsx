@@ -37,9 +37,9 @@ const BAR_MAX_GAP = 220
 const OBS_SPAWN_MS = 3000
 const OBS_MIN_MS = 1600
 const OBS_DECAY = 0.93
-const OBS_SPEED = 65
+const OBS_SPEED = 320
 const JUMP_MS = 600
-const JUMP_H = 70
+const JUMP_H = 100
 
 // ═══ Viewport ═══
 const VW = 432
@@ -350,8 +350,12 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         if (magnetMsRef.current <= 0) { magnetRef.current = false; setMagnetActive(false) }
       }
 
+      // Score-based difficulty scaling
+      const curScore = calcScore(pPos.current - PLAYER_START_POS, ms, bonusRef.current)
+      const diffMul = 1 + Math.floor(curScore / 100) * 0.08 // +8% per 100 pts
+
       // Zombie
-      const zSpd = Math.min(MAX_ZOMBIE_SPEED, INITIAL_ZOMBIE_SPEED + sec * ZOMBIE_ACCEL) * (stageRef.current >= 3 ? 1.2 : 1)
+      const zSpd = Math.min(MAX_ZOMBIE_SPEED * diffMul, INITIAL_ZOMBIE_SPEED + sec * ZOMBIE_ACCEL) * (stageRef.current >= 3 ? 1.2 : 1) * (1 + diffMul * 0.15)
       zPos.current += zSpd * (dt / 1000)
 
       // Player drift
@@ -377,7 +381,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         const w = t === 'spike' ? 32 : t === 'barrel' ? 36 : 38
         const h = t === 'spike' ? 28 : t === 'barrel' ? 36 : 34
         obsArr.current.push({ id: obsId.current++, x: VW + w, y: GROUND_Y - h, w, h, type: t })
-        obsInterval.current = Math.max(OBS_MIN_MS, obsInterval.current * OBS_DECAY)
+        const minMs = Math.max(600, OBS_MIN_MS - curScore * 1.5)
+        obsInterval.current = Math.max(minMs, obsInterval.current * OBS_DECAY)
         nextObs.current = ms + obsInterval.current
       }
 
@@ -401,8 +406,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       }
 
       // Move & collide
-      const spMul = 1 + stg * 0.08
-      const pScreenX = VW * 0.6
+      const spMul = (1 + stg * 0.08) * (1 + diffMul * 0.1)
+      const pScreenX = VW * 0.4
       const inAir = jumpAt.current !== null
 
       const alive: Obs[] = []
@@ -496,7 +501,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const gapR = clamp(gap / BAR_MAX_GAP, 0, 1)
   const jumpOff = jumping ? Math.sin(jumpProg * Math.PI) * JUMP_H : 0
   const danger = gapR < 0.15 ? 'critical' : gapR < 0.35 ? 'danger' : gapR < 0.55 ? 'warn' : 'safe'
-  const pScreenX = VW * 0.6
+  const pScreenX = VW * 0.4
 
   return (
     <section className="mini-game-panel zr" aria-label="zombie-run-game" style={{ ...fx.getShakeStyle() }}>
@@ -516,13 +521,11 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         {/* ─── HUD ─── */}
         <div className="zr-hud">
           <div className="zr-hud-l">
-            <span className="zr-score">{score}</span>
-            <span className="zr-best">BEST {best}</span>
-          </div>
-          <div className="zr-hud-hp">
-            {[...Array(MAX_HP)].map((_, i) => (
-              <span key={i} className={`zr-heart ${i < hp ? 'on' : 'off'}`} />
-            ))}
+            <div className="zr-hud-hp">
+              {[...Array(MAX_HP)].map((_, i) => (
+                <span key={i} className={`zr-heart ${i < hp ? 'on' : 'off'}`} />
+              ))}
+            </div>
           </div>
           <div className="zr-hud-r">
             <span className={`zr-time ${timeLeft < 10 ? 'zr-blink' : ''}`}>{timeLeft.toFixed(1)}s</span>
@@ -539,6 +542,12 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           {magnetActive && <span className="zr-b mag">MAGNET {(magnetMs / 1000).toFixed(1)}s</span>}
           {fever && <span className="zr-b fever">FEVER!! {(feverMs / 1000).toFixed(1)}s</span>}
           {!dashReady && <span className="zr-b dash">DASH...</span>}
+        </div>
+
+        {/* Score */}
+        <div className="zr-score-row">
+          <span className="zr-score">{score}</span>
+          <span className="zr-best">BEST {best}</span>
         </div>
 
         {/* Gap bar */}
@@ -570,7 +579,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
           {/* Zombie (sprite sheet animation) */}
           <div className={`zr-zombie ${danger === 'critical' ? 'zr-zombie-rage' : ''}`}
-            style={{ left: VW * 0.15, top: GROUND_Y - ZOMBIE_H }}>
+            style={{ left: VW * 0.08, top: GROUND_Y - ZOMBIE_H }}>
             <div className="zr-sprite-zombie" style={{
               backgroundImage: `url(${zombieSpriteSheet})`,
               backgroundPosition: `${-(zombieFrame % 2) * 100}% ${-(Math.floor(zombieFrame / 2)) * 100}%`,
@@ -650,12 +659,14 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 // CSS — Full pixel art retro style
 // ═══════════════════════════════════════════════════
 const ZR_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 .zr {
   display: flex; flex-direction: column;
   width: 100%; height: 100%; max-width: 432px; margin: 0 auto;
   background: #0c0c1d; color: #e2e8f0; overflow: hidden;
   position: relative; user-select: none; -webkit-user-select: none;
   touch-action: manipulation; image-rendering: pixelated;
+  font-family: 'Press Start 2P', monospace;
 }
 .zr-board {
   display: flex; flex-direction: column;
@@ -672,6 +683,10 @@ const ZR_CSS = `
 .zr-hud-l, .zr-hud-r { display: flex; flex-direction: column; }
 .zr-hud-r { align-items: flex-end; }
 .zr-hud-hp { display: flex; gap: 6px; }
+.zr-score-row {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 0 16px 4px; flex-shrink: 0;
+}
 .zr-heart {
   display: inline-block; width: 24px; height: 24px;
   background: #ef4444; clip-path: path('M12 4C9 0 0 0 0 7.3C0 14.7 12 21.3 12 21.3S24 14.7 24 7.3C24 0 15 0 12 4Z');
@@ -680,23 +695,23 @@ const ZR_CSS = `
 }
 .zr-heart.off { background: #374151; opacity: 0.4; filter: none; }
 .zr-score {
-  font-size: clamp(32px, 8vw, 48px); font-weight: 900;
+  font-size: clamp(40px, 10vw, 60px); font-weight: 900;
   color: #fde68a; text-shadow: 0 2px 12px rgba(253,230,138,0.5), 0 0 20px rgba(253,230,138,0.3);
-  font-family: monospace; line-height: 1;
+  line-height: 1;
 }
-.zr-best { font-size: 12px; color: #6ee7b7; opacity: 0.8; font-family: monospace; }
+.zr-best { font-size: 10px; color: #6ee7b7; opacity: 0.8; }
 .zr-time {
-  font-size: clamp(28px, 7vw, 40px); font-weight: 800;
-  color: #93c5fd; font-family: monospace; line-height: 1;
+  font-size: clamp(20px, 5vw, 28px); font-weight: 800;
+  color: #93c5fd; line-height: 1;
   text-shadow: 0 2px 8px rgba(147,197,253,0.4);
 }
-.zr-stg { font-size: 11px; color: #9ca3af; letter-spacing: 1px; font-family: monospace; }
+.zr-stg { font-size: 8px; color: #9ca3af; letter-spacing: 1px; white-space: nowrap; }
 
 /* ─── Badges ─── */
 .zr-badges { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 16px; flex-shrink: 0; }
 .zr-b {
-  font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 4px;
-  font-family: monospace; letter-spacing: 0.5px;
+  font-size: 8px; font-weight: 800; padding: 3px 8px; border-radius: 4px;
+  letter-spacing: 0.5px;
 }
 .zr-b.combo { background: rgba(251,191,36,0.25); color: #fbbf24; }
 .zr-b.coin { background: rgba(245,158,11,0.25); color: #f59e0b; }
@@ -715,7 +730,7 @@ const ZR_CSS = `
 .zr-gap-fill { height: 100%; border-radius: 6px; transition: width 0.1s ease-out; }
 .zr-gap-txt {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  font-size: 10px; color: #fff; font-weight: 800; font-family: monospace;
+  font-size: 8px; color: #fff; font-weight: 800;
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 .zr-gap-safe { background: linear-gradient(90deg, #059669, #34d399); }
@@ -784,7 +799,7 @@ const ZR_CSS = `
 .zr-pow-inner {
   display: flex; align-items: center; justify-content: center;
   width: 100%; height: 100%; border-radius: 50%;
-  font-weight: 900; font-size: 14px; font-family: monospace;
+  font-weight: 900; font-size: 10px;
   animation: zr-pow-bob 0.8s infinite ease-in-out;
 }
 .zr-pow-speed { background: #0e7490; color: #cffafe; border: 2px solid #22d3ee; box-shadow: 0 0 10px rgba(34,211,238,0.4); }
@@ -814,7 +829,7 @@ const ZR_CSS = `
 
 .zr-jump-txt {
   position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
-  font-size: 11px; font-weight: 900; color: #fde68a; font-family: monospace;
+  font-size: 8px; font-weight: 900; color: #fde68a;
   text-shadow: 0 1px 4px rgba(0,0,0,0.6);
 }
 
@@ -864,7 +879,6 @@ const ZR_CSS = `
   align-items: center; justify-content: center; gap: 2px;
   box-shadow: 0 6px 0 #052e16, 0 8px 16px rgba(0,0,0,0.5);
   transition: transform 0.04s;
-  font-family: monospace;
 }
 .zr-btn-tap:active, .zr-tap-on {
   transform: translateY(4px);
@@ -877,8 +891,8 @@ const ZR_CSS = `
   box-shadow: 0 6px 0 #450a0a, 0 0 24px rgba(239,68,68,0.3) !important;
   animation: zr-pulse 0.3s infinite;
 }
-.zr-btn-label { font-size: clamp(20px, 4.5vw, 28px); font-weight: 900; letter-spacing: 3px; }
-.zr-btn-sub { font-size: 9px; opacity: 0.5; }
+.zr-btn-label { font-size: clamp(16px, 4vw, 22px); font-weight: 900; letter-spacing: 3px; }
+.zr-btn-sub { font-size: 7px; opacity: 0.5; }
 .zr-btn-jump {
   flex: 1; height: clamp(72px, 11vh, 100px);
   border: 3px solid #1d4ed8; border-radius: 12px;
@@ -886,14 +900,14 @@ const ZR_CSS = `
   color: #fff; cursor: pointer; display: flex;
   align-items: center; justify-content: center;
   box-shadow: 0 6px 0 #1e3a5f, 0 8px 16px rgba(0,0,0,0.5);
-  transition: transform 0.04s; font-family: monospace;
+  transition: transform 0.04s;
 }
 .zr-btn-jump:active { transform: translateY(4px); box-shadow: 0 2px 0 #1e3a5f; }
 .zr-btn-jump:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .zr-status {
-  font-size: 8px; color: #6b7280; text-align: center;
-  padding: 2px 0 4px; flex-shrink: 0; font-family: monospace;
+  font-size: 7px; color: #6b7280; text-align: center;
+  padding: 2px 0 4px; flex-shrink: 0;
 }
 
 /* ─── Actions ─── */
@@ -904,8 +918,8 @@ const ZR_CSS = `
 .zr-act {
   padding: 5px 14px; border: none; border-radius: 6px;
   background: linear-gradient(180deg, #374151, #1f2937);
-  color: #d1d5db; font-size: 10px; font-weight: 700; cursor: pointer;
-  box-shadow: 0 2px 0 #111827; font-family: monospace;
+  color: #d1d5db; font-size: 8px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 2px 0 #111827;
 }
 .zr-act:active { transform: translateY(2px); box-shadow: none; }
 .zr-act.ghost { background: transparent; border: 1px solid #4b5563; color: #9ca3af; box-shadow: none; }
@@ -918,13 +932,13 @@ const ZR_CSS = `
   animation: zr-stage-in 2.2s ease-out forwards;
 }
 .zr-stage-num {
-  font-size: clamp(26px, 7vw, 40px); font-weight: 900; color: #fde68a;
+  font-size: clamp(20px, 5vw, 32px); font-weight: 900; color: #fde68a;
   text-shadow: 0 2px 12px rgba(253,230,138,0.5), 0 0 40px rgba(253,230,138,0.3);
-  font-family: monospace; letter-spacing: 4px;
+  letter-spacing: 4px;
 }
 .zr-stage-name {
-  font-size: clamp(11px, 3vw, 15px); color: #6ee7b7; font-weight: 700;
-  font-family: monospace; letter-spacing: 2px;
+  font-size: clamp(9px, 2.5vw, 12px); color: #6ee7b7; font-weight: 700;
+  letter-spacing: 2px;
 }
 
 /* ─── Animations ─── */

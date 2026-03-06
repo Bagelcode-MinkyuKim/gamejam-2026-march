@@ -31,9 +31,9 @@ const COMBO_BONUS_PER_STACK = 5
 // --- Gimmick constants ---
 const VIP_ORDER_CHANCE = 0.15
 const VIP_SCORE_MULTIPLIER = 3
-const ORDER_TIMER_BASE_MS = 15000
-const ORDER_TIMER_MIN_MS = 6000
-const ORDER_TIMER_SHRINK_PER_DISH = 300
+const ORDER_TIMER_BASE_MS = 12000
+const ORDER_TIMER_MIN_MS = 4000
+const ORDER_TIMER_SHRINK_PER_DISH = 500
 const TIMER_FAIL_PENALTY = 10
 const FEVER_COMBO_THRESHOLD = 5
 const FEVER_DURATION_MS = 6000
@@ -591,7 +591,7 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         .cr-score {
           margin: 0;
-          font-size: clamp(36px, 10vw, 52px);
+          font-size: clamp(48px, 14vw, 72px);
           font-weight: 900;
           color: #fef3c7;
           text-shadow: 4px 4px 0 rgba(0,0,0,0.5);
@@ -678,7 +678,7 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         /* ---- BANNERS ---- */
         .cr-fever-banner {
           text-align: center;
-          font-size: clamp(18px, 5vw, 24px);
+          font-size: clamp(11px, 3vw, 15px);
           font-weight: 900;
           color: #fff;
           margin: 0;
@@ -687,7 +687,7 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           background-size: 16px 100%;
           animation: cr-fever-scroll 0.3s linear infinite;
           text-shadow: 3px 3px 0 rgba(0,0,0,0.4);
-          letter-spacing: 4px;
+          letter-spacing: 3px;
           border-top: 3px solid #fbbf24;
           border-bottom: 3px solid #fbbf24;
         }
@@ -699,7 +699,7 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         .cr-powerup-banner {
           text-align: center;
-          font-size: clamp(14px, 3.5vw, 18px);
+          font-size: clamp(9px, 2.5vw, 12px);
           font-weight: 900;
           margin: 0;
           padding: 6px 0;
@@ -717,7 +717,7 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         .cr-streak-banner {
           text-align: center;
-          font-size: clamp(20px, 5vw, 28px);
+          font-size: clamp(12px, 3.5vw, 16px);
           font-weight: 900;
           margin: 0;
           padding: 8px 0;
@@ -736,7 +736,7 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         .cr-dish-text {
           text-align: center;
-          font-size: clamp(22px, 6vw, 30px);
+          font-size: clamp(14px, 4vw, 20px);
           font-weight: 900;
           color: #ea580c;
           margin: 0;
@@ -754,8 +754,8 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         /* ---- RECIPE AREA ---- */
         .cr-recipe-area {
-          margin: 8px 12px;
-          padding: 12px 14px;
+          margin: 80px 12px 8px;
+          padding: 14px 16px;
           background: #fefce8;
           border: 3px solid #1a1a2e;
           box-shadow: 4px 4px 0 rgba(0,0,0,0.25);
@@ -817,12 +817,12 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 2px;
-          padding: 6px 8px;
+          gap: 3px;
+          padding: 8px 10px;
           background: #f3f4f6;
           border: 3px solid #1a1a2e;
           transition: all 0.15s steps(3);
-          min-width: 48px;
+          min-width: 52px;
         }
 
         .cr-slot.done {
@@ -850,14 +850,14 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         }
 
         .cr-slot-img {
-          width: clamp(28px, 7vw, 36px);
-          height: clamp(28px, 7vw, 36px);
+          width: clamp(32px, 8vw, 42px);
+          height: clamp(32px, 8vw, 42px);
           image-rendering: pixelated;
           object-fit: contain;
         }
 
         .cr-slot-name {
-          font-size: clamp(7px, 2vw, 9px);
+          font-size: clamp(7px, 2vw, 10px);
           font-weight: 900;
           color: #6b7280;
           letter-spacing: 1px;
@@ -929,18 +929,19 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         }
 
         .cr-ingredient-img {
-          width: clamp(44px, 11vw, 60px);
-          height: clamp(44px, 11vw, 60px);
+          width: clamp(48px, 13vw, 68px);
+          height: clamp(48px, 13vw, 68px);
           image-rendering: pixelated;
           object-fit: contain;
           filter: drop-shadow(2px 2px 0 rgba(0,0,0,0.2));
         }
 
         .cr-ingredient-name {
-          font-size: clamp(11px, 2.8vw, 13px);
+          font-size: clamp(9px, 2.5vw, 12px);
           font-weight: 900;
           color: #374151;
           letter-spacing: 1px;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.1);
         }
 
         @keyframes cr-shake {

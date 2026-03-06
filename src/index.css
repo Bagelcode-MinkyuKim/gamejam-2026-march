@@ -392,6 +392,7 @@ img {
   margin: 0;
   font-size: clamp(1.8rem, 18cqw, 6.5rem);
   line-height: 1;
+  letter-spacing: -0.04em;
   color: #111827;
   white-space: nowrap;
   max-width: 100%;

@@ -20,6 +20,7 @@ import sfxDoubleJump from '../../../assets/sounds/lava-floor-doublejump.mp3'
 import sfxLevelUp from '../../../assets/sounds/lava-floor-levelup.mp3'
 import sfxDanger from '../../../assets/sounds/lava-floor-danger.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import bgmSrc from '../../../assets/sounds/lava-floor-bgm.mp3'
 
 // ─── Layout ───
 const VW = 360
@@ -27,14 +28,14 @@ const VH = 720
 const PX = 4 // pixel grid unit for dot-game feel
 
 // ─── Character ───
-const CHAR_SIZE = 52
+const CHAR_SIZE = 80
 
 // ─── Lava ───
 const LAVA_H = 64
 const LAVA_Y = VH - LAVA_H
 
 // ─── Platform types ───
-type PlatformType = 'normal' | 'moving' | 'spring' | 'crumble' | 'ice' | 'gold'
+type PlatformType = 'normal' | 'moving' | 'spring' | 'crumble' | 'ice' | 'gold' | 'sink'
 
 // ─── Platform ───
 const PLAT_W0 = 56
@@ -65,11 +66,11 @@ const SPRING_ARC = -150
 const CRUMBLE_MS = 350
 
 // ─── Player ───
-const PLAYER_R = 14
+const PLAYER_R = CHAR_SIZE / 2 // half character — feet align with platform top
 const JUMP_MS = 240
 
 // ─── Physics ───
-const GRAVITY = 2200
+const GRAVITY = 1200
 const FALL_DELAY = 450
 const TIMEOUT_MS = 120000
 
@@ -92,19 +93,61 @@ const COMBO_WIN = 3500
 const LEVEL_SCORE = 15 // score per level
 
 // ─── Eruption ───
-const ERUPT_INT = 7000
+const ERUPT_INT_BASE = 7000
+const ERUPT_INT_MIN = 2500
 const ERUPT_DUR = 2200
 const ERUPT_W = 44
 
 // ─── Fire bat enemy ───
 const BAT_SIZE = 20
-const BAT_SPEED = 50
-const BAT_SPAWN_AFTER = 20000
+const BAT_SPEED_BASE = 50
+const BAT_SPAWN_AFTER = 12000
+
+// ─── Sink platform ───
+const SINK_SPEED = 18 // px/s sinking
+
+// ─── Time-based difficulty phases ───
+// Each phase unlocks at a certain elapsed time (ms)
+const PHASE_ERUPTIONS = 10000   // 10s: eruptions start
+const PHASE_FIREBALLS = 15000   // 15s: fireballs
+const PHASE_BATS = 20000        // 20s: fire bats
+const PHASE_LAVA_WAVE = 30000   // 30s: lava waves
+const PHASE_EARTHQUAKE = 40000  // 40s: earthquakes
+const PHASE_SINK_PLATS = 25000  // 25s: sinking platforms
+const PHASE_MULTI_ERUPT = 50000 // 50s: multiple eruptions
+const PHASE_HELL = 70000        // 70s: all hazards intensified
+
+function getDifficulty(lv: number, elapsed: number) {
+  const timeFactor = Math.min(elapsed / 60000, 1.5) // 0~1.5 over 60s
+  return {
+    eruptInterval: Math.max(ERUPT_INT_MIN, ERUPT_INT_BASE - lv * 200 - timeFactor * 2000),
+    batSpeed: BAT_SPEED_BASE + lv * 6 + timeFactor * 30,
+    batSpawnInterval: Math.max(1500, 6000 - lv * 300 - timeFactor * 2000),
+    maxBats: Math.min(6, 2 + Math.floor(lv / 3) + (elapsed > PHASE_HELL ? 2 : 0)),
+    moveSpeed: MOVE_SPEED + lv * 2 + timeFactor * 20,
+    lavaRisePerTick: Math.min(24, 10 + lv + timeFactor * 5),
+    platformLifeMult: Math.max(0.5, 1.0 - timeFactor * 0.3),
+    maxPlatforms: Math.max(5, MAX_PLATS - Math.floor(timeFactor * 2)),
+    multiErupt: elapsed > PHASE_MULTI_ERUPT,
+  }
+}
+
+// ─── Lava wave ───
+const LAVA_WAVE_DUR = 3000
+const LAVA_WAVE_HEIGHT = 60
+
+// ─── Earthquake ───
+const EARTHQUAKE_DUR = 1500
+
+// ─── Fireball hazard ───
+interface Fireball { id: number; x: number; y: number; dx: number; spawnAt: number }
+const FIREBALL_SIZE = 16
+const FIREBALL_SPEED = 80
 
 interface Platform {
   id: number; x: number; y: number; w: number;
   spawnAt: number; lifeMs: number;
-  hasCoin: boolean; hasShield: boolean; hasMagnet: boolean;
+  hasCoin: boolean; hasShield: boolean; hasMagnet: boolean; hasDoubleScore: boolean;
   type: PlatformType; moveDir: number; crumbleAt: number | null
 }
 
@@ -132,18 +175,19 @@ function platW(j: number) { return Math.max(PLAT_WMIN, PLAT_W0 - j * PLAT_WSHRIN
 function platLife(j: number) { return Math.max(PLAT_LIFEMIN, PLAT_LIFE0 - j * PLAT_LIFESHRINK) }
 function spawnInt(j: number) { return Math.max(SPAWN_INTMIN, SPAWN_INT0 - j * SPAWN_INTSHRINK) }
 
-function pickType(j: number): PlatformType {
+function pickType(j: number, elapsed = 0): PlatformType {
   if (j < 3) return 'normal'
   const r = Math.random()
-  if (j >= 25 && r < 0.06) return 'gold'
-  if (j >= 18 && r < 0.12) return 'ice'
-  if (j >= 10 && r < 0.22) return 'crumble'
-  if (j >= 5 && r < 0.35) return 'spring'
-  if (r < 0.48) return 'moving'
+  if (elapsed > PHASE_SINK_PLATS && r < 0.12) return 'sink'
+  if (j >= 25 && r < 0.08) return 'gold'
+  if (j >= 18 && r < 0.15) return 'ice'
+  if (j >= 10 && r < 0.25) return 'crumble'
+  if (j >= 5 && r < 0.38) return 'spring'
+  if (r < 0.55) return 'moving'
   return 'normal'
 }
 
-function mkPlat(id: number, now: number, j: number): Platform {
+function mkPlat(id: number, now: number, j: number, elapsed = 0): Platform {
   const w = snap(platW(j))
   const x = snap(rng(SPAWN_MX, VW - SPAWN_MX - w))
   const y = snap(rng(SPAWN_MINY, SPAWN_MAXY))
@@ -151,15 +195,16 @@ function mkPlat(id: number, now: number, j: number): Platform {
   const hasCoin = Math.random() < COIN_CHANCE
   const hasShield = !hasCoin && Math.random() < SHIELD_CHANCE
   const hasMagnet = !hasCoin && !hasShield && Math.random() < MAGNET_CHANCE
-  const type = pickType(j)
-  return { id, x, y, w, spawnAt: now, lifeMs: life, hasCoin, hasShield, hasMagnet, type, moveDir: Math.random() > 0.5 ? 1 : -1, crumbleAt: null }
+  const hasDoubleScore = !hasCoin && !hasShield && !hasMagnet && Math.random() < 0.05
+  const type = pickType(j, elapsed)
+  return { id, x, y, w, spawnAt: now, lifeMs: life, hasCoin, hasShield, hasMagnet, hasDoubleScore, type, moveDir: Math.random() > 0.5 ? 1 : -1, crumbleAt: null }
 }
 
 function mkStart(id: number, now: number): Platform {
   const w = snap(PLAT_W0 * 1.8)
   const x = snap(VW / 2 - w / 2)
   const y = snap(VH / 2 + 60)
-  return { id, x, y, w, spawnAt: now, lifeMs: 999999, hasCoin: false, hasShield: false, hasMagnet: false, type: 'normal', moveDir: 0, crumbleAt: null }
+  return { id, x, y, w, spawnAt: now, lifeMs: 6000, hasCoin: false, hasShield: false, hasMagnet: false, hasDoubleScore: false, type: 'normal', moveDir: 0, crumbleAt: null }
 }
 
 function expired(p: Platform, now: number) {
@@ -196,6 +241,7 @@ function platColor(p: Platform, lifeR: number, fever: boolean): string {
     case 'crumble': return '#a16207'
     case 'ice': return '#67e8f9'
     case 'gold': return '#fbbf24'
+    case 'sink': return '#78716c'
     default: return lifeR > 0.5 ? '#4ade80' : lifeR > 0.25 ? '#eab308' : '#ef4444'
   }
 }
@@ -300,9 +346,14 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [collected, setCollected] = useState<Set<number>>(new Set())
   const [eruptions, setEruptions] = useState<Eruption[]>([])
   const [bats, setBats] = useState<FireBat[]>([])
+  const [fireballs, setFireballs] = useState<Fireball[]>([])
   const [level, setLevel] = useState(1)
   const [trail, setTrail] = useState<{ x: number; y: number; age: number }[]>([])
   const [lavaRiseOffset, setLavaRiseOffset] = useState(0)
+  const [hasDoubleScore, setHasDoubleScore] = useState(false)
+  const [doubleScoreRemMs, setDoubleScoreRemMs] = useState(0)
+  const [lavaWaveExtra, setLavaWaveExtra] = useState(0)
+  const [isEarthquake, setIsEarthquake] = useState(false)
 
   // refs
   const R = useRef({
@@ -313,12 +364,20 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     coins: 0, collected: new Set<number>(),
     eruptions: [] as Eruption[], lastErupt: 0,
     bats: [] as FireBat[], nextBatId: 0, lastBatSpawn: 0,
+    fireballs: [] as Fireball[], nextFireballId: 0, lastFireballSpawn: 0,
     level: 1, trail: [] as { x: number; y: number; age: number }[],
-    lavaRise: 0,
+    lavaRise: 0, doubleScore: false, doubleScoreRem: 0,
+    lavaWaveAt: 0, lastLavaWave: 0,
+    earthquakeAt: 0, lastEarthquake: 0,
   })
 
   const rafRef = useRef<number | null>(null)
   const lastFrameRef = useRef<number | null>(null)
+
+  // Stable refs for game loop callbacks (prevent useEffect restarts)
+  const finishRef = useRef<() => void>(() => {})
+  const sfxRef = useRef<(k: string, vol: number, rate?: number) => void>(() => {})
+  const effectsRef = useRef(effects)
 
   // audio pool
   const audio = useRef<Map<string, HTMLAudioElement>>(new Map())
@@ -337,13 +396,20 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     R.current.finished = true
     onFinish({ score: R.current.score, durationMs: Math.max(Math.round(R.current.elapsed), Math.round(DEFAULT_FRAME_MS)) })
   }, [onFinish])
+  finishRef.current = finish
+  sfxRef.current = sfx
+  effectsRef.current = effects
 
   const handleTap = useCallback((plat: Platform) => {
     const r = R.current
-    if (r.finished || r.phase !== 'playing') return
+    if (r.finished) return
+
+    const isFalling = r.phase === 'falling'
+    if (r.phase !== 'playing' && !isFalling) return
+
     const p = r.player
-    if (p.jumping) return
-    if (p.standId === plat.id) return
+    if (p.jumping && !isFalling) return
+    if (p.standId === plat.id && !isFalling) return
 
     const now = r.elapsed
     const px = movingX(plat, now)
@@ -351,6 +417,16 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     const ty = plat.y - PLAYER_R
     const isSpring = plat.type === 'spring'
     const facing = tx > p.x
+
+    // Rescue from falling!
+    if (isFalling) {
+      r.phase = 'playing'; setPhase('playing')
+      r.combo = 0; setCombo(0)
+      sfx('shield', 0.7, 1.5)
+      effects.triggerFlash('#4ade80')
+      effects.spawnParticles(12, p.x, p.y)
+      effects.showScorePopup(0, tx, ty - 30)
+    }
 
     const np: PlayerState = {
       ...p, jumping: true, jx0: p.x, jy0: p.y, jx1: tx, jy1: ty, jElapsed: 0,
@@ -385,7 +461,8 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     const sbonus = isSpring ? SPRING_BONUS : 0
     const gbonus = plat.type === 'gold' ? 5 : 0
     const fm = r.fever ? FEVER_MULT : 1
-    const pts = (base + cbonus + sbonus + gbonus) * fm
+    const dm = r.doubleScore ? 2 : 1
+    const pts = (base + cbonus + sbonus + gbonus) * fm * dm
     r.score += pts; setScore(r.score)
 
     // level up
@@ -394,9 +471,10 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       r.level = newLv; setLevel(newLv)
       sfx('levelup', 0.6, 1 + newLv * 0.03)
       effects.triggerFlash('#a78bfa')
-      // lava rises every 3 levels
-      if (newLv % 3 === 0) {
-        r.lavaRise = Math.min(200, r.lavaRise + 12)
+      // lava rises every 2 levels
+      if (newLv % 2 === 0) {
+        const d = getDifficulty(newLv, r.elapsed)
+        r.lavaRise = Math.min(300, r.lavaRise + d.lavaRisePerTick)
         setLavaRiseOffset(r.lavaRise)
         sfx('danger', 0.5, 1)
       }
@@ -420,6 +498,12 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       r.player = { ...r.player, hasMagnet: true, magnetEndAt: now + MAGNET_DURATION }
       setPlayer(prev => ({ ...prev, hasMagnet: true, magnetEndAt: now + MAGNET_DURATION }))
       sfx('magnet', 0.6); effects.triggerFlash('#c084fc')
+    }
+    if (plat.hasDoubleScore && !r.collected.has(plat.id + 300000)) {
+      r.collected = new Set([...r.collected, plat.id + 300000]); setCollected(new Set(r.collected))
+      r.doubleScore = true; r.doubleScoreRem = 6000
+      setHasDoubleScore(true); setDoubleScoreRemMs(6000)
+      sfx('combo', 0.7, 1.4); effects.triggerFlash('#f59e0b')
     }
 
     // sfx + fx
@@ -459,7 +543,10 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
   const bestDisplay = useMemo(() => Math.max(bestScore, score), [bestScore, score])
 
-  // init audio
+  // BGM ref
+  const bgmRef = useRef<HTMLAudioElement | null>(null)
+
+  // init audio + BGM
   useEffect(() => {
     const sfxMap: [string, string][] = [
       ['jump', sfxJump], ['coin', sfxCoin], ['combo', sfxCombo], ['crumble', sfxCrumble],
@@ -470,15 +557,23 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     ]
     for (const [k, src] of sfxMap) loadA(k, src)
     const img = new Image(); img.src = characterSprite; void img.decode?.().catch(() => {})
-    return () => { audio.current.forEach(a => { a.pause(); a.currentTime = 0 }) }
+
+    // BGM
+    const bgm = new Audio(bgmSrc)
+    bgm.loop = true
+    bgm.volume = 0.3
+    bgmRef.current = bgm
+    const startBgm = () => { void bgm.play().catch(() => {}) }
+    startBgm()
+    window.addEventListener('pointerdown', startBgm, { once: true })
+
+    return () => {
+      audio.current.forEach(a => { a.pause(); a.currentTime = 0 })
+      bgm.pause(); bgm.currentTime = 0; bgmRef.current = null
+      window.removeEventListener('pointerdown', startBgm)
+    }
   }, [loadA])
 
-  // escape
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onExit])
 
   // game loop
   useEffect(() => {
@@ -502,15 +597,23 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS)
       lastFrameRef.current = now
       r.elapsed += dt; setElapsed(r.elapsed)
-      if (r.elapsed >= TIMEOUT_MS) { r.phase = 'finished'; setPhase('finished'); finish(); rafRef.current = null; return }
+      if (r.elapsed >= TIMEOUT_MS) { r.phase = 'finished'; setPhase('finished'); finishRef.current(); rafRef.current = null; return }
 
       const t = r.elapsed
-      const effectiveLavaY = LAVA_Y - r.lavaRise
+      // Lava wave temporarily raises lava
+      const waveExtra = r.lavaWaveAt > 0 ? Math.sin(((t - r.lavaWaveAt) / LAVA_WAVE_DUR) * Math.PI) * LAVA_WAVE_HEIGHT : 0
+      const effectiveLavaY = LAVA_Y - r.lavaRise - waveExtra
 
       // fever timer
       if (r.fever) {
         r.feverRem = Math.max(0, r.feverRem - dt); setFeverRemMs(r.feverRem)
         if (r.feverRem <= 0) { r.fever = false; setIsFever(false) }
+      }
+
+      // double score timer
+      if (r.doubleScore) {
+        r.doubleScoreRem = Math.max(0, r.doubleScoreRem - dt); setDoubleScoreRemMs(r.doubleScoreRem)
+        if (r.doubleScoreRem <= 0) { r.doubleScore = false; setHasDoubleScore(false) }
       }
 
       // magnet timer
@@ -521,28 +624,92 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       // spawn platforms
       const si = spawnInt(r.jumps)
       if (t - r.lastSpawn >= si && r.plats.length < MAX_PLATS) {
-        r.nextId++; r.plats = [...r.plats, mkPlat(r.nextId, t, r.jumps)]; r.lastSpawn = t
+        r.nextId++; r.plats = [...r.plats, mkPlat(r.nextId, t, r.jumps, t)]; r.lastSpawn = t
       }
 
       // expire platforms
       r.plats = r.plats.filter(p => !expired(p, t)); setPlatforms([...r.plats])
 
-      // eruptions
-      if (t > 12000 && t - r.lastErupt >= ERUPT_INT) {
+      // difficulty
+      const diff = getDifficulty(r.level, t)
+
+      // eruptions (phase-gated)
+      if (t > PHASE_ERUPTIONS && t - r.lastErupt >= diff.eruptInterval) {
         r.lastErupt = t
-        r.eruptions = [...r.eruptions, { x: snap(rng(16, VW - 16 - ERUPT_W)), startAt: t }]
-        sfx('eruption', 0.5); effects.triggerShake(5, 400)
+        const eruptCount = diff.multiErupt ? (Math.random() < 0.4 ? 2 : 1) : 1
+        for (let ei = 0; ei < eruptCount; ei++) {
+          r.eruptions = [...r.eruptions, { x: snap(rng(16, VW - 16 - ERUPT_W)), startAt: t + ei * 400 }]
+        }
+        sfxRef.current('eruption', 0.5); effectsRef.current.triggerShake(5, 400)
       }
       r.eruptions = r.eruptions.filter(e => t - e.startAt < ERUPT_DUR); setEruptions([...r.eruptions])
 
-      // fire bats
-      if (t > BAT_SPAWN_AFTER && t - r.lastBatSpawn > 6000 && r.bats.length < 3) {
+      // fire bats (phase-gated)
+      if (t > PHASE_BATS && t - r.lastBatSpawn > diff.batSpawnInterval && r.bats.length < diff.maxBats) {
         r.lastBatSpawn = t; r.nextBatId++
         const fromLeft = Math.random() > 0.5
-        r.bats = [...r.bats, { id: r.nextBatId, x: fromLeft ? -BAT_SIZE : VW + BAT_SIZE, y: snap(rng(80, effectiveLavaY - 80)), dx: fromLeft ? BAT_SPEED : -BAT_SPEED, spawnAt: t }]
+        const bs = diff.batSpeed
+        r.bats = [...r.bats, { id: r.nextBatId, x: fromLeft ? -BAT_SIZE : VW + BAT_SIZE, y: snap(rng(80, effectiveLavaY - 80)), dx: fromLeft ? bs : -bs, spawnAt: t }]
       }
       r.bats = r.bats.map(b => ({ ...b, x: b.x + b.dx * (dt / 1000) })).filter(b => b.x > -60 && b.x < VW + 60)
       setBats([...r.bats])
+
+      // fireballs from lava
+      const fbInterval = Math.max(1500, 4000 - r.level * 200)
+      if (t > PHASE_FIREBALLS && t - r.lastFireballSpawn > fbInterval) {
+        r.lastFireballSpawn = t; r.nextFireballId++
+        const fromLeft = Math.random() > 0.5
+        const spd = FIREBALL_SPEED + r.level * 5
+        r.fireballs = [...r.fireballs, { id: r.nextFireballId, x: fromLeft ? -FIREBALL_SIZE : VW + FIREBALL_SIZE, y: snap(effectiveLavaY - rng(30, 80)), dx: fromLeft ? spd : -spd, spawnAt: t }]
+      }
+      r.fireballs = r.fireballs.map(f => ({ ...f, x: f.x + f.dx * (dt / 1000) })).filter(f => f.x > -40 && f.x < VW + 40)
+      setFireballs([...r.fireballs])
+
+      // bat sine-wave movement after PHASE_HELL
+      if (t > PHASE_HELL) {
+        r.bats = r.bats.map(b => ({ ...b, y: b.y + Math.sin(t / 300 + b.id) * 0.8 }))
+      }
+
+      // lava wave (phase-gated): temporary lava surge
+      if (t > PHASE_LAVA_WAVE) {
+        const waveInterval = t > PHASE_HELL ? 8000 : 14000
+        if (t - r.lastLavaWave > waveInterval && r.lavaWaveAt === 0) {
+          r.lavaWaveAt = t; r.lastLavaWave = t
+          sfxRef.current('danger', 0.6, 1.2)
+        }
+        if (r.lavaWaveAt > 0) {
+          const wp = (t - r.lavaWaveAt) / LAVA_WAVE_DUR
+          if (wp >= 1) { r.lavaWaveAt = 0; setLavaWaveExtra(0) }
+          else { const wave = Math.sin(wp * Math.PI) * LAVA_WAVE_HEIGHT; setLavaWaveExtra(wave) }
+        }
+      }
+
+      // earthquake (phase-gated): shake + shift all platforms
+      if (t > PHASE_EARTHQUAKE) {
+        const quakeInterval = t > PHASE_HELL ? 10000 : 18000
+        if (t - r.lastEarthquake > quakeInterval && r.earthquakeAt === 0) {
+          r.earthquakeAt = t; r.lastEarthquake = t
+          effectsRef.current.triggerShake(10, EARTHQUAKE_DUR)
+          sfxRef.current('eruption', 0.4, 0.6)
+          setIsEarthquake(true)
+          // shift all platforms randomly
+          r.plats = r.plats.map(p => ({
+            ...p, x: snap(clamp(p.x + rng(-20, 20), 4, VW - p.w - 4)),
+            y: snap(clamp(p.y + rng(-15, 15), SPAWN_MINY, SPAWN_MAXY)),
+          }))
+        }
+        if (r.earthquakeAt > 0 && t - r.earthquakeAt > EARTHQUAKE_DUR) {
+          r.earthquakeAt = 0; setIsEarthquake(false)
+        }
+      }
+
+      // sink platforms: slowly fall toward lava
+      if (t > PHASE_SINK_PLATS) {
+        r.plats = r.plats.map(p => {
+          if (p.type !== 'sink') return p
+          return { ...p, y: p.y + SINK_SPEED * (dt / 1000) }
+        })
+      }
 
       // magnet: pull coins
       if (r.player.hasMagnet && !r.player.falling) {
@@ -555,8 +722,8 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
               r.collected = new Set([...r.collected, pl.id]); setCollected(new Set(r.collected))
               const cs = COIN_SCORE * (r.fever ? FEVER_MULT : 1)
               r.score += cs; setScore(r.score); r.coins++; setCoins(r.coins)
-              effects.showScorePopup(cs, r.player.x, r.player.y - 20)
-              sfx('coin', 0.4, 1.4)
+              effectsRef.current.showScorePopup(cs, r.player.x, r.player.y - 20)
+              sfxRef.current('coin', 0.4, 1.4)
             }
           }
         }
@@ -598,7 +765,7 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           if (t - r.fallStart >= FALL_DELAY) {
             if (cp.hasShield) {
               cp = { ...cp, hasShield: false, shieldUsedAt: t }
-              sfx('shield', 0.6, 0.8); effects.triggerFlash('#38bdf8'); effects.spawnParticles(10, cp.x, cp.y)
+              sfxRef.current('shield', 0.6, 0.8); effectsRef.current.triggerFlash('#38bdf8'); effectsRef.current.spawnParticles(10, cp.x, cp.y)
               const nearest = r.plats.reduce<Platform | null>((b, p) => {
                 const d = Math.abs(p.y - cp.y) + Math.abs(movingX(p, t) + p.w / 2 - cp.x)
                 if (!b) return p
@@ -621,10 +788,23 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         if (Math.hypot(bat.x - cp.x, bat.y - cp.y) < BAT_SIZE && !cp.falling && r.phase === 'playing') {
           if (cp.hasShield) {
             cp = { ...cp, hasShield: false, shieldUsedAt: t }
-            sfx('shield', 0.6, 0.8); effects.triggerFlash('#38bdf8')
+            sfxRef.current('shield', 0.6, 0.8); effectsRef.current.triggerFlash('#38bdf8')
           } else {
             cp = { ...cp, falling: true, fallV: 150, standId: null }
-            r.phase = 'falling'; setPhase('falling'); effects.triggerFlash('#ef4444')
+            r.phase = 'falling'; setPhase('falling'); effectsRef.current.triggerFlash('#ef4444')
+          }
+        }
+      }
+
+      // fireball collision
+      for (const fb of r.fireballs) {
+        if (Math.hypot(fb.x - cp.x, fb.y - cp.y) < FIREBALL_SIZE + 10 && !cp.falling && r.phase === 'playing') {
+          if (cp.hasShield) {
+            cp = { ...cp, hasShield: false, shieldUsedAt: t }
+            sfxRef.current('shield', 0.6, 0.8); effectsRef.current.triggerFlash('#38bdf8')
+          } else {
+            cp = { ...cp, falling: true, fallV: 100, standId: null }
+            r.phase = 'falling'; setPhase('falling'); effectsRef.current.triggerFlash('#ff4500')
           }
         }
       }
@@ -636,10 +816,10 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           if (!cp.falling && r.phase === 'playing') {
             if (cp.hasShield) {
               cp = { ...cp, hasShield: false, shieldUsedAt: t }
-              sfx('shield', 0.6, 0.8); effects.triggerFlash('#38bdf8')
+              sfxRef.current('shield', 0.6, 0.8); effectsRef.current.triggerFlash('#38bdf8')
             } else {
               cp = { ...cp, falling: true, fallV: 200, standId: null }
-              r.phase = 'falling'; setPhase('falling'); effects.triggerFlash('#ef4444')
+              r.phase = 'falling'; setPhase('falling'); effectsRef.current.triggerFlash('#ef4444')
             }
           }
         }
@@ -653,9 +833,9 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         cp = { ...cp, y: ny, fallV: nv }
         if (ny + PLAYER_R >= effectiveLavaY) {
           r.phase = 'finished'; setPhase('finished')
-          sfx('fall', 0.6, 0.9); sfx('gameOver', 0.5, 0.8)
-          effects.triggerFlash('#ff4500'); effects.triggerShake(8, 600)
-          finish(); rafRef.current = null; r.player = cp; setPlayer(cp); return
+          sfxRef.current('fall', 0.6, 0.9); sfxRef.current('gameOver', 0.5, 0.8)
+          effectsRef.current.triggerFlash('#ff4500'); effectsRef.current.triggerShake(8, 600)
+          finishRef.current(); rafRef.current = null; r.player = cp; setPlayer(cp); return
         }
       }
 
@@ -664,19 +844,20 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       setTrail([...r.trail])
 
       r.player = cp; setPlayer(cp)
-      effects.updateParticles()
+      effectsRef.current.updateParticles()
       rafRef.current = window.requestAnimationFrame(step)
     }
 
     rafRef.current = window.requestAnimationFrame(step)
     return () => {
       if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }
-      lastFrameRef.current = null; effects.cleanup()
+      lastFrameRef.current = null; effectsRef.current.cleanup()
     }
-  }, [finish, sfx, effects])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const t = elapsed
-  const effectiveLavaY = LAVA_Y - lavaRiseOffset
+  const effectiveLavaY = LAVA_Y - lavaRiseOffset - lavaWaveExtra
   const comboLbl = getComboLabel(combo)
   const comboClr = getComboColor(combo)
 
@@ -698,50 +879,31 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
         .lf-hud {
           display: flex; justify-content: space-between; align-items: center;
-          padding: 6px 10px;
+          padding: 14px 16px;
           background: linear-gradient(180deg, rgba(249,115,22,0.25) 0%, rgba(249,115,22,0.05) 100%);
-          border-bottom: 2px solid #f97316;
+          border-bottom: 3px solid #f97316;
           flex-shrink: 0;
           image-rendering: auto;
         }
-        .lf-avatar { width: 32px; height: 32px; border: 2px solid #f97316; image-rendering: pixelated; flex-shrink: 0; }
-        .lf-score-num { font-size: 22px; font-weight: 900; color: #f97316; margin: 0; line-height: 1; text-shadow: 2px 2px 0 #7c2d12; }
-        .lf-best-txt { font-size: 7px; color: #9ca3af; margin: 0; letter-spacing: 1px; }
-        .lf-time-txt { font-size: 11px; font-weight: 700; color: #e5e7eb; margin: 0; }
-        .lf-stats { display: flex; justify-content: center; gap: 12px; font-size: 8px; color: #d4d4d8; padding: 3px 0; flex-shrink: 0; letter-spacing: 0.5px; }
+        .lf-avatar { width: 64px; height: 64px; border: 3px solid #f97316; image-rendering: pixelated; flex-shrink: 0; }
+        .lf-score-num { font-size: clamp(48px, 14vw, 72px); font-weight: 900; color: #f97316; margin: 0; line-height: 1; text-shadow: 4px 4px 0 #7c2d12, 0 0 20px rgba(249,115,22,0.5); }
+        .lf-best-txt { font-size: 16px; color: #9ca3af; margin: 0; letter-spacing: 1px; }
+        .lf-time-txt { font-size: 28px; font-weight: 700; color: #e5e7eb; margin: 0; }
+        .lf-stats { display: flex; justify-content: center; align-items: center; gap: 14px; font-size: 18px; color: #d4d4d8; padding: 8px 0; flex-shrink: 0; letter-spacing: 0.5px; background: rgba(0,0,0,0.2); }
         .lf-svg { width: 100%; flex: 1; min-height: 0; display: block; image-rendering: pixelated; }
-        .lf-warn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 40px; font-weight: 900; color: #ef4444; text-shadow: 3px 3px 0 #7f1d1d; animation: lf-pulse 0.25s ease-in-out infinite alternate; z-index: 15; }
+        .lf-warn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 64px; font-weight: 900; color: #ef4444; text-shadow: 4px 4px 0 #7f1d1d; animation: lf-pulse 0.25s ease-in-out infinite alternate; z-index: 15; }
         @keyframes lf-pulse { from { opacity: 0.6; transform: translate(-50%, -50%) scale(1); } to { opacity: 1; transform: translate(-50%, -50%) scale(1.2); } }
-        .lf-acts { display: flex; gap: 6px; padding: 4px 0 6px; justify-content: center; flex-shrink: 0; }
-        .lf-btn { padding: 5px 16px; border: 2px solid #f97316; background: #1c1917; color: #f97316; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; letter-spacing: 1px; }
-        .lf-btn:active { background: #f97316; color: #1c1917; }
-        .lf-btn.ghost { border-color: #4b5563; color: #9ca3af; }
-        .lf-btn.ghost:active { background: #4b5563; color: #e5e7eb; }
-        .lf-fever { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); z-index: 25; font-size: 16px; font-weight: 900; color: #fbbf24; text-shadow: 2px 2px 0 #92400e; animation: lf-fblink 0.2s infinite alternate; letter-spacing: 3px; }
+        .lf-fever { text-align: center; padding: 6px 0; font-size: 26px; font-weight: 900; color: #fbbf24; text-shadow: 3px 3px 0 #92400e; animation: lf-fblink 0.2s infinite alternate; letter-spacing: 3px; flex-shrink: 0; background: rgba(251,191,36,0.1); }
         @keyframes lf-fblink { from { opacity: 0.7; } to { opacity: 1; } }
-        .lf-lvl { position: absolute; top: 50px; left: 50%; transform: translateX(-50%); z-index: 20; font-size: 10px; color: #a78bfa; text-shadow: 1px 1px 0 #4c1d95; letter-spacing: 2px; }
-        .lf-powerup { position: absolute; top: 48px; right: 10px; z-index: 20; font-size: 16px; display: flex; gap: 4px; }
-        .lf-djump-hint { position: absolute; bottom: 46px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #6b7280; z-index: 5; letter-spacing: 1px; }
+        .lf-powerup-inline { font-size: 22px; display: flex; align-items: center; gap: 4px; }
+        .lf-djump-hint { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-size: 16px; color: #9ca3af; z-index: 5; letter-spacing: 1px; text-shadow: 1px 1px 0 rgba(0,0,0,0.5); }
+        .lf-wave-warn { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); font-size: 28px; font-weight: 900; color: #ff4500; text-shadow: 3px 3px 0 #7f1d1d; animation: lf-pulse 0.2s ease-in-out infinite alternate; z-index: 15; margin: 0; }
+        .lf-quake-warn { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; font-weight: 900; color: #a16207; text-shadow: 3px 3px 0 #451a03; animation: lf-pulse 0.15s ease-in-out infinite alternate; z-index: 15; margin: 0; letter-spacing: 3px; }
       `}</style>
 
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
-
-      {comboLbl && (
-        <div className="ge-combo-label" style={{ position: 'absolute', top: 48, left: '50%', transform: 'translateX(-50%)', zIndex: 20, fontSize: 14, color: comboClr, textShadow: '2px 2px 0 rgba(0,0,0,0.5)', letterSpacing: 2 }}>
-          {comboLbl}
-        </div>
-      )}
-
-      {isFever && <div className="lf-fever">FEVER x{FEVER_MULT} ({(feverRemMs / 1000).toFixed(1)}s)</div>}
-
-      <div className="lf-lvl">LV.{level}</div>
-
-      <div className="lf-powerup">
-        {player.hasShield && <span>🛡</span>}
-        {player.hasMagnet && <span>🧲</span>}
-      </div>
 
       <div className="lf-hud">
         <img src={characterSprite} alt="" className="lf-avatar" />
@@ -753,10 +915,17 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       </div>
 
       <div className="lf-stats">
+        <span>LV.<strong style={{ color: '#a78bfa' }}>{level}</strong></span>
         <span>CMB <strong style={{ color: '#fbbf24' }}>{combo}</strong></span>
         <span>COIN <strong style={{ color: '#fbbf24' }}>{coins}</strong></span>
-        <span>JMP <strong style={{ color: '#f97316' }}>{R.current.jumps}</strong></span>
+        {comboLbl && <span style={{ color: comboClr, fontWeight: 900 }}>{comboLbl}</span>}
+        <span className="lf-powerup-inline">
+          {player.hasShield && '🛡'}
+          {player.hasMagnet && '🧲'}
+          {hasDoubleScore && <strong style={{ color: '#f59e0b' }}>x2 {(doubleScoreRemMs / 1000).toFixed(0)}s</strong>}
+        </span>
       </div>
+      {isFever && <div className="lf-fever">FEVER x{FEVER_MULT} ({(feverRemMs / 1000).toFixed(1)}s)</div>}
 
       <svg className="lf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid meet" aria-label="stage" shapeRendering="crispEdges">
         {/* BG: dark pixel grid */}
@@ -811,6 +980,7 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           const coinOk = pl.hasCoin && !collected.has(pl.id)
           const shieldOk = pl.hasShield && !collected.has(pl.id + 100000)
           const magnetOk = pl.hasMagnet && !collected.has(pl.id + 200000)
+          const dscoreOk = pl.hasDoubleScore && !collected.has(pl.id + 300000)
 
           return (
             <g key={pl.id} opacity={op}>
@@ -826,11 +996,13 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
               )}
               {pl.type === 'ice' && <PixelRect x={px + 2} y={pl.y + 2} w={pl.w - 4} h={PLAT_H - 4} fill="rgba(255,255,255,0.2)" />}
               {pl.type === 'gold' && <text x={px + pl.w / 2} y={pl.y + PLAT_H - 1} textAnchor="middle" fontSize="8" fill="#92400e" fontFamily="monospace" pointerEvents="none">★</text>}
+              {pl.type === 'sink' && <text x={px + pl.w / 2} y={pl.y + PLAT_H - 1} textAnchor="middle" fontSize="8" fill="#fff" fontFamily="monospace" pointerEvents="none">▼</text>}
 
               {/* items */}
               {coinOk && <PixelCoin cx={px + pl.w / 2} cy={pl.y - COIN_R - 3} t={t} id={pl.id} />}
               {shieldOk && <text x={px + pl.w / 2} y={pl.y - 8} textAnchor="middle" fontSize="12" pointerEvents="none" opacity={0.8 + Math.sin(t / 250 + pl.id) * 0.2}>🛡</text>}
               {magnetOk && <text x={px + pl.w / 2} y={pl.y - 8} textAnchor="middle" fontSize="12" pointerEvents="none" opacity={0.8 + Math.sin(t / 250 + pl.id) * 0.2}>🧲</text>}
+              {dscoreOk && <text x={px + pl.w / 2} y={pl.y - 8} textAnchor="middle" fontSize="12" pointerEvents="none" opacity={0.8 + Math.sin(t / 200 + pl.id) * 0.2}>✕2</text>}
 
               {/* tap target */}
               <rect x={px - 16} y={pl.y - 28} width={pl.w + 32} height={PLAT_H + 56} fill="transparent"
@@ -841,6 +1013,20 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         {/* fire bats */}
         {bats.map(bat => <PixelBat key={bat.id} bat={bat} t={t} />)}
+
+        {/* fireballs */}
+        {fireballs.map(fb => {
+          const fx = snap(fb.x)
+          const fy = snap(fb.y)
+          const flicker = Math.sin(t / 50 + fb.id) * 2
+          return (
+            <g key={`fb${fb.id}`}>
+              <rect x={fx - 6} y={fy - 4 + flicker} width={12} height={8} fill="#ff4500" shapeRendering="crispEdges" />
+              <rect x={fx - 4} y={fy - 6 + flicker} width={8} height={12} fill="#ff6a00" shapeRendering="crispEdges" />
+              <rect x={fx - 2} y={fy - 2 + flicker} width={4} height={4} fill="#fbbf24" shapeRendering="crispEdges" />
+            </g>
+          )
+        })}
 
         {/* jump trail */}
         {trail.map((tr, i) => {
@@ -922,14 +1108,13 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
       {phase === 'falling' && <p className="lf-warn">DANGER!</p>}
 
+      {lavaWaveExtra > 10 && <p className="lf-wave-warn">LAVA WAVE!</p>}
+      {isEarthquake && <p className="lf-quake-warn">EARTHQUAKE!</p>}
+
       {player.jumping && player.doubleJumpReady && (
         <div className="lf-djump-hint">TAP FOR DOUBLE JUMP!</div>
       )}
 
-      <div className="lf-acts">
-        <button className="lf-btn" type="button" onClick={() => { sfx('combo', 0.4); finish() }}>END</button>
-        <button className="lf-btn ghost" type="button" onClick={onExit}>EXIT</button>
-      </div>
     </section>
   )
 }

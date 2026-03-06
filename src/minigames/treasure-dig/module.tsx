@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
@@ -18,7 +18,20 @@ import chainSfx from '../../../assets/sounds/treasure-dig-chain.mp3'
 import luckySfx from '../../../assets/sounds/treasure-dig-lucky.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
-// ─── Pixel Art Characters (inline SVG data) ────────────────
+// ─── Pixel Art Image Imports ────────────────────────────────
+import gemImg from '../../../assets/images/treasure-dig/gem.png'
+import crownImg from '../../../assets/images/treasure-dig/crown.png'
+import bombImg from '../../../assets/images/treasure-dig/bomb.png'
+import timeGemImg from '../../../assets/images/treasure-dig/time-gem.png'
+import dirtBlockImg from '../../../assets/images/treasure-dig/dirt-block.png'
+import shovelImg from '../../../assets/images/treasure-dig/shovel.png'
+import shieldItemImg from '../../../assets/images/treasure-dig/shield.png'
+import mapItemImg from '../../../assets/images/treasure-dig/map.png'
+import chainImg from '../../../assets/images/treasure-dig/chain.png'
+import luckyImg from '../../../assets/images/treasure-dig/lucky.png'
+import lobbyIconImg from '../../../assets/images/treasure-dig/lobby-icon.png'
+
+// ─── Pixel Art Emoji fallbacks (for particles/bonus text) ───
 const PIXEL_PICKAXE = '\u{26CF}\uFE0F'
 const PIXEL_GEM = '\u{1F48E}'
 const PIXEL_CROWN = '\u{1F451}'
@@ -39,6 +52,7 @@ const BASE_TREASURE_SCORE = 35
 const BOMB_PENALTY = 20
 const LOW_TIME_THRESHOLD_MS = 8000
 const DIG_FEEDBACK_DURATION_MS = 500
+const MAX_BOMB_HITS = 3
 
 // ─── Gimmick constants ─────────────────────────────────────
 const GOLDEN_TREASURE_CHANCE = 0.12
@@ -91,13 +105,13 @@ function rollItem(depth: number): ItemType {
   return null
 }
 
-const ITEM_INFO: Record<string, { icon: string; label: string; color: string }> = {
-  shovel: { icon: '\u{26CF}\uFE0F', label: 'SHOVEL', color: '#a16207' },
-  xray: { icon: '\u{1F50D}', label: 'X-RAY', color: '#2563eb' },
-  shield: { icon: PIXEL_SHIELD, label: 'SHIELD', color: '#059669' },
-  map: { icon: PIXEL_MAP, label: 'MAP', color: '#7c3aed' },
-  chain: { icon: PIXEL_CHAIN, label: 'CHAIN', color: '#dc2626' },
-  lucky: { icon: PIXEL_CLOVER, label: 'LUCKY', color: '#16a34a' },
+const ITEM_INFO: Record<string, { icon: string; img: string; label: string; color: string }> = {
+  shovel: { icon: PIXEL_PICKAXE, img: shovelImg, label: 'SHOVEL', color: '#a16207' },
+  xray: { icon: '\u{1F50D}', img: gemImg, label: 'X-RAY', color: '#2563eb' },
+  shield: { icon: PIXEL_SHIELD, img: shieldItemImg, label: 'SHIELD', color: '#059669' },
+  map: { icon: PIXEL_MAP, img: mapItemImg, label: 'MAP', color: '#7c3aed' },
+  chain: { icon: PIXEL_CHAIN, img: chainImg, label: 'CHAIN', color: '#dc2626' },
+  lucky: { icon: PIXEL_CLOVER, img: luckyImg, label: 'LUCKY', color: '#16a34a' },
 }
 
 interface Cell {
@@ -209,6 +223,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [luckyMs, setLuckyMs] = useState(0)
   const [hasChain, setHasChain] = useState(false)
   const [shieldFlash, setShieldFlash] = useState(false)
+  const [bombsHit, setBombsHit] = useState(0)
 
   const scoreRef = useRef(0)
   const treasuresFoundRef = useRef(0)
@@ -542,12 +557,18 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           setScore(scoreRef.current)
           consecutiveTreasuresRef.current = 0
           bombsHitRef.current += 1
+          setBombsHit(bombsHitRef.current)
           setLastDigKind('bomb')
           playAudio('bomb', 0.7)
           effects.triggerShake(10)
           effects.triggerFlash('rgba(239,68,68,0.55)')
           effects.spawnParticles(8, px, py, [PIXEL_BOMB, '\u{1F4A5}', '\u{1F525}', '\u{1F4AB}'])
           effects.showScorePopup(-penalty, px, py - 25)
+          if (bombsHitRef.current >= MAX_BOMB_HITS) {
+            showBonusText(`${PIXEL_BOMB} BOOM! GAME OVER!`)
+            setTimeout(() => finishGame(), 600)
+            return
+          }
         }
       } else {
         setLastDigKind('empty')
@@ -591,24 +612,37 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   }, [])
 
   useEffect(() => {
+    // Track displayed values to avoid unnecessary setState calls
+    let prevDisplayedRemaining = Math.floor(remainingMsRef.current / 100)
+    let prevDisplayedFever = Math.floor(feverMsRef.current / 100)
+    let prevDisplayedLucky = Math.floor(luckyMsRef.current / 1000)
+
     const step = (now: number) => {
       if (finishedRef.current) { animationFrameRef.current = null; return }
       if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
 
+      // Update timer ref every frame, but only setState when display changes
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
-      setRemainingMs(remainingMsRef.current)
+      const curDisplayedRemaining = Math.floor(remainingMsRef.current / 100)
+      if (curDisplayedRemaining !== prevDisplayedRemaining) {
+        prevDisplayedRemaining = curDisplayedRemaining
+        setRemainingMs(remainingMsRef.current)
+      }
 
       if (isFeverRef.current) {
         feverMsRef.current = Math.max(0, feverMsRef.current - deltaMs)
-        setFeverMs(feverMsRef.current)
+        const curDisplayedFever = Math.floor(feverMsRef.current / 100)
+        if (curDisplayedFever !== prevDisplayedFever) {
+          prevDisplayedFever = curDisplayedFever
+          setFeverMs(feverMsRef.current)
+        }
         if (feverMsRef.current <= 0) { isFeverRef.current = false; setIsFever(false) }
       }
 
       if (hintCooldownRef.current > 0) {
         hintCooldownRef.current = Math.max(0, hintCooldownRef.current - deltaMs)
-        setHintCooldownMs(hintCooldownRef.current)
       }
 
       if (isXrayRef.current) {
@@ -618,7 +652,11 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       if (isLuckyRef.current) {
         luckyMsRef.current = Math.max(0, luckyMsRef.current - deltaMs)
-        setLuckyMs(luckyMsRef.current)
+        const curDisplayedLucky = Math.floor(luckyMsRef.current / 1000)
+        if (curDisplayedLucky !== prevDisplayedLucky) {
+          prevDisplayedLucky = curDisplayedLucky
+          setLuckyMs(luckyMsRef.current)
+        }
         if (luckyMsRef.current <= 0) { isLuckyRef.current = false; setIsLuckyActive(false) }
       }
 
@@ -663,24 +701,24 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     return cls.join(' ')
   }
 
-  const getCellIcon = (cell: Cell): string => {
-    if (cell.state === 'hidden') return ''
-    if (cell.content === 'golden') return PIXEL_CROWN
-    if (cell.content === 'treasure') return PIXEL_GEM
-    if (cell.content === 'bomb') return PIXEL_BOMB
-    if (cell.content === 'time-gem') return PIXEL_CLOCK
+  const getCellIcon = (cell: Cell): ReactNode => {
+    if (cell.state === 'hidden') return null
+    if (cell.content === 'golden') return <img src={crownImg} alt="" className="td-cell-img" />
+    if (cell.content === 'treasure') return <img src={gemImg} alt="" className="td-cell-img" />
+    if (cell.content === 'bomb') return <img src={bombImg} alt="" className="td-cell-img" />
+    if (cell.content === 'time-gem') return <img src={timeGemImg} alt="" className="td-cell-img" />
     if (cell.adjacentTreasures > 0) return String(cell.adjacentTreasures)
-    return ''
+    return null
   }
 
   const adjColor = (n: number) => n === 1 ? '#60a5fa' : n === 2 ? '#4ade80' : n === 3 ? '#f87171' : '#c084fc'
 
   // Active buffs indicator
-  const activeBuffs: { icon: string; label: string; color: string }[] = []
-  if (hasShield) activeBuffs.push({ icon: PIXEL_SHIELD, label: 'SHIELD', color: '#059669' })
-  if (hasChain) activeBuffs.push({ icon: PIXEL_CHAIN, label: 'CHAIN', color: '#dc2626' })
-  if (isLuckyActive) activeBuffs.push({ icon: PIXEL_CLOVER, label: `LUCKY ${(luckyMs / 1000).toFixed(0)}s`, color: '#16a34a' })
-  if (isXrayActive) activeBuffs.push({ icon: '\u{1F50D}', label: 'X-RAY', color: '#2563eb' })
+  const activeBuffs: { img: string; label: string; color: string }[] = []
+  if (hasShield) activeBuffs.push({ img: shieldItemImg, label: 'SHIELD', color: '#059669' })
+  if (hasChain) activeBuffs.push({ img: chainImg, label: 'CHAIN', color: '#dc2626' })
+  if (isLuckyActive) activeBuffs.push({ img: luckyImg, label: `LUCKY ${(luckyMs / 1000).toFixed(0)}s`, color: '#16a34a' })
+  if (isXrayActive) activeBuffs.push({ img: gemImg, label: 'X-RAY', color: '#2563eb' })
 
   return (
     <section
@@ -707,9 +745,17 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         <div className="td-hdr-top">
           <span className="td-depth-badge">D{depth}</span>
           <p className="td-pts">{score.toLocaleString()}</p>
-          <span className="td-gem-count">{PIXEL_GEM}{treasuresFound}</span>
+          <span className="td-gem-count"><img src={gemImg} alt="" className="td-hdr-gem-img" />{treasuresFound}</span>
         </div>
-        <p className="td-best">BEST {displayedBestScore.toLocaleString()}</p>
+        <div className="td-hdr-sub">
+          <p className="td-best">BEST {displayedBestScore.toLocaleString()}</p>
+          <span className="td-lives">
+            <img src={bombImg} alt="" className="td-life-bomb-icon" />
+            <span className={`td-life-count ${MAX_BOMB_HITS - bombsHit <= 1 ? 'td-life-danger' : ''}`}>
+              x{MAX_BOMB_HITS - bombsHit}
+            </span>
+          </span>
+        </div>
       </div>
 
       {/* Active buffs */}
@@ -717,7 +763,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         <div className="td-buffs">
           {activeBuffs.map((b, i) => (
             <span key={i} className="td-buff" style={{ borderColor: b.color, color: b.color }}>
-              {b.icon} {b.label}
+              <img src={b.img} alt="" className="td-buff-img" /> {b.label}
             </span>
           ))}
         </div>
@@ -743,7 +789,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         <div className="td-item-bar">
           <button className="td-item-btn" type="button" onClick={() => activateItem(pendingItem)}
             style={{ borderColor: ITEM_INFO[pendingItem]?.color, background: `${ITEM_INFO[pendingItem]?.color}22` }}>
-            <span className="td-item-icon">{ITEM_INFO[pendingItem]?.icon}</span>
+            <img src={ITEM_INFO[pendingItem]?.img} alt="" className="td-item-icon-img" />
             <span className="td-item-name">{ITEM_INFO[pendingItem]?.label}</span>
             <span className="td-item-tap">TAP!</span>
           </button>
@@ -773,10 +819,10 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       {/* Bottom */}
       <div className="td-bot">
         <div className="td-legend">
-          <span>{PIXEL_GEM}+{BASE_TREASURE_SCORE}</span>
-          <span>{PIXEL_CROWN}+{GOLDEN_TREASURE_SCORE}</span>
-          <span>{PIXEL_BOMB}-{BOMB_PENALTY}</span>
-          <span>{PIXEL_CLOCK}+{(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s</span>
+          <span><img src={gemImg} alt="" className="td-legend-img" />+{BASE_TREASURE_SCORE}</span>
+          <span><img src={crownImg} alt="" className="td-legend-img" />+{GOLDEN_TREASURE_SCORE}</span>
+          <span><img src={bombImg} alt="" className="td-legend-img" />-{BOMB_PENALTY}</span>
+          <span><img src={timeGemImg} alt="" className="td-legend-img" />+{(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s</span>
         </div>
       </div>
 
@@ -799,7 +845,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           background: #2d1b0e;
           background-image:
             linear-gradient(180deg, #1a0f06 0%, #3d2211 20%, #5c3a1e 50%, #4a2e14 80%, #2d1b0e 100%);
-          font-family: 'Courier New', 'Menlo', monospace;
+          font-family: 'DungGeunMo', 'Press Start 2P', monospace;
           image-rendering: pixelated;
         }
 
@@ -848,7 +894,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         /* ── Timer bar ── */
         .td-tbar-wrap {
           width: 100%;
-          height: 28px;
+          height: 32px;
           background: #1a0f06;
           border-bottom: 2px solid #5c3a1e;
           position: relative;
@@ -869,14 +915,14 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         }
         .td-tbar-label {
           position: absolute;
-          right: 6px;
+          right: 8px;
           top: 50%;
           transform: translateY(-50%);
-          font-size: 14px;
+          font-size: 18px;
           font-weight: 900;
           color: #fef3c7;
           text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
-          letter-spacing: 1px;
+          letter-spacing: 0px;
         }
 
         /* ── Header ── */
@@ -898,37 +944,47 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           width: 100%;
         }
         .td-pts {
-          font-size: clamp(36px, 11vw, 56px);
+          font-size: clamp(48px, 14vw, 72px);
           font-weight: 900;
           color: #fbbf24;
           margin: 0;
           text-shadow: 3px 3px 0 #78350f, 0 0 16px rgba(251,191,36,0.5);
           line-height: 1;
-          letter-spacing: 3px;
+          letter-spacing: 1px;
           text-align: center;
         }
+        .td-hdr-sub {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          width: 100%;
+        }
         .td-best {
-          font-size: 11px;
+          font-size: 16px;
           font-weight: 700;
           color: #92400e;
           margin: 2px 0 0;
-          letter-spacing: 1px;
+          letter-spacing: 0px;
           text-align: center;
         }
         .td-depth-badge {
           background: #7c3aed;
           color: white;
-          font-size: 16px;
+          font-size: 22px;
           font-weight: 900;
-          padding: 4px 10px;
+          padding: 6px 14px;
           border: 2px solid #a855f7;
-          letter-spacing: 1px;
+          letter-spacing: 0px;
         }
         .td-gem-count {
-          font-size: 18px;
+          font-size: 24px;
           font-weight: 900;
           color: #fbbf24;
           text-shadow: 1px 1px 0 #000;
+          display: flex;
+          align-items: center;
+          gap: 2px;
         }
 
         /* ── Active buffs ── */
@@ -941,13 +997,16 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           flex-shrink: 0;
         }
         .td-buff {
-          font-size: 13px;
+          font-size: 16px;
           font-weight: 900;
-          padding: 3px 8px;
+          padding: 4px 10px;
           border: 2px solid;
           background: rgba(0,0,0,0.3);
           animation: td-buff-pulse 0.5s steps(2) infinite;
-          letter-spacing: 1px;
+          letter-spacing: 0px;
+          display: flex;
+          align-items: center;
+          gap: 4px;
         }
         @keyframes td-buff-pulse {
           0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; }
@@ -963,23 +1022,23 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           flex-shrink: 0;
         }
         .td-combo {
-          font-size: 16px;
+          font-size: 24px;
           font-weight: 900;
           color: #fbbf24;
           text-shadow: 1px 1px 0 #000;
           animation: td-combo-pop 0.3s steps(3);
-          letter-spacing: 1px;
+          letter-spacing: 0px;
         }
         @keyframes td-combo-pop {
           0% { transform: scale(1.6); } 100% { transform: scale(1); }
         }
         .td-fever-label {
-          font-size: 16px;
+          font-size: 24px;
           font-weight: 900;
           color: #ef4444;
           text-shadow: 0 0 8px rgba(239,68,68,0.8), 1px 1px 0 #000;
           animation: td-fv-txt 0.2s steps(2) infinite;
-          letter-spacing: 2px;
+          letter-spacing: 0px;
         }
         @keyframes td-fv-txt {
           0% { color: #ef4444; } 50% { color: #fbbf24; } 100% { color: #ef4444; }
@@ -987,15 +1046,15 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         /* ── Bonus text ── */
         .td-bonus {
-          margin: 2px 0;
-          font-size: clamp(14px, 4vw, 18px);
+          margin: 4px 0;
+          font-size: clamp(20px, 6vw, 28px);
           font-weight: 900;
           color: #fbbf24;
           text-shadow: 2px 2px 0 #78350f, 0 0 16px rgba(251,191,36,0.8);
           text-align: center;
           animation: td-bonus-in 0.5s steps(4);
           flex-shrink: 0;
-          letter-spacing: 2px;
+          letter-spacing: 0px;
         }
         @keyframes td-bonus-in {
           0% { transform: scale(0.2) translateY(15px); opacity: 0; }
@@ -1028,16 +1087,16 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         }
         .td-item-btn:active { transform: scale(0.92) !important; }
         .td-item-icon { font-size: 22px; }
-        .td-item-name { font-size: 16px; font-weight: 900; letter-spacing: 2px; }
-        .td-item-tap { font-size: 12px; font-weight: 700; opacity: 0.7; }
+        .td-item-name { font-size: 20px; font-weight: 900; letter-spacing: 0px; }
+        .td-item-tap { font-size: 16px; font-weight: 700; opacity: 0.7; }
 
         /* ── Grid ── */
         .td-grid {
           display: grid;
           grid-template-columns: repeat(${GRID_SIZE}, 1fr);
-          gap: clamp(3px, 1vw, 5px);
+          gap: clamp(4px, 1.2vw, 6px);
           width: 100%;
-          padding: 6px 8px;
+          padding: 8px 10px;
           flex: 1;
           align-content: center;
           min-height: 0;
@@ -1058,7 +1117,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           justify-content: center;
           border: none;
           cursor: pointer;
-          font-size: clamp(22px, 6vw, 32px);
+          font-size: clamp(30px, 8vw, 42px);
           font-weight: 900;
           font-family: inherit;
           aspect-ratio: 1;
@@ -1071,26 +1130,11 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         /* Hidden cell - dirt block */
         .td-hidden {
-          background: #8b5e34;
+          background: url('${dirtBlockImg}') center/cover no-repeat;
           border: 3px solid;
           border-color: #b8864e #5c3a1e #5c3a1e #b8864e;
           box-shadow: inset 0 0 0 1px #6b4423, 2px 2px 0 rgba(0,0,0,0.3);
-        }
-        .td-hidden::before {
-          content: '';
-          position: absolute;
-          top: 3px; left: 3px;
-          width: 40%; height: 40%;
-          background: rgba(255,255,255,0.1);
-          pointer-events: none;
-        }
-        .td-hidden::after {
-          content: '';
-          position: absolute;
-          bottom: 4px; right: 4px;
-          width: 5px; height: 5px;
-          background: #6b4423;
-          pointer-events: none;
+          image-rendering: pixelated;
         }
         .td-hidden:hover:not(:disabled) {
           background: #9a6b3d;
@@ -1223,6 +1267,67 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           line-height: 1;
           text-shadow: 1px 1px 0 rgba(0,0,0,0.4);
         }
+        .td-cell-img {
+          width: 70%;
+          height: 70%;
+          object-fit: contain;
+          image-rendering: pixelated;
+          pointer-events: none;
+          filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.4));
+        }
+        .td-item-icon-img {
+          width: 28px;
+          height: 28px;
+          object-fit: contain;
+          image-rendering: pixelated;
+        }
+        .td-buff-img {
+          width: 16px;
+          height: 16px;
+          object-fit: contain;
+          image-rendering: pixelated;
+          vertical-align: middle;
+        }
+        .td-legend-img {
+          width: 16px;
+          height: 16px;
+          object-fit: contain;
+          image-rendering: pixelated;
+          vertical-align: middle;
+          margin-right: 2px;
+        }
+        .td-lives {
+          display: flex;
+          gap: 4px;
+          align-items: center;
+        }
+        .td-life-bomb-icon {
+          width: 28px;
+          height: 28px;
+          object-fit: contain;
+          image-rendering: pixelated;
+        }
+        .td-life-count {
+          font-size: 22px;
+          font-weight: 900;
+          color: #f87171;
+          text-shadow: 1px 1px 0 #000;
+        }
+        .td-life-danger {
+          color: #ef4444;
+          animation: td-life-blink 0.4s steps(2) infinite;
+        }
+        @keyframes td-life-blink {
+          0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; }
+        }
+        .td-hdr-gem-img {
+          width: 20px;
+          height: 20px;
+          object-fit: contain;
+          image-rendering: pixelated;
+          vertical-align: middle;
+          margin-right: 2px;
+        }
 
         /* ── Bottom bar ── */
         .td-bot {
@@ -1238,13 +1343,17 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         }
         .td-legend {
           display: flex;
-          gap: 10px;
-          font-size: 14px;
+          gap: 12px;
+          font-size: 17px;
           font-weight: 700;
           color: #a8a29e;
           flex-wrap: wrap;
           justify-content: center;
-          letter-spacing: 0.5px;
+          letter-spacing: 0px;
+        }
+        .td-legend span {
+          display: flex;
+          align-items: center;
         }
         .td-exit:active { transform: scale(0.9); background: #57534e; }
 

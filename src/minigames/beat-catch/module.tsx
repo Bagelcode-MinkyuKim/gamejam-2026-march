@@ -15,61 +15,23 @@ import noteNormalImg from '../../../assets/images/beat-catch/note-normal.png'
 import noteGoldenImg from '../../../assets/images/beat-catch/note-golden.png'
 import noteDoubleImg from '../../../assets/images/beat-catch/note-double.png'
 import noteHoldImg from '../../../assets/images/beat-catch/note-hold.png'
+import {
+  BEAT_CATCH_FEVER_COMBO as FEVER_COMBO,
+  BEAT_CATCH_FEVER_DURATION_MS as FEVER_DURATION_MS,
+  BEAT_CATCH_FEVER_MULTIPLIER as FEVER_MULTIPLIER,
+  BEAT_CATCH_GOOD_SCORE as GOOD_SCORE,
+  BEAT_CATCH_GOLDEN_MULTIPLIER as GOLDEN_MULTIPLIER,
+  BEAT_CATCH_HIT_LINE_Y as HIT_LINE_Y,
+  BEAT_CATCH_MAX_LIVES as MAX_LIVES,
+  BEAT_CATCH_MISS_ZONE as MISS_ZONE,
+  BEAT_CATCH_PERFECT_SCORE as PERFECT_SCORE,
+  getBeatCatchDifficulty,
+  getBeatCatchLevel,
+  loseBeatCatchLife,
+} from './logic'
 
 // ─── Game Constants ─────────────────────────────────────────────────
-const ROUND_DURATION_MS = 45000
 const LANE_COUNT = 3
-const HIT_LINE_Y = 0.82
-const PERFECT_ZONE = 0.03
-const GOOD_ZONE = 0.07
-const MISS_ZONE = 0.12
-
-// ─── Progressive Difficulty Constants ───────────────────────────────
-// Fall speed: starts slow, ramps up aggressively
-const INITIAL_FALL_SPEED = 0.28
-const MAX_FALL_SPEED = 0.95
-const SPEED_INCREASE_PER_SEC = 0.018
-
-// Spawn interval: starts generous, shrinks fast
-const INITIAL_SPAWN_INTERVAL_MS = 900
-const MIN_SPAWN_INTERVAL_MS = 250
-const SPAWN_SPEEDUP_PER_SEC = 18
-
-// Max active notes: more notes on screen over time
-const INITIAL_MAX_ACTIVE = 3
-const MAX_ACTIVE_CEILING = 10
-const MAX_ACTIVE_INCREASE_PER_SEC = 0.15
-
-// Judgement zones shrink over time
-const PERFECT_ZONE_SHRINK_PER_SEC = 0.0005
-const MIN_PERFECT_ZONE = 0.015
-const GOOD_ZONE_SHRINK_PER_SEC = 0.0008
-const MIN_GOOD_ZONE = 0.035
-
-// Special note chances increase over time
-const BASE_GOLDEN_CHANCE = 0.06
-const MAX_GOLDEN_CHANCE = 0.18
-const BASE_DOUBLE_CHANCE = 0.04
-const MAX_DOUBLE_CHANCE = 0.15
-const BASE_HOLD_CHANCE = 0.03
-const MAX_HOLD_CHANCE = 0.12
-
-// Multi-spawn: chance of spawning 2-3 notes at once
-const MULTI_SPAWN_START_SEC = 10
-const MULTI_SPAWN_CHANCE_PER_SEC = 0.015
-const MAX_MULTI_SPAWN_CHANCE = 0.4
-
-// Scoring
-const PERFECT_SCORE = 10
-const GOOD_SCORE = 4
-const LOW_TIME_MS = 5000
-const FEVER_COMBO = 10
-const FEVER_DURATION_MS = 5000
-const FEVER_MULTIPLIER = 3
-const GOLDEN_MULTIPLIER = 3
-
-// Level up
-const CATCHES_PER_LEVEL = 8
 
 type NoteType = 'normal' | 'golden' | 'double' | 'hold'
 type JudgeKind = 'perfect' | 'good' | 'miss'
@@ -112,28 +74,20 @@ let noteIdCounter = 0
 
 function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
-  const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [combo, setCombo] = useState(0)
-  const [, setMaxCombo] = useState(0)
   const [notes, setNotes] = useState<Note[]>([])
   const [hitEffects, setHitEffects] = useState<HitEffect[]>([])
   const [laneFlashes, setLaneFlashes] = useState<LaneFlash[]>([])
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
   const [level, setLevel] = useState(1)
-  const [, setCatchCount] = useState(0)
   const [lastJudge, setLastJudge] = useState<JudgeKind | null>(null)
-  const [, setPerfectCount] = useState(0)
-  const [, setGoodCount] = useState(0)
-  const [, setMissCount] = useState(0)
-  const [dangerLevel, setDangerLevel] = useState(0)
+  const [lives, setLives] = useState(MAX_LIVES)
 
   const effects = useGameEffects()
 
   const scoreRef = useRef(0)
-  const remainingMsRef = useRef(ROUND_DURATION_MS)
   const comboRef = useRef(0)
-  const maxComboRef = useRef(0)
   const notesRef = useRef<Note[]>([])
   const hitEffectsRef = useRef<HitEffect[]>([])
   const laneFlashesRef = useRef<LaneFlash[]>([])
@@ -146,9 +100,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const catchCountRef = useRef(0)
   const levelRef = useRef(1)
   const elapsedRef = useRef(0)
-  const perfectCountRef = useRef(0)
-  const goodCountRef = useRef(0)
-  const missCountRef = useRef(0)
+  const livesRef = useRef(MAX_LIVES)
   const holdingLanesRef = useRef<Set<number>>(new Set())
   const judgeTimerRef = useRef<number | null>(null)
   const gameAreaRef = useRef<HTMLDivElement | null>(null)
@@ -164,53 +116,38 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     void audio.play().catch(() => {})
   }, [])
 
-  // ─── Progressive difficulty getters ───────────────────────────────
-  const getElapsedSec = useCallback(() => elapsedRef.current / 1000, [])
+  const clearFever = useCallback(() => {
+    if (!feverRef.current) return
 
-  const getCurrentFallSpeed = useCallback(() => {
-    const t = getElapsedSec()
-    // Quadratic ramp: accelerates faster as time goes on
-    return Math.min(MAX_FALL_SPEED, INITIAL_FALL_SPEED + t * SPEED_INCREASE_PER_SEC + (t * t * 0.0002))
-  }, [getElapsedSec])
+    feverRef.current = false
+    feverMsRef.current = 0
+    setIsFever(false)
+    setFeverRemainingMs(0)
+  }, [])
 
-  const getCurrentSpawnInterval = useCallback(() => {
-    const t = getElapsedSec()
-    return Math.max(MIN_SPAWN_INTERVAL_MS, INITIAL_SPAWN_INTERVAL_MS - t * SPAWN_SPEEDUP_PER_SEC)
-  }, [getElapsedSec])
+  const breakCombo = useCallback(() => {
+    comboRef.current = 0
+    setCombo(0)
+    clearFever()
+  }, [clearFever])
 
-  const getCurrentMaxActive = useCallback(() => {
-    const t = getElapsedSec()
-    return Math.min(MAX_ACTIVE_CEILING, Math.floor(INITIAL_MAX_ACTIVE + t * MAX_ACTIVE_INCREASE_PER_SEC))
-  }, [getElapsedSec])
+  const finishGame = useCallback(() => {
+    if (finishedRef.current) return
 
-  const getCurrentPerfectZone = useCallback(() => {
-    const t = getElapsedSec()
-    return Math.max(MIN_PERFECT_ZONE, PERFECT_ZONE - t * PERFECT_ZONE_SHRINK_PER_SEC)
-  }, [getElapsedSec])
-
-  const getCurrentGoodZone = useCallback(() => {
-    const t = getElapsedSec()
-    return Math.max(MIN_GOOD_ZONE, GOOD_ZONE - t * GOOD_ZONE_SHRINK_PER_SEC)
-  }, [getElapsedSec])
-
-  const getSpecialChances = useCallback(() => {
-    const t = getElapsedSec()
-    const progress = Math.min(1, t / 40)
-    return {
-      golden: BASE_GOLDEN_CHANCE + (MAX_GOLDEN_CHANCE - BASE_GOLDEN_CHANCE) * progress,
-      double: t > 5 ? BASE_DOUBLE_CHANCE + (MAX_DOUBLE_CHANCE - BASE_DOUBLE_CHANCE) * progress : 0,
-      hold: t > 10 ? BASE_HOLD_CHANCE + (MAX_HOLD_CHANCE - BASE_HOLD_CHANCE) * progress : 0,
-      multiSpawn: t > MULTI_SPAWN_START_SEC
-        ? Math.min(MAX_MULTI_SPAWN_CHANCE, (t - MULTI_SPAWN_START_SEC) * MULTI_SPAWN_CHANCE_PER_SEC)
-        : 0,
-    }
-  }, [getElapsedSec])
+    finishedRef.current = true
+    playAudio('gameover', 0.62)
+    onFinish({
+      score: scoreRef.current,
+      durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, elapsedRef.current)),
+    })
+  }, [onFinish, playAudio])
 
   const spawnNote = useCallback(() => {
     const activeCount = notesRef.current.filter(n => !n.hit && !n.missed).length
-    if (activeCount >= getCurrentMaxActive()) return
+    const difficulty = getBeatCatchDifficulty(elapsedRef.current)
+    if (activeCount >= difficulty.maxActiveNotes) return
 
-    const chances = getSpecialChances()
+    const chances = difficulty.specialChances
     const lane = Math.floor(Math.random() * LANE_COUNT)
 
     let type: NoteType = 'normal'
@@ -261,7 +198,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         notesRef.current = [...notesRef.current, extraNote]
       }
     }
-  }, [getCurrentMaxActive, getSpecialChances])
+  }, [])
 
   const addHitEffect = useCallback((lane: number, kind: JudgeKind) => {
     noteIdCounter += 1
@@ -275,6 +212,30 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     laneFlashesRef.current = [...laneFlashesRef.current, flash].slice(-6)
     setLaneFlashes([...laneFlashesRef.current])
   }, [])
+
+  const registerMiss = useCallback((lane: number, deductLife: boolean) => {
+    if (finishedRef.current) return
+
+    breakCombo()
+    setLastJudge('miss')
+    addHitEffect(lane, 'miss')
+    playAudio('miss', deductLife ? 0.5 : 0.38, deductLife ? 0.72 : 0.86)
+    effects.triggerShake(deductLife ? 8 : 4)
+    effects.triggerFlash('rgba(239,68,68,0.34)')
+
+    if (deductLife) {
+      const nextLives = loseBeatCatchLife(livesRef.current)
+      livesRef.current = nextLives
+      setLives(nextLives)
+
+      if (nextLives <= 0) {
+        finishGame()
+      }
+    }
+
+    if (judgeTimerRef.current) clearTimeout(judgeTimerRef.current)
+    judgeTimerRef.current = window.setTimeout(() => { setLastJudge(null) }, 400)
+  }, [addHitEffect, breakCombo, effects, finishGame, playAudio])
 
   const handleLaneHit = useCallback((lane: number) => {
     if (finishedRef.current) return

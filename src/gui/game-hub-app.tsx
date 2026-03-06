@@ -225,6 +225,7 @@ const COUNTDOWN_GUIDE_BY_GAME_ID: Partial<Record<MiniGameId, string>> = {
   'intense-cheer': 'Tap left/right to jump up! Dodge obstacles, collect hearts & coins!',
   'fierce-cheer': 'Bounce ball off walls to score! 20 second limit!',
   'light-speed': 'Tap lights fast! Avoid bombs, catch gold for fever mode!',
+  'karaoke-pitch': 'Drag up/down to match the TARGET! Catch scrolling notes for bonus!',
 }
 
 interface RoundSettlement {

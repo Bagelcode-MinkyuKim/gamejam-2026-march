@@ -26,7 +26,7 @@ const FEVER_DURATION_MS = 10000
 const FEVER_MULTIPLIER = 2
 const PERFECT_THRESHOLD = 90
 const PERFECT_BONUS = 15
-const MIN_ACCURACY_FOR_SCORE = 40
+const MIN_ACCURACY_FOR_SCORE = 90
 
 // --- Feature constants ---
 const GOLDEN_COLOR_CHANCE = 0.12
@@ -338,7 +338,9 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     // Rainbow round bonus
     const rainbowBonus = isRainbowRound && basePoints >= 80 ? RAINBOW_BONUS : 0
 
-    const totalPoints = !sliderTouched || basePoints < MIN_ACCURACY_FOR_SCORE
+    const isPass = sliderTouched && basePoints >= MIN_ACCURACY_FOR_SCORE
+
+    const totalPoints = !isPass
       ? 0
       : Math.round((basePoints + speedBonus + perfBonus + rainbowBonus) * comboMult * feverMult * goldenMult)
 
@@ -346,30 +348,8 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     scoreRef.current = nextScore
     setScore(nextScore)
 
-    const nextMatched = colorsMatchedRef.current + 1
-    colorsMatchedRef.current = nextMatched
-    setColorsMatched(nextMatched)
-
     setLastSubmitScore(totalPoints)
     setLastSubmitFade(false)
-
-    // Build bonus text
-    const parts: string[] = []
-    if (speedBonus > 0) parts.push('SPEED!')
-    if (perfBonus > 0) parts.push('PERFECT!')
-    if (rainbowBonus > 0) parts.push('RAINBOW!')
-    if (isGoldenRound) parts.push('GOLDEN x3!')
-    if (comboMult > 1) parts.push(`x${comboMult.toFixed(2)}`)
-    if (isFeverRef.current) parts.push('FEVER!')
-    if (perfBonus > 0) parts.push(`+${TIME_BONUS_PER_PERFECT_MS / 1000}s`)
-    if (parts.length > 0) {
-      setBonusText(parts.join(' '))
-      clearTimeoutSafe(bonusTextTimerRef)
-      bonusTextTimerRef.current = window.setTimeout(() => {
-        bonusTextTimerRef.current = null
-        setBonusText('')
-      }, 1200)
-    }
 
     clearTimeoutSafe(lastSubmitTimerRef)
     lastSubmitTimerRef.current = window.setTimeout(() => {
@@ -377,38 +357,58 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       setLastSubmitFade(true)
     }, 1200)
 
-    // Sound & effects based on score
-    if (basePoints >= 90) {
+    if (isPass) {
+      // SUCCESS — count match, show bonus, advance to next color
+      const nextMatched = colorsMatchedRef.current + 1
+      colorsMatchedRef.current = nextMatched
+      setColorsMatched(nextMatched)
+
+      // Build bonus text
+      const parts: string[] = []
+      if (speedBonus > 0) parts.push('SPEED!')
+      if (perfBonus > 0) parts.push('PERFECT!')
+      if (rainbowBonus > 0) parts.push('RAINBOW!')
+      if (isGoldenRound) parts.push('GOLDEN x3!')
+      if (comboMult > 1) parts.push(`x${comboMult.toFixed(2)}`)
+      if (isFeverRef.current) parts.push('FEVER!')
+      if (perfBonus > 0) parts.push(`+${TIME_BONUS_PER_PERFECT_MS / 1000}s`)
+      if (parts.length > 0) {
+        setBonusText(parts.join(' '))
+        clearTimeoutSafe(bonusTextTimerRef)
+        bonusTextTimerRef.current = window.setTimeout(() => {
+          bonusTextTimerRef.current = null
+          setBonusText('')
+        }, 1200)
+      }
+
+      // Success effects
       playAudio(perfectAudioRef, 0.7, 1 + basePoints * 0.001)
       effects.triggerFlash('rgba(34,197,94,0.5)')
       effects.spawnParticles(10, 200, 300)
       triggerScreenFlash('rgba(34,197,94,0.3)')
-    } else if (basePoints >= 70) {
-      playAudio(splashAudioRef, 0.6, 1)
-      effects.triggerFlash()
-      effects.spawnParticles(6, 200, 250)
-    } else if (basePoints >= 50) {
-      playAudio(splashAudioRef, 0.5, 0.9)
-      effects.spawnParticles(3, 200, 200)
+
+      // Next color
+      const nextIndex = pickNextTargetIndex(targetIndex, nextMatched)
+      setTargetIndex(nextIndex)
+      setSliderR(128)
+      setSliderG(128)
+      setSliderB(128)
+      colorStartAtRef.current = performance.now()
+      setShowHints(false)
+      setSliderTouched(false)
+
+      setIsGoldenRound(Math.random() < GOLDEN_COLOR_CHANCE)
+      setIsRainbowRound(nextMatched > 0 && nextMatched % RAINBOW_ROUND_INTERVAL === 0)
     } else {
+      // FAIL — shake, miss sound, stay on same color
       playAudio(missAudioRef, 0.5, 1)
       effects.triggerShake(6)
       effects.triggerFlash('rgba(239,68,68,0.4)')
       triggerScreenFlash('rgba(239,68,68,0.25)')
+      comboRef.current = 0
+      setCombo(0)
+      consecutiveGoodRef.current = 0
     }
-
-    // Next color
-    const nextIndex = pickNextTargetIndex(targetIndex, nextMatched)
-    setTargetIndex(nextIndex)
-    setSliderR(128)
-    setSliderG(128)
-    setSliderB(128)
-    colorStartAtRef.current = performance.now()
-    setShowHints(false)
-    setSliderTouched(false)
-
-    setIsGoldenRound(Math.random() < GOLDEN_COLOR_CHANCE)
-    setIsRainbowRound(nextMatched > 0 && nextMatched % RAINBOW_ROUND_INTERVAL === 0)
   }, [targetIndex, sliderR, sliderG, sliderB, sliderTouched, playAudio, isGoldenRound, isRainbowRound, triggerScreenFlash, triggerPixelFill])
 
   const handleExit = useCallback(() => {
