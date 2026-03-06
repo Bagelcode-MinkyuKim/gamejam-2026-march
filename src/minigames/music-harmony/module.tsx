@@ -14,29 +14,29 @@ import hintSfxSrc from '../../../assets/sounds/music-harmony-hint.mp3'
 import lifeLostSfxSrc from '../../../assets/sounds/music-harmony-life-lost.mp3'
 import streakSfxSrc from '../../../assets/sounds/music-harmony-streak.mp3'
 
-const ROUND_DURATION_MS = 75000
+const ROUND_DURATION_MS = 60000
 const LOW_TIME_THRESHOLD_MS = 10000
-const CHORD_DISPLAY_MS = 2800
-const CHORD_DISPLAY_MIN_MS = 1000
-const CHORD_SPEEDUP_PER_LEVEL = 100
-const ANSWER_TIMEOUT_MS = 7000
-const ANSWER_TIMEOUT_MIN_MS = 2500
-const ANSWER_SPEEDUP_PER_LEVEL = 150
-const RESULT_DISPLAY_MS = 600
-const TONE_DURATION_S = 0.4
+const CHORD_DISPLAY_MS = 1800
+const CHORD_DISPLAY_MIN_MS = 600
+const CHORD_SPEEDUP_PER_LEVEL = 150
+const ANSWER_TIMEOUT_MS = 4500
+const ANSWER_TIMEOUT_MIN_MS = 1500
+const ANSWER_SPEEDUP_PER_LEVEL = 250
+const RESULT_DISPLAY_MS = 450
+const TONE_DURATION_S = 0.35
 const TONE_VOLUME = 0.3
-const FEVER_COMBO_THRESHOLD = 5
-const FEVER_DURATION_MS = 12000
+const FEVER_COMBO_THRESHOLD = 7
+const FEVER_DURATION_MS = 8000
 const FEVER_SCORE_MULTIPLIER = 3
-const PERFECT_TIME_BONUS_MS = 2000
+const PERFECT_TIME_BONUS_MS = 1200
 const HARMONY_BONUS_MULTIPLIER = 1.5
 const MAX_NOTES = 7
-const CHORD_START_SIZE = 2
-const CHORD_GROWTH_INTERVAL = 3
-const MAX_HP = 3
-const HINTS_PER_GAME = 3
-const BOSS_INTERVAL = 5
-const BOSS_BONUS_MULTIPLIER = 2.5
+const CHORD_START_SIZE = 3
+const CHORD_GROWTH_INTERVAL = 2
+const MAX_HP = 2
+const HINTS_PER_GAME = 1
+const BOSS_INTERVAL = 4
+const BOSS_BONUS_MULTIPLIER = 3
 
 type Phase = 'listen' | 'select' | 'result-correct' | 'result-wrong' | 'boss-intro' | 'game-over'
 
@@ -125,55 +125,55 @@ const PIXEL_CSS = `${GAME_EFFECTS_CSS}
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 .mh-root{position:relative;width:100%;height:100%;max-width:432px;margin:0 auto;background:#1a1a2e;display:flex;flex-direction:column;overflow:hidden;font-family:'Press Start 2P',monospace,system-ui;user-select:none;touch-action:manipulation;image-rendering:pixelated}
 .mh-root::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);background-size:16px 16px;pointer-events:none;z-index:0}
-.mh-header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;z-index:10;gap:6px}
-.mh-score{font-size:1.1rem;color:#ffd700;text-shadow:2px 2px 0 #b8860b,0 0 8px rgba(255,215,0,.4);min-width:60px}
-.mh-hp{display:flex;gap:4px;align-items:center}
-.mh-heart{font-size:1.2rem;transition:transform .2s;filter:drop-shadow(0 0 4px rgba(255,0,0,.5))}
+.mh-header{display:flex;justify-content:space-between;align-items:center;padding:14px 14px 8px;z-index:10;gap:8px}
+.mh-score{font-size:1.6rem;color:#ffd700;text-shadow:2px 2px 0 #b8860b,0 0 8px rgba(255,215,0,.4);min-width:80px}
+.mh-hp{display:flex;gap:6px;align-items:center}
+.mh-heart{font-size:1.8rem;transition:transform .2s;filter:drop-shadow(0 0 4px rgba(255,0,0,.5))}
 .mh-heart.lost{filter:grayscale(1) opacity(.3);transform:scale(.8)}
 .mh-heart.hit{animation:mh-hb .4s ease}
 @keyframes mh-hb{0%{transform:scale(1)}30%{transform:scale(1.4) rotate(-10deg)}60%{transform:scale(.6) rotate(10deg)}100%{transform:scale(.8);filter:grayscale(1) opacity(.3)}}
-.mh-level-badge{background:#2d2d44;border:2px solid #4a4a6a;padding:3px 8px;font-size:.6rem;color:#a0a0cc}
+.mh-level-badge{background:#2d2d44;border:2px solid #4a4a6a;padding:5px 12px;font-size:.8rem;color:#a0a0cc}
 .mh-level-badge.boss{background:#4a1a1a;border-color:#ff4444;color:#ff6666;animation:mh-bp .5s ease infinite alternate}
 @keyframes mh-bp{0%{box-shadow:0 0 4px rgba(255,68,68,.3)}100%{box-shadow:0 0 12px rgba(255,68,68,.6)}}
-.mh-timer-bar{height:8px;background:#2d2d44;border:2px solid #4a4a6a;margin:4px 12px;overflow:hidden}
+.mh-timer-bar{height:12px;background:#2d2d44;border:2px solid #4a4a6a;margin:6px 14px;overflow:hidden}
 .mh-timer-fill{height:100%;transition:width .1s linear}
-.mh-combo-row{text-align:center;font-size:.7rem;min-height:24px;line-height:24px;padding:2px 0;z-index:10}
+.mh-combo-row{text-align:center;font-size:1rem;min-height:32px;line-height:32px;padding:4px 0;z-index:10}
 .mh-combo-text{display:inline-block;animation:mh-cb .3s ease}
 @keyframes mh-cb{0%{transform:scale(.5)}50%{transform:scale(1.3)}100%{transform:scale(1)}}
 .mh-chord-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 12px;min-height:0;z-index:10}
-.mh-chord-name{font-size:.8rem;color:#a0a0cc;margin-bottom:8px;letter-spacing:2px}
-.mh-chord-display{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;min-height:70px;padding:12px;background:#12122a;border:3px solid #3a3a5a;width:100%;max-width:380px;position:relative}
-.mh-chord-display::before{content:'LISTEN';position:absolute;top:-10px;left:12px;background:#1a1a2e;padding:0 6px;font-size:.5rem;color:#6a6a8a}
-.mh-chord-note{width:clamp(40px,11vw,52px);height:clamp(40px,11vw,52px);display:flex;align-items:center;justify-content:center;font-size:.8rem;color:#fff;border:3px solid rgba(255,255,255,.3);animation:mh-np .25s steps(4) both}
+.mh-chord-name{font-size:1.1rem;color:#a0a0cc;margin-bottom:10px;letter-spacing:3px}
+.mh-chord-display{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:center;min-height:90px;padding:16px;background:#12122a;border:3px solid #3a3a5a;width:100%;max-width:400px;position:relative}
+.mh-chord-display::before{content:'LISTEN';position:absolute;top:-12px;left:12px;background:#1a1a2e;padding:0 6px;font-size:.6rem;color:#6a6a8a}
+.mh-chord-note{width:clamp(52px,14vw,68px);height:clamp(52px,14vw,68px);display:flex;align-items:center;justify-content:center;font-size:1.1rem;color:#fff;border:3px solid rgba(255,255,255,.3);animation:mh-np .25s steps(4) both}
 .mh-chord-note.hidden{background:#2d2d44!important;border-color:#4a4a6a;color:transparent}
 .mh-chord-note.hidden::after{content:'?';color:#6a6a8a;font-size:.9rem}
 .mh-chord-note.hint-revealed{animation:mh-hg .8s ease infinite alternate}
 @keyframes mh-hg{0%{box-shadow:0 0 4px rgba(255,215,0,.3)}100%{box-shadow:0 0 16px rgba(255,215,0,.8);border-color:#ffd700}}
 @keyframes mh-np{0%{transform:scale(0);opacity:0}50%{transform:scale(1.1);opacity:.8}100%{transform:scale(1);opacity:1}}
-.mh-instruction{font-size:.55rem;color:#6a6a8a;text-align:center;margin:8px 0;letter-spacing:1px}
-.mh-waveform{display:flex;gap:2px;align-items:flex-end;height:36px;margin:8px 0;justify-content:center}
-.mh-wave-bar{width:4px;background:#ffd700;animation:mh-wd var(--dur) steps(3) infinite alternate;animation-delay:var(--delay)}
+.mh-instruction{font-size:.75rem;color:#6a6a8a;text-align:center;margin:10px 0;letter-spacing:2px}
+.mh-waveform{display:flex;gap:3px;align-items:flex-end;height:44px;margin:10px 0;justify-content:center}
+.mh-wave-bar{width:5px;background:#ffd700;animation:mh-wd var(--dur) steps(3) infinite alternate;animation-delay:var(--delay)}
 @keyframes mh-wd{0%{height:4px;opacity:.4}100%{height:var(--max-h);opacity:1}}
-.mh-note-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px 10px;width:100%;z-index:10}
-.mh-note-btn{aspect-ratio:1;border:3px solid rgba(0,0,0,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:transform .05s steps(2);position:relative;overflow:hidden;touch-action:manipulation;min-height:64px;box-shadow:inset -3px -3px 0 rgba(0,0,0,.3),inset 3px 3px 0 rgba(255,255,255,.15)}
+.mh-note-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:8px 12px;width:100%;z-index:10}
+.mh-note-btn{aspect-ratio:1;border:4px solid rgba(0,0,0,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:transform .05s steps(2);position:relative;overflow:hidden;touch-action:manipulation;min-height:80px;box-shadow:inset -3px -3px 0 rgba(0,0,0,.3),inset 3px 3px 0 rgba(255,255,255,.15)}
 .mh-note-btn:active{transform:scale(.9);box-shadow:inset 3px 3px 0 rgba(0,0,0,.3)}
 .mh-note-btn.selected{border-color:#ffd700;box-shadow:0 0 0 3px #ffd700,inset -3px -3px 0 rgba(0,0,0,.3);transform:scale(1.05)}
 .mh-note-btn.correct-flash{animation:mh-cf .4s steps(4)}
 .mh-note-btn.wrong-flash{animation:mh-wf .3s steps(4)}
 @keyframes mh-cf{0%,100%{filter:brightness(1)}25%{filter:brightness(2)}50%{filter:brightness(1.5)}75%{filter:brightness(2)}}
 @keyframes mh-wf{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
-.mh-note-letter{font-size:1.1rem;color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,.5)}
-.mh-note-name{font-size:.4rem;color:rgba(255,255,255,.7);margin-top:2px}
-.mh-bottom-row{display:flex;gap:6px;padding:6px 10px 12px;z-index:10}
-.mh-btn{flex:1;height:48px;border:3px solid rgba(0,0,0,.4);font-family:'Press Start 2P',monospace;font-size:.55rem;color:#fff;cursor:pointer;touch-action:manipulation;box-shadow:inset -3px -3px 0 rgba(0,0,0,.3),inset 3px 3px 0 rgba(255,255,255,.15);transition:transform .05s steps(2)}
+.mh-note-letter{font-size:1.5rem;color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,.5)}
+.mh-note-name{font-size:.6rem;color:rgba(255,255,255,.7);margin-top:4px}
+.mh-bottom-row{display:flex;gap:8px;padding:8px 12px 16px;z-index:10}
+.mh-btn{flex:1;height:64px;border:4px solid rgba(0,0,0,.4);font-family:'Press Start 2P',monospace;font-size:.75rem;color:#fff;cursor:pointer;touch-action:manipulation;box-shadow:inset -3px -3px 0 rgba(0,0,0,.3),inset 3px 3px 0 rgba(255,255,255,.15);transition:transform .05s steps(2)}
 .mh-btn:active{transform:scale(.92);box-shadow:inset 3px 3px 0 rgba(0,0,0,.3)}
 .mh-btn.confirm{background:#2ecc71}.mh-btn.confirm:disabled{background:#2d2d44;color:#4a4a6a;cursor:default}
-.mh-btn.replay{background:#3498db;flex:.4}.mh-btn.hint{background:#f39c12;flex:.4}.mh-btn.hint:disabled{background:#2d2d44;color:#4a4a6a}
-.mh-answer-timer{height:6px;background:#2d2d44;border:2px solid #3a3a5a;margin:2px 10px;overflow:hidden}
+.mh-btn.hint{background:#f39c12;flex:.5}.mh-btn.hint:disabled{background:#2d2d44;color:#4a4a6a}
+.mh-answer-timer{height:10px;background:#2d2d44;border:2px solid #3a3a5a;margin:4px 14px;overflow:hidden}
 .mh-answer-timer-fill{height:100%;transition:width .1s linear}
 .mh-result-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:none}
-.mh-result-text{font-size:1.4rem;text-shadow:3px 3px 0 rgba(0,0,0,.5);animation:mh-rp .4s steps(5);letter-spacing:3px}
-.mh-result-sub{font-size:.6rem;color:#ffd700;margin-top:8px;animation:mh-rp .4s steps(5) .2s both}
+.mh-result-text{font-size:2rem;text-shadow:3px 3px 0 rgba(0,0,0,.5);animation:mh-rp .4s steps(5);letter-spacing:4px}
+.mh-result-sub{font-size:.85rem;color:#ffd700;margin-top:10px;animation:mh-rp .4s steps(5) .2s both}
 @keyframes mh-rp{0%{transform:scale(0);opacity:0}40%{transform:scale(1.3);opacity:1}100%{transform:scale(1);opacity:1}}
 .mh-fever-overlay{position:absolute;inset:0;pointer-events:none;z-index:5;border:4px solid rgba(255,215,0,.4);animation:mh-fb .5s steps(2) infinite alternate}
 @keyframes mh-fb{0%{border-color:rgba(255,215,0,.4)}100%{border-color:rgba(255,68,68,.4)}}
@@ -193,11 +193,11 @@ const PIXEL_CSS = `${GAME_EFFECTS_CSS}
 @keyframes mh-lug{0%{transform:scale(.3)}40%{transform:scale(1.5)}100%{transform:scale(1)}}
 @keyframes mh-fi{0%{opacity:0}100%{opacity:1}}
 .mh-game-over{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.92);z-index:100;animation:mh-fi .5s steps(5)}
-.mh-go-title{font-size:1.2rem;color:#ff4444;text-shadow:3px 3px 0 #8b0000;margin-bottom:16px;letter-spacing:3px}
-.mh-go-score{font-size:1.8rem;color:#ffd700;text-shadow:3px 3px 0 #b8860b;margin-bottom:8px}
-.mh-go-level{font-size:.6rem;color:#a0a0cc;margin-bottom:20px}
-.mh-go-stats{display:flex;gap:20px;margin-bottom:24px}
-.mh-go-stat{text-align:center}.mh-go-stat-val{font-size:1rem;color:#ffd700}.mh-go-stat-lbl{font-size:.4rem;color:#6a6a8a;margin-top:4px}
+.mh-go-title{font-size:1.8rem;color:#ff4444;text-shadow:3px 3px 0 #8b0000;margin-bottom:20px;letter-spacing:4px}
+.mh-go-score{font-size:2.5rem;color:#ffd700;text-shadow:3px 3px 0 #b8860b;margin-bottom:10px}
+.mh-go-level{font-size:.85rem;color:#a0a0cc;margin-bottom:24px}
+.mh-go-stats{display:flex;gap:28px;margin-bottom:28px}
+.mh-go-stat{text-align:center}.mh-go-stat-val{font-size:1.4rem;color:#ffd700}.mh-go-stat-lbl{font-size:.55rem;color:#6a6a8a;margin-top:6px}
 .mh-scanlines{position:absolute;inset:0;pointer-events:none;z-index:200;background:repeating-linear-gradient(transparent 0px,transparent 2px,rgba(0,0,0,.08) 2px,rgba(0,0,0,.08) 4px)}
 .mh-note-btn::after{content:'';position:absolute;inset:0;background:rgba(255,255,255,.3);opacity:0;transition:opacity .1s}
 .mh-note-btn:active::after{opacity:1}`
