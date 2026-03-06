@@ -177,18 +177,18 @@ const PIXEL_CSS = `${GAME_EFFECTS_CSS}
 @keyframes mh-rp{0%{transform:scale(0);opacity:0}40%{transform:scale(1.3);opacity:1}100%{transform:scale(1);opacity:1}}
 .mh-fever-overlay{position:absolute;inset:0;pointer-events:none;z-index:5;border:4px solid rgba(255,215,0,.4);animation:mh-fb .5s steps(2) infinite alternate}
 @keyframes mh-fb{0%{border-color:rgba(255,215,0,.4)}100%{border-color:rgba(255,68,68,.4)}}
-.mh-fever-badge{position:absolute;top:44px;left:50%;transform:translateX(-50%);background:#ff4444;border:3px solid #ffd700;color:#ffd700;font-size:.65rem;padding:4px 12px;z-index:15;animation:mh-fbk .3s steps(2) infinite alternate;letter-spacing:2px}
+.mh-fever-badge{position:absolute;top:50px;left:50%;transform:translateX(-50%);background:#ff4444;border:3px solid #ffd700;color:#ffd700;font-size:.9rem;padding:6px 16px;z-index:15;animation:mh-fbk .3s steps(2) infinite alternate;letter-spacing:3px}
 @keyframes mh-fbk{0%{opacity:1}100%{opacity:.6}}
 .mh-boss-intro{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.9);z-index:60;animation:mh-fi .3s steps(4)}
-.mh-boss-text{font-size:1.2rem;color:#ff4444;text-shadow:3px 3px 0 #8b0000;letter-spacing:4px;animation:mh-bz .8s steps(6) infinite alternate}
-.mh-boss-sub{font-size:.5rem;color:#ffd700;margin-top:12px;animation:mh-bbl .4s steps(2) infinite alternate}
+.mh-boss-text{font-size:2rem;color:#ff4444;text-shadow:3px 3px 0 #8b0000;letter-spacing:5px;animation:mh-bz .8s steps(6) infinite alternate}
+.mh-boss-sub{font-size:.8rem;color:#ffd700;margin-top:16px;animation:mh-bbl .4s steps(2) infinite alternate}
 @keyframes mh-bz{0%{transform:scale(1)}100%{transform:scale(1.1)}}
 @keyframes mh-bbl{0%{opacity:1}100%{opacity:.3}}
 .mh-pixel-stars{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden}
 .mh-pixel-star{position:absolute;width:4px;height:4px;animation:mh-sb var(--dur) steps(2) infinite alternate;animation-delay:var(--delay)}
 @keyframes mh-sb{0%{opacity:.1}100%{opacity:.8}}
 .mh-level-up-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:55;pointer-events:none;animation:mh-luf .6s steps(3)}
-.mh-level-up-text{font-size:1.2rem;color:#ffd700;text-shadow:3px 3px 0 #b8860b;letter-spacing:3px;animation:mh-lug .6s steps(5)}
+.mh-level-up-text{font-size:1.8rem;color:#ffd700;text-shadow:3px 3px 0 #b8860b;letter-spacing:4px;animation:mh-lug .6s steps(5)}
 @keyframes mh-luf{0%{background:rgba(255,215,0,.3)}50%{background:rgba(255,215,0,.1)}100%{background:transparent}}
 @keyframes mh-lug{0%{transform:scale(.3)}40%{transform:scale(1.5)}100%{transform:scale(1)}}
 @keyframes mh-fi{0%{opacity:0}100%{opacity:1}}
