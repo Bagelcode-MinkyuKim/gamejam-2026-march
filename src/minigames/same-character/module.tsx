@@ -3,17 +3,17 @@ import type { CSSProperties } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { AUDIO_ENABLED } from '../../primitives/constants'
 import parkSangminImage from '../../../assets/images/same-character/park-sangmin.png'
-import songChangsikImage from '../../../Pixel Image/송창식.png'
+import songChangsikImage from '../../../assets/images/same-character/song-changsik.png'
 import taeJinaImage from '../../../assets/images/same-character/tae-jina.png'
 import parkWankyuImage from '../../../assets/images/same-character/park-wankyu.png'
-import kimYeonjaImage from '../../../Pixel Image/Sq/김연자 Sq/김연자_00000.png'
+import kimYeonjaImage from '../../../assets/images/same-character/sq/kim-yeonja_00000.png'
 import seoTaijiImage from '../../../assets/images/same-character/seo-taiji.png'
-import iconParkSangminImage from '../../../Pixel Image/Icon 박상민.png'
-import iconSongChangsikImage from '../../../Pixel Image/Icon 송창식.png'
-import iconTaeJinaImage from '../../../Pixel Image/Icon 태진아.png'
-import iconParkWankyuImage from '../../../Pixel Image/Icon 박완규.png'
-import iconKimYeonjaImage from '../../../Pixel Image/Icon 김연자.png'
-import iconSeoTaijiImage from '../../../Pixel Image/Icon 서태지.png'
+import iconParkSangminImage from '../../../assets/images/same-character/icon-park-sangmin.png'
+import iconSongChangsikImage from '../../../assets/images/same-character/icon-song-changsik.png'
+import iconTaeJinaImage from '../../../assets/images/same-character/icon-tae-jina.png'
+import iconParkWankyuImage from '../../../assets/images/same-character/icon-park-wankyu.png'
+import iconKimYeonjaImage from '../../../assets/images/same-character/icon-kim-yeonja.png'
+import iconSeoTaijiImage from '../../../assets/images/same-character/icon-seo-taiji.png'
 import sameCharacterBack04Image from '../../../assets/images/same-character/back-04.png'
 import correctHitEffectImage from '../../../assets/images/same-character/effect.png'
 import correctHitSfx from '../../../assets/sounds/same-character-correct-pop.wav'
@@ -21,12 +21,12 @@ import stackMissSfx from '../../../assets/sounds/tap-hit.mp3'
 import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
 import comboMilestoneSfx from '../../../assets/sounds/combo-milestone.mp3'
 import sameCharacterBgmLoop from '../../../assets/sounds/lobby-bgm-loop.mp3'
-import leftKeyImage from '../../../Pixel Image/Left Key.png'
-import rightKeyImage from '../../../Pixel Image/Right Key.png'
-import homeButtonImage from '../../../Pixel Image/Home Btn.png'
-import pauseButtonImage from '../../../Pixel Image/Pause Btn.png'
-import playButtonImage from '../../../Pixel Image/Play Btn.png'
-import scoreBoardImage from '../../../Pixel Image/Score Board.png'
+import leftKeyImage from '../../../assets/images/same-character/left-key.png'
+import rightKeyImage from '../../../assets/images/same-character/right-key.png'
+import homeButtonImage from '../../../assets/images/same-character/home-btn.png'
+import pauseButtonImage from '../../../assets/images/same-character/pause-btn.png'
+import playButtonImage from '../../../assets/images/same-character/play-btn.png'
+import scoreBoardImage from '../../../assets/images/same-character/score-board.png'
 
 const CENTER_STACK_SIZE = 12
 const GAME_DURATION_MS = 40000
@@ -48,18 +48,26 @@ const CORRECT_POP_DURATION_MS = 100
 const CORRECT_SHAKE_DURATION_MS = 100
 const CENTER_SEQUENCE_FPS = 30
 const CENTER_SEQUENCE_FRAME_MS = 1000 / CENTER_SEQUENCE_FPS
+const SPEED_INCREASE_PER_COMBO = 0.012
+const MAX_SPEED_MULTIPLIER = 2.2
+const PERFECT_WINDOW_MS = 300
+const PERFECT_BONUS_SCORE = 12
+
+const BURST_TEXTS_COMBO = ['Nice!', 'Great!', 'Amazing!', 'Fantastic!', 'Superb!']
+
+const STREAK_MILESTONES = [5, 10, 15, 20, 30, 50]
 
 const SQ_SEQUENCE_SOURCES = import.meta.glob<string>(
-  '../../../Pixel Image/Sq/김연자 Sq/*.png',
+  '../../../assets/images/same-character/sq/*.png',
   { eager: true, import: 'default' },
 )
 
-const KIM_YEONJA_SEQUENCE_FRAMES = getSequenceFrames('김연자', kimYeonjaImage)
-const SONG_CHANGSIK_SEQUENCE_FRAMES = getSequenceFrames('송창식', songChangsikImage)
-const PARK_WANKYU_SEQUENCE_FRAMES = getSequenceFrames('박완규', parkWankyuImage)
-const TAE_JINA_SEQUENCE_FRAMES = getSequenceFrames('태진아', taeJinaImage)
-const PARK_SANGMIN_SEQUENCE_FRAMES = getSequenceFrames('박상민', parkSangminImage)
-const SEO_TAIJI_SEQUENCE_FRAMES = getSequenceFrames('서태지', seoTaijiImage)
+const KIM_YEONJA_SEQUENCE_FRAMES = getSequenceFrames('kim-yeonja', kimYeonjaImage)
+const SONG_CHANGSIK_SEQUENCE_FRAMES = getSequenceFrames('song-changsik', songChangsikImage)
+const PARK_WANKYU_SEQUENCE_FRAMES = getSequenceFrames('park-wankyu', parkWankyuImage)
+const TAE_JINA_SEQUENCE_FRAMES = getSequenceFrames('tae-jina', taeJinaImage)
+const PARK_SANGMIN_SEQUENCE_FRAMES = getSequenceFrames('park-sangmin', parkSangminImage)
+const SEO_TAIJI_SEQUENCE_FRAMES = getSequenceFrames('seo-taiji', seoTaijiImage)
 
 const CHARACTER_POOL = [
   { id: 'park-sangmin', name: 'Park Sangmin', imageSrc: parkSangminImage, sideImageSrc: iconParkSangminImage, speechText: 'Gaseum soge chaoreuneun geudaeyeo' },
@@ -195,14 +203,26 @@ function pushRandom(queue: CenterCharacterToken[], runState: StackRunState): Cen
   return [...queue.slice(1), createCenterTokenFromCharacter(takeStackRunCharacter(runState))]
 }
 
-function createFixedSideBoard(): {
+function shuffleArray<T>(array: readonly T[]): T[] {
+  const shuffled = [...array]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const temp = shuffled[i]
+    shuffled[i] = shuffled[j]
+    shuffled[j] = temp
+  }
+  return shuffled
+}
+
+function createShuffledSideBoard(): {
   readonly leftQueue: CharacterDefinition[]
   readonly rightQueue: CharacterDefinition[]
   readonly sideByCharacterId: Record<CharacterDefinition['id'], SelectedSide>
 } {
-  const midpoint = Math.floor(CHARACTER_POOL.length / 2)
-  const leftQueue = [...CHARACTER_POOL.slice(0, midpoint)]
-  const rightQueue = [...CHARACTER_POOL.slice(midpoint)]
+  const shuffled = shuffleArray(CHARACTER_POOL)
+  const midpoint = Math.floor(shuffled.length / 2)
+  const leftQueue = shuffled.slice(0, midpoint)
+  const rightQueue = shuffled.slice(midpoint)
 
   const sideByCharacterId = {} as Record<CharacterDefinition['id'], SelectedSide>
   for (const character of leftQueue) {
@@ -219,22 +239,23 @@ function createFixedSideBoard(): {
   }
 }
 
+function getBurstTextForCombo(comboValue: number): string {
+  if (comboValue >= 20) return BURST_TEXTS_COMBO[4]
+  if (comboValue >= 15) return BURST_TEXTS_COMBO[3]
+  if (comboValue >= 10) return BURST_TEXTS_COMBO[2]
+  if (comboValue >= 5) return BURST_TEXTS_COMBO[1]
+  return BURST_TEXTS_COMBO[0]
+}
+
 function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameSessionProps) {
   const initialBoard = useMemo<{
     readonly centerQueue: CenterCharacterToken[]
-    readonly leftQueue: CharacterDefinition[]
-    readonly rightQueue: CharacterDefinition[]
-    readonly sideByCharacterId: Record<CharacterDefinition['id'], SelectedSide>
     readonly runState: StackRunState
   }>(() => {
     const runState = createStackRunState()
     const seededCenterQueue = createQueue(CENTER_STACK_SIZE, runState)
-    const seededSideBoard = createFixedSideBoard()
     return {
       centerQueue: seededCenterQueue,
-      leftQueue: seededSideBoard.leftQueue,
-      rightQueue: seededSideBoard.rightQueue,
-      sideByCharacterId: seededSideBoard.sideByCharacterId,
       runState,
     }
   }, [])
@@ -258,6 +279,12 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
   const [correctEffectPulseKey, setCorrectEffectPulseKey] = useState(0)
   const [sequenceFrameIndex, setSequenceFrameIndex] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
+  const [speedMultiplier, setSpeedMultiplier] = useState(1)
+  const [perfectFeedback, setPerfectFeedback] = useState(false)
+  const [streakMilestone, setStreakMilestone] = useState<number | null>(null)
+  const [sideShuffleKey, setSideShuffleKey] = useState(0)
+
+  const [sideBoard, setSideBoard] = useState(() => createShuffledSideBoard())
 
   const centerQueueRef = useRef<CenterCharacterToken[]>(centerQueue)
   const remainingMsRef = useRef(remainingMs)
@@ -283,9 +310,12 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
   const comboMilestoneSfxAudioRef = useRef<HTMLAudioElement | null>(null)
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
   const stackRunStateRef = useRef<StackRunState>(initialBoard.runState)
-  const sideByCharacterId = initialBoard.sideByCharacterId
-  const leftQueue = initialBoard.leftQueue
-  const rightQueue = initialBoard.rightQueue
+  const sideBoardRef = useRef(sideBoard)
+  const lastTurnAtRef = useRef(0)
+  const perfectFeedbackMsRef = useRef(0)
+  const streakMilestoneMsRef = useRef(0)
+  const speedMultiplierRef = useRef(1)
+
   const isFrontKimYeonja = centerQueue[0]?.id === 'kim-yeonja'
   const isFrontSongChangsik = centerQueue[0]?.id === 'song-changsik'
   const isFrontParkWankyu = centerQueue[0]?.id === 'park-wankyu'
@@ -293,36 +323,22 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
   const isFrontParkSangmin = centerQueue[0]?.id === 'park-sangmin'
   const isFrontSeoTaiji = centerQueue[0]?.id === 'seo-taiji'
   const activeFrontSequenceFrames = useMemo(() => {
-    if (isFrontKimYeonja) {
-      return KIM_YEONJA_SEQUENCE_FRAMES
-    }
-
-    if (isFrontSongChangsik) {
-      return SONG_CHANGSIK_SEQUENCE_FRAMES
-    }
-
-    if (isFrontParkWankyu) {
-      return PARK_WANKYU_SEQUENCE_FRAMES
-    }
-
-    if (isFrontTaeJina) {
-      return TAE_JINA_SEQUENCE_FRAMES
-    }
-
-    if (isFrontParkSangmin) {
-      return PARK_SANGMIN_SEQUENCE_FRAMES
-    }
-
-    if (isFrontSeoTaiji) {
-      return SEO_TAIJI_SEQUENCE_FRAMES
-    }
-
+    if (isFrontKimYeonja) return KIM_YEONJA_SEQUENCE_FRAMES
+    if (isFrontSongChangsik) return SONG_CHANGSIK_SEQUENCE_FRAMES
+    if (isFrontParkWankyu) return PARK_WANKYU_SEQUENCE_FRAMES
+    if (isFrontTaeJina) return TAE_JINA_SEQUENCE_FRAMES
+    if (isFrontParkSangmin) return PARK_SANGMIN_SEQUENCE_FRAMES
+    if (isFrontSeoTaiji) return SEO_TAIJI_SEQUENCE_FRAMES
     return null
   }, [isFrontKimYeonja, isFrontSongChangsik, isFrontParkWankyu, isFrontTaeJina, isFrontParkSangmin, isFrontSeoTaiji])
 
   useEffect(() => {
     isPausedRef.current = isPaused
   }, [isPaused])
+
+  useEffect(() => {
+    sideBoardRef.current = sideBoard
+  }, [sideBoard])
 
   useEffect(() => {
     if (!AUDIO_ENABLED) {
@@ -492,20 +508,39 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
     setIsPaused(false)
   }, [])
 
+  const reshuffleSides = useCallback(() => {
+    const newBoard = createShuffledSideBoard()
+    sideBoardRef.current = newBoard
+    setSideBoard(newBoard)
+    setSideShuffleKey((prev) => prev + 1)
+  }, [])
+
   const resolveTurn = useCallback((selected: SelectedSide) => {
     if (finishedRef.current || isPausedRef.current) {
       return
     }
 
     const target = centerQueueRef.current[0]
-    const expectedSide = sideByCharacterId[target.id]
+    const expectedSide = sideBoardRef.current.sideByCharacterId[target.id]
     const isMatch = selected === expectedSide
+
+    const now = window.performance.now()
+    const timeSinceLastTurn = now - lastTurnAtRef.current
+    lastTurnAtRef.current = now
 
     if (isMatch) {
       const nextCombo = comboRef.current + 1
       const nextBestCombo = Math.max(bestComboRef.current, nextCombo)
       const scoreBase = feverRemainingMsRef.current > 0 ? 30 : 18
-      const gainedScore = scoreBase + nextCombo * 6
+      let gainedScore = scoreBase + nextCombo * 6
+
+      const isPerfect = timeSinceLastTurn > 0 && timeSinceLastTurn <= PERFECT_WINDOW_MS
+      if (isPerfect) {
+        gainedScore += PERFECT_BONUS_SCORE
+        perfectFeedbackMsRef.current = 500
+        setPerfectFeedback(true)
+      }
+
       const nextScore = scoreRef.current + gainedScore
 
       comboRef.current = nextCombo
@@ -514,6 +549,10 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
       setCombo(nextCombo)
       setBestCombo(nextBestCombo)
       setScore(nextScore)
+
+      const nextSpeed = Math.min(MAX_SPEED_MULTIPLIER, 1 + nextCombo * SPEED_INCREASE_PER_COMBO)
+      speedMultiplierRef.current = nextSpeed
+      setSpeedMultiplier(nextSpeed)
 
       correctPopMsRef.current = CORRECT_POP_DURATION_MS
       setCorrectPopMs(CORRECT_POP_DURATION_MS)
@@ -527,9 +566,16 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
       if (nextCombo >= 2) {
         comboScoreFeedbackMsRef.current = COMBO_SCORE_FEEDBACK_DURATION_MS
         setComboScoreFeedbackMs(COMBO_SCORE_FEEDBACK_DURATION_MS)
-        setComboScoreText(`COMBO +${gainedScore}`)
+        const comboText = isPerfect ? `PERFECT +${gainedScore}` : `COMBO +${gainedScore}`
+        setComboScoreText(comboText)
         setComboScorePulseKey((previous) => previous + 1)
         playComboMilestoneSfx()
+      }
+
+      const isMilestone = STREAK_MILESTONES.includes(nextCombo)
+      if (isMilestone) {
+        streakMilestoneMsRef.current = 900
+        setStreakMilestone(nextCombo)
       }
 
       let nextStarGauge = starGaugeRef.current + STAR_GAIN_ON_MATCH
@@ -538,10 +584,10 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
         feverRemainingMsRef.current = FEVER_DURATION_MS
         setFeverRemainingMs(FEVER_DURATION_MS)
         burstMsRef.current = 900
-        setBurstText('Nice!')
+        setBurstText('FEVER!')
       } else if (nextCombo >= 3) {
         burstMsRef.current = 700
-        setBurstText('Nice!')
+        setBurstText(getBurstTextForCombo(nextCombo))
       }
 
       starGaugeRef.current = nextStarGauge
@@ -550,9 +596,14 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
       const nextCenter = pushRandom(centerQueueRef.current, stackRunStateRef.current)
       centerQueueRef.current = nextCenter
       setCenterQueue(nextCenter)
+
+      reshuffleSides()
     } else {
       comboRef.current = 0
       setCombo(0)
+
+      speedMultiplierRef.current = 1
+      setSpeedMultiplier(1)
 
       const nextStarGauge = Math.max(0, starGaugeRef.current - STAR_LOSS_ON_MISS)
       starGaugeRef.current = nextStarGauge
@@ -568,12 +619,16 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
       setComboScoreFeedbackMs(0)
       setComboScoreText(null)
       playMissSfx()
+
+      reshuffleSides()
     }
-  }, [playComboMilestoneSfx, playCorrectHitSfx, playMissSfx, sideByCharacterId])
+  }, [playComboMilestoneSfx, playCorrectHitSfx, playMissSfx, reshuffleSides])
 
   useEffect(() => {
-    startedAtRef.current = window.performance.now()
-    lastTickAtRef.current = startedAtRef.current
+    const now = window.performance.now()
+    startedAtRef.current = now
+    lastTickAtRef.current = now
+    lastTurnAtRef.current = now
 
     const timer = window.setInterval(() => {
       if (finishedRef.current) {
@@ -581,15 +636,15 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
         return
       }
 
-      const now = window.performance.now()
+      const tickNow = window.performance.now()
       if (isPausedRef.current) {
-        lastTickAtRef.current = now
+        lastTickAtRef.current = tickNow
         return
       }
 
-      const previousTickAt = lastTickAtRef.current ?? now
-      const deltaMs = Math.min(MAX_TICK_DELTA_MS, Math.max(1, now - previousTickAt))
-      lastTickAtRef.current = now
+      const previousTickAt = lastTickAtRef.current ?? tickNow
+      const deltaMs = Math.min(MAX_TICK_DELTA_MS, Math.max(1, tickNow - previousTickAt))
+      lastTickAtRef.current = tickNow
 
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
@@ -630,6 +685,20 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
         burstMsRef.current = Math.max(0, burstMsRef.current - deltaMs)
         if (burstMsRef.current === 0) {
           setBurstText(null)
+        }
+      }
+
+      if (perfectFeedbackMsRef.current > 0) {
+        perfectFeedbackMsRef.current = Math.max(0, perfectFeedbackMsRef.current - deltaMs)
+        if (perfectFeedbackMsRef.current === 0) {
+          setPerfectFeedback(false)
+        }
+      }
+
+      if (streakMilestoneMsRef.current > 0) {
+        streakMilestoneMsRef.current = Math.max(0, streakMilestoneMsRef.current - deltaMs)
+        if (streakMilestoneMsRef.current === 0) {
+          setStreakMilestone(null)
         }
       }
 
@@ -734,11 +803,13 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
 
   const remainingSeconds = Math.ceil(remainingMs / 1000)
   const timeSlidePercent = Math.max(0, Math.min(100, (remainingMs / GAME_DURATION_MS) * 100))
+  const isFever = feverRemainingMs > 0
+  const speedLabel = speedMultiplier >= 1.5 ? 'x' + speedMultiplier.toFixed(1) : null
 
   return (
     <section className="mini-game-panel same-character-panel" aria-label="same-character-game">
       <div
-        className={`same-character-track ${correctShakeMs > 0 ? 'shake' : ''} ${isPaused ? 'paused' : ''}`}
+        className={`same-character-track ${correctShakeMs > 0 ? 'shake' : ''} ${isPaused ? 'paused' : ''} ${isFever ? 'fever-bg' : ''}`}
         role="presentation"
         style={{ '--same-character-bg-image': `url(${sameCharacterBack04Image})` } as CSSProperties}
       >
@@ -747,6 +818,9 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
             <img className="same-character-top-action-icon" src={homeButtonImage} alt="" aria-hidden />
           </button>
           <div className="same-character-top-actions-right">
+            {speedLabel !== null ? (
+              <span className="same-character-speed-badge">{speedLabel}</span>
+            ) : null}
             {isPaused ? (
               <button
                 className="same-character-top-action-button play"
@@ -779,8 +853,15 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
           </div>
         </div>
 
-        <div className="same-character-side-group left" aria-label="left-characters">
-          {leftQueue.map((character, index) => {
+        {combo >= 2 ? (
+          <div className="same-character-combo-counter" key={`combo-${combo}`}>
+            <span className="same-character-combo-number">{combo}</span>
+            <span className="same-character-combo-label">COMBO</span>
+          </div>
+        ) : null}
+
+        <div className={`same-character-side-group left`} aria-label="left-characters" key={`left-${sideShuffleKey}`}>
+          {sideBoard.leftQueue.map((character, index) => {
             const isCorrectHitSlot =
               correctPopMs > 0 &&
               correctEffectSide === 'left' &&
@@ -798,8 +879,8 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
           })}
         </div>
 
-        <div className="same-character-side-group right" aria-label="right-characters">
-          {rightQueue.map((character, index) => {
+        <div className={`same-character-side-group right`} aria-label="right-characters" key={`right-${sideShuffleKey}`}>
+          {sideBoard.rightQueue.map((character, index) => {
             const isCorrectHitSlot =
               correctPopMs > 0 &&
               correctEffectSide === 'right' &&
@@ -817,7 +898,7 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
           })}
         </div>
 
-        <div className={`same-character-center-stack ${feverRemainingMs > 0 ? 'fever' : ''}`} aria-label="center-stack">
+        <div className={`same-character-center-stack ${isFever ? 'fever' : ''}`} aria-label="center-stack">
           {centerQueue.map((character, index) => {
             const isTarget = index === 0
             const isTargetPop = isTarget && correctPopMs > 0
@@ -855,14 +936,21 @@ function SameCharacterGame({ onFinish, onExit, isAudioMuted = false }: MiniGameS
         </div>
 
         {comboScoreFeedbackMs > 0 && comboScoreText !== null ? (
-          <p className="same-character-combo-score-float" key={comboScorePulseKey}>
+          <p className={`same-character-combo-score-float ${perfectFeedback ? 'perfect' : ''}`} key={comboScorePulseKey}>
             {comboScoreText}
           </p>
         ) : null}
 
         <p className={`same-character-judge ${missFeedbackMs > 0 ? 'miss' : 'ready'}`}>{missFeedbackMs > 0 ? 'Wrong!' : ' '}</p>
 
-        {burstText !== null ? <p className="same-character-burst">{burstText}</p> : null}
+        {burstText !== null ? <p className={`same-character-burst ${isFever ? 'fever' : ''}`}>{burstText}</p> : null}
+
+        {streakMilestone !== null ? (
+          <div className="same-character-streak-milestone" key={`streak-${streakMilestone}`}>
+            <span className="same-character-streak-number">{streakMilestone}</span>
+            <span className="same-character-streak-label">STREAK!</span>
+          </div>
+        ) : null}
 
         {isPaused ? (
           <div className="same-character-paused-overlay" role="status" aria-live="polite">
