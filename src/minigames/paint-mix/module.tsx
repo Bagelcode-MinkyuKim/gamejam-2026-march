@@ -534,14 +534,19 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         <div className="pm-screen-flash" style={{ background: screenFlashColor }} />
       )}
 
+      {/* === PIXEL FONT === */}
+      <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+
       {/* === PIXEL HEADER === */}
       <div className="pm-header">
-        <img className="pm-avatar" src={iconPaletteImg} alt="Palette" />
-        <div className="pm-header-info">
-          <p className="pm-score">{score.toLocaleString()}</p>
+        <div className="pm-header-side">
+          <img className="pm-avatar" src={iconPaletteImg} alt="Palette" />
           <p className="pm-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
-        <div className="pm-header-time">
+        <div className="pm-header-center">
+          <p className="pm-score">{score.toLocaleString()}</p>
+        </div>
+        <div className="pm-header-side pm-header-right">
           <p className={`pm-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
         </div>
       </div>
@@ -704,7 +709,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           touch-action: manipulation;
           overflow: hidden;
           image-rendering: pixelated;
-          font-family: 'Courier New', 'Monaco', monospace;
+          font-family: 'Press Start 2P', 'Courier New', monospace;
         }
 
         .pm-bg-blur {
@@ -740,51 +745,60 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .pm-header {
           display: flex;
           align-items: center;
-          gap: 10px;
+          justify-content: space-between;
           width: 100%;
-          padding: 10px 14px 8px;
-          background: linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(45,27,105,0.8) 100%);
+          padding: 12px 14px 10px;
+          background: linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(45,27,105,0.85) 100%);
           box-sizing: border-box;
           border-bottom: 4px solid #7c3aed;
           image-rendering: pixelated;
         }
 
+        .pm-header-side {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          min-width: 60px;
+        }
+
+        .pm-header-right {
+          align-items: flex-end;
+        }
+
+        .pm-header-center {
+          flex: 1;
+          text-align: center;
+        }
+
         .pm-avatar {
-          width: clamp(48px, 13vw, 60px);
-          height: clamp(48px, 13vw, 60px);
-          border: 4px solid #a855f7;
-          box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+          width: clamp(40px, 11vw, 52px);
+          height: clamp(40px, 11vw, 52px);
+          border: 3px solid #a855f7;
+          box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
           image-rendering: pixelated;
           object-fit: cover;
         }
 
-        .pm-header-info {
-          flex: 1;
-        }
-
         .pm-score {
-          font-size: clamp(36px, 9vw, 52px);
+          font-size: clamp(28px, 8vw, 42px);
           font-weight: 900;
           color: #faf5ff;
           margin: 0;
-          text-shadow: 3px 3px 0 rgba(0,0,0,0.5);
+          text-shadow: 3px 3px 0 rgba(0,0,0,0.6), 0 0 12px rgba(168,85,247,0.5);
           letter-spacing: 2px;
         }
 
         .pm-best {
-          font-size: 10px;
+          font-size: 7px;
           font-weight: 700;
           color: rgba(250,245,255,0.5);
           margin: 0;
           letter-spacing: 1px;
         }
 
-        .pm-header-time {
-          text-align: right;
-        }
-
         .pm-time {
-          font-size: clamp(20px, 5vw, 28px);
+          font-size: clamp(14px, 4vw, 20px);
           font-weight: 900;
           color: #faf5ff;
           margin: 0;
@@ -819,36 +833,35 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 10px;
+          gap: 8px;
           padding: 6px 12px;
           width: 100%;
           box-sizing: border-box;
-          background: rgba(124,58,237,0.1);
-          border-bottom: 2px solid rgba(124,58,237,0.2);
+          background: rgba(0,0,0,0.4);
+          border-bottom: 2px solid rgba(124,58,237,0.4);
         }
 
         .pm-pixel-badge {
-          font-size: 12px;
+          font-size: 8px;
           font-weight: 900;
-          color: #7c3aed;
-          padding: 2px 8px;
-          background: rgba(124,58,237,0.15);
+          color: #d8b4fe;
+          padding: 2px 6px;
+          background: rgba(124,58,237,0.3);
           border: 2px solid #7c3aed;
-          letter-spacing: 1px;
         }
 
         .pm-pixel-stat {
-          font-size: 13px;
+          font-size: 8px;
           font-weight: 900;
-          color: #581c87;
-          letter-spacing: 1px;
+          color: #d8b4fe;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
         }
 
         /* ---- BANNERS ---- */
         .pm-fever-banner {
           width: 100%;
           text-align: center;
-          font-size: clamp(14px, 4vw, 18px);
+          font-size: clamp(9px, 2.5vw, 12px);
           font-weight: 900;
           color: #fff;
           padding: 6px 0;
@@ -869,7 +882,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .pm-golden-banner {
           width: 100%;
           text-align: center;
-          font-size: 14px;
+          font-size: 9px;
           font-weight: 900;
           color: #78350f;
           padding: 4px 0;
@@ -882,7 +895,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .pm-rainbow-banner {
           width: 100%;
           text-align: center;
-          font-size: 14px;
+          font-size: 9px;
           font-weight: 900;
           padding: 4px 0;
           background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #3b82f6, #8b5cf6);
@@ -894,16 +907,16 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .pm-rankup-banner {
           width: 100%;
           text-align: center;
-          font-size: clamp(16px, 4vw, 22px);
+          font-size: clamp(10px, 3vw, 14px);
           font-weight: 900;
           color: #fff;
-          padding: 8px 0;
+          padding: 6px 0;
           background: linear-gradient(135deg, #7c3aed, #a855f7);
           border-top: 3px solid #fbbf24;
           border-bottom: 3px solid #fbbf24;
           animation: pm-rankup-flash 0.3s steps(3) infinite alternate;
           text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
-          letter-spacing: 3px;
+          letter-spacing: 2px;
         }
 
         @keyframes pm-rankup-flash {
@@ -912,7 +925,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-bonus-text {
-          font-size: clamp(14px, 3.5vw, 18px);
+          font-size: clamp(9px, 2.5vw, 12px);
           font-weight: 900;
           color: #f59e0b;
           text-align: center;
@@ -929,9 +942,10 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
         /* ---- TARGET LABEL ---- */
         .pm-target-label {
-          font-size: clamp(14px, 3.5vw, 18px);
+          font-size: clamp(10px, 3vw, 14px);
           font-weight: 900;
-          color: #581c87;
+          color: #faf5ff;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.5);
           text-align: center;
           margin: 0;
           letter-spacing: 2px;
@@ -965,10 +979,10 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-swatch-tag {
-          font-size: 10px;
+          font-size: 7px;
           font-weight: 900;
-          color: #7c3aed;
-          letter-spacing: 1px;
+          color: #d8b4fe;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
         }
 
         .pm-accuracy-display {
@@ -997,15 +1011,15 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-accuracy-num {
-          font-size: clamp(18px, 5vw, 26px);
+          font-size: clamp(14px, 4vw, 20px);
           font-weight: 900;
-          text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
         }
 
         .pm-accuracy-txt {
-          font-size: 10px;
+          font-size: 7px;
           font-weight: 900;
-          letter-spacing: 1px;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.3);
         }
 
         /* ---- PIXEL CANVAS ---- */
@@ -1068,11 +1082,11 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-slider-label {
-          font-size: 18px;
+          font-size: 12px;
           font-weight: 900;
-          width: 22px;
+          width: 18px;
           text-align: center;
-          text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
         }
 
         .pm-slider-track-wrap {
@@ -1081,11 +1095,12 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-slider-value {
-          font-size: 13px;
+          font-size: 8px;
           font-weight: 900;
-          width: 34px;
+          width: 30px;
           text-align: right;
-          color: #4c1d95;
+          color: #d8b4fe;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
         }
 
         .pm-hint {
@@ -1127,7 +1142,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
         /* ---- BUTTONS ---- */
         .pm-pixel-btn {
-          font-family: 'Courier New', 'Monaco', monospace;
+          font-family: 'Press Start 2P', 'Courier New', monospace;
           font-weight: 900;
           cursor: pointer;
           border: 3px solid #1a1a2e;
@@ -1151,7 +1166,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-hint-btn {
-          font-size: 14px;
+          font-size: 9px;
           padding: 10px 14px;
           background: #ede9fe;
           color: #7c3aed;
@@ -1163,8 +1178,8 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-submit-btn {
-          font-size: clamp(16px, 4vw, 22px);
-          padding: 12px 28px;
+          font-size: clamp(12px, 3.5vw, 16px);
+          padding: 14px 32px;
           background: linear-gradient(180deg, #a855f7, #7c3aed);
           color: #fff;
           text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
@@ -1180,17 +1195,17 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .pm-feedback.fade { opacity: 0; }
 
         .pm-feedback-text {
-          font-size: clamp(16px, 4vw, 22px);
+          font-size: clamp(10px, 3vw, 14px);
           font-weight: 900;
-          letter-spacing: 2px;
+          letter-spacing: 1px;
         }
 
         .pm-feedback-text.excellent {
-          color: #22c55e;
-          text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+          color: #4ade80;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.4), 0 0 8px rgba(34,197,94,0.4);
         }
-        .pm-feedback-text.good { color: #eab308; }
-        .pm-feedback-text.poor { color: #ef4444; }
+        .pm-feedback-text.good { color: #fde047; text-shadow: 2px 2px 0 rgba(0,0,0,0.4); }
+        .pm-feedback-text.poor { color: #f87171; text-shadow: 2px 2px 0 rgba(0,0,0,0.4); }
 
       `}</style>
     </section>
