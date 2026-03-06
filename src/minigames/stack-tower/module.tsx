@@ -192,7 +192,20 @@ function PixelStarfield({ stars, time }: { stars: PixelStar[]; time: number }) {
 // ─── Main Component ────────────────────────────────────────────────
 
 function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const effects = useGameEffects()
+  const {
+    particles,
+    scorePopups,
+    isFlashing,
+    flashColor,
+    spawnParticles,
+    triggerShake,
+    triggerFlash,
+    showScorePopup,
+    comboHitBurst,
+    updateParticles,
+    cleanup,
+    getShakeStyle,
+  } = useGameEffects()
   const containerRef = useRef<HTMLDivElement>(null)
   const [boardHeight, setBoardHeight] = useState(640)
 
@@ -226,7 +239,6 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [isFever, setIsFever] = useState(false)
   const [showSpeedWarning, setShowSpeedWarning] = useState(false)
   const [milestoneText, setMilestoneText] = useState<string | null>(null)
-  const [showGuide, setShowGuide] = useState(true)
   const [stage, setStage] = useState(1)
   const [stageFlash, setStageFlash] = useState(false)
   const [dangerFlash, setDangerFlash] = useState(false)
@@ -314,7 +326,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       setStage(newStage)
       setStageFlash(true)
       playSfx('stage', 0.65)
-      effects.triggerFlash('rgba(255,255,255,0.5)', 400)
+      triggerFlash('rgba(255,255,255,0.5)', 400)
       clearTimeoutSafe(stageFlashTimerRef)
       stageFlashTimerRef.current = window.setTimeout(() => { stageFlashTimerRef.current = null; setStageFlash(false) }, 2500)
       // Regen stars for new stage
@@ -347,7 +359,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     const newMoving: MovingBlock = { x: startX, width: topBlock.width, direction, speed, colorIndex: nextColorIndex, isGolden, item }
     movingRef.current = newMoving
     setMoving(newMoving)
-  }, [playSfx, effects])
+  }, [playSfx, triggerFlash])
 
   // ─── Finish Game ─────────────────────────────────────────────────
 
@@ -359,17 +371,17 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     movingRef.current = null
     setMoving(null)
     playSfx('crash', 0.7, 0.85)
-    effects.triggerShake(12, 400)
-    effects.triggerFlash('rgba(239,68,68,0.6)', 300)
+    triggerShake(12, 400)
+    triggerFlash('rgba(239,68,68,0.6)', 300)
 
     // Pixel explosion particles
     const topBlock = stackRef.current[stackRef.current.length - 1]
-    effects.spawnParticles(10, topBlock.x + topBlock.width / 2, 100, undefined, 'circle')
+    spawnParticles(10, topBlock.x + topBlock.width / 2, 100, undefined, 'circle')
 
     const finalScore = scoreRef.current
     const elapsedMs = Math.max(Math.round(DEFAULT_FRAME_MS), finalScore * 800)
     onFinish({ score: finalScore, durationMs: elapsedMs })
-  }, [onFinish, playSfx, effects])
+  }, [onFinish, playSfx, spawnParticles, triggerFlash, triggerShake])
 
   // ─── Handle Tap ──────────────────────────────────────────────────
 
@@ -377,8 +389,6 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     if (finishedRef.current || gameOverRef.current) return
     const currentMoving = movingRef.current
     if (!currentMoving) return
-
-    setShowGuide(false)
 
     const currentStack = stackRef.current
     const topBlock = currentStack[currentStack.length - 1]
@@ -429,12 +439,12 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         feverActiveRef.current = true
         setIsFever(true)
         playSfx('fever', 0.7)
-        effects.triggerFlash('rgba(251,191,36,0.5)', 350)
+        triggerFlash('rgba(251,191,36,0.5)', 350)
       }
       if (nextPerfects > 1 && nextPerfects % 3 === 0) {
         playSfx('combo', 0.45, 1.0 + nextPerfects * 0.04)
       }
-      effects.comboHitBurst(placedX + placedWidth / 2, 80, nextPerfects, PERFECT_BONUS)
+      comboHitBurst(placedX + placedWidth / 2, 80, nextPerfects, PERFECT_BONUS)
     } else {
       placedWidth = overlapWidth
       placedX = overlapLeft
@@ -455,8 +465,8 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       }
 
       playSfx('place', 0.45, 0.85 + Math.random() * 0.3)
-      effects.spawnParticles(2, placedX + placedWidth / 2, 80, undefined, 'circle')
-      effects.triggerShake(2, 50)
+      spawnParticles(2, placedX + placedWidth / 2, 80, undefined, 'circle')
+      triggerShake(2, 50)
     }
 
     if (placedWidth < MIN_BLOCK_WIDTH) { finishGame(); return }
@@ -464,7 +474,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     // Apply item effects
     if (currentMoving.item) {
       playSfx('item', 0.6)
-      effects.triggerFlash(ITEM_COLORS[currentMoving.item] + '44', 200)
+      triggerFlash(ITEM_COLORS[currentMoving.item] + '44', 200)
 
       switch (currentMoving.item) {
         case 'widen':
@@ -496,8 +506,8 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     // Golden block
     if (currentMoving.isGolden) {
       playSfx('golden', 0.6)
-      effects.triggerFlash('rgba(251,191,36,0.35)', 150)
-      effects.spawnParticles(6, placedX + placedWidth / 2, 80, undefined, 'circle')
+      triggerFlash('rgba(251,191,36,0.35)', 150)
+      spawnParticles(6, placedX + placedWidth / 2, 80, undefined, 'circle')
     }
 
     // Scoring
@@ -516,7 +526,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     setScore(nextScore)
     if (points > 1) {
       const popColor = currentMoving.isGolden ? '#ffe066' : isPerfect ? '#ff6b6b' : feverActiveRef.current ? '#fd79a8' : '#fff'
-      effects.showScorePopup(points, newBlock.x + newBlock.width / 2, 60, popColor)
+      showScorePopup(points, newBlock.x + newBlock.width / 2, 60, popColor)
     }
 
     // Milestone
@@ -526,7 +536,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         setMilestoneText(`${m} BLOCKS!`)
         clearTimeoutSafe(milestoneTimerRef)
         milestoneTimerRef.current = window.setTimeout(() => { milestoneTimerRef.current = null; setMilestoneText(null) }, 2000)
-        effects.triggerFlash('rgba(34,197,94,0.35)', 200)
+        triggerFlash('rgba(34,197,94,0.35)', 200)
         playSfx('combo', 0.55, 1.2)
         break
       }
@@ -543,7 +553,16 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     window.setTimeout(() => {
       if (!finishedRef.current && !gameOverRef.current) spawnMovingBlock(newBlock, height)
     }, 50)
-  }, [finishGame, playSfx, spawnMovingBlock, effects])
+  }, [
+    comboHitBurst,
+    finishGame,
+    playSfx,
+    showScorePopup,
+    spawnMovingBlock,
+    spawnParticles,
+    triggerFlash,
+    triggerShake,
+  ])
 
   // ─── Audio Init ──────────────────────────────────────────────────
 
@@ -553,15 +572,16 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       combo: comboSfx, fever: feverSfx, golden: goldenSfx,
       speedup: speedupSfx, item: itemSfx, stage: stageSfx, danger: dangerSfx,
     }
+    const audioMap = audioRefs.current
     for (const [key, src] of Object.entries(sources)) {
-      const a = new Audio(src); a.preload = 'auto'; audioRefs.current[key] = a
+      const a = new Audio(src); a.preload = 'auto'; audioMap[key] = a
     }
     return () => {
       ;[perfectFlashTimerRef, cutPieceTimerRef, speedWarningTimerRef, milestoneTimerRef, stageFlashTimerRef, dangerTimerRef, itemTextTimerRef].forEach(clearTimeoutSafe)
-      for (const key of Object.keys(audioRefs.current)) audioRefs.current[key] = null
-      effects.cleanup()
+      for (const key of Object.keys(audioMap)) audioMap[key] = null
+      cleanup()
     }
-  }, [])
+  }, [cleanup])
 
   useEffect(() => { spawnMovingBlock(stackRef.current[0], 1) }, [spawnMovingBlock])
 
@@ -608,7 +628,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       }
 
       if (cutPiece !== null) setCutPieceOpacity((prev) => Math.max(0, prev - deltaSec * 2.5))
-      effects.updateParticles()
+      updateParticles()
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
 
@@ -617,7 +637,7 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (animationFrameRef.current !== null) { window.cancelAnimationFrame(animationFrameRef.current); animationFrameRef.current = null }
       lastFrameAtRef.current = null
     }
-  }, [cutPiece, effects])
+  }, [cutPiece, updateParticles])
 
   // ─── Derived State ───────────────────────────────────────────────
 
@@ -637,8 +657,8 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         margin: '0 auto', overflow: 'hidden', position: 'relative',
         display: 'flex', flexDirection: 'column',
         fontFamily: "'Press Start 2P', 'Courier New', monospace",
-        imageRendering: 'pixelated' as any,
-        ...effects.getShakeStyle(),
+        imageRendering: 'pixelated',
+        ...getShakeStyle(),
       }}
     >
       <style>{GAME_EFFECTS_CSS}</style>
@@ -656,39 +676,40 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         @keyframes st-rainbow { 0% { filter: hue-rotate(0deg); } 100% { filter: hue-rotate(360deg); } }
       `}</style>
 
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={isFlashing} flashColor={flashColor} />
+      <ParticleRenderer particles={particles} />
+      <ScorePopupRenderer popups={scorePopups} />
 
       {/* ─── Score HUD (Pixel style) ─── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 12px', background: '#0a0a2e', borderBottom: '3px solid #333',
+        padding: '12px 14px 10px', background: 'linear-gradient(180deg, #05051a 0%, #0a0a2e 100%)', borderBottom: '3px solid #333',
         flexShrink: 0, zIndex: 10,
       }}>
         <div>
-          <div style={{ fontSize: 'clamp(22px, 5.5vw, 32px)', fontWeight: 900, color: '#ffe066', margin: 0, textShadow: '2px 2px 0 #b8960b, -1px -1px 0 #000' }}>
+          <div style={{ fontSize: 9, color: '#b6b6d8', marginBottom: 4, letterSpacing: 1 }}>SCORE</div>
+          <div style={{ fontSize: 'clamp(30px, 8vw, 46px)', fontWeight: 900, color: '#ffe066', margin: 0, textShadow: '3px 3px 0 #b8960b, -1px -1px 0 #000' }}>
             {score}
           </div>
-          <div style={{ fontSize: 8, color: '#666', marginTop: 2 }}>STG {stage}</div>
+          <div style={{ fontSize: 10, color: '#b6b6d8', marginTop: 4 }}>STG {stage}</div>
         </div>
 
         {/* Power-up indicators */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          {slowActive > 0 && <div style={{ fontSize: 8, color: '#63b3ed', background: '#1a365d', padding: '2px 6px', border: '2px solid #63b3ed' }}>SLOW x{slowActive}</div>}
-          {doublePoints > 0 && <div style={{ fontSize: 8, color: '#ffe066', background: '#5a4a0a', padding: '2px 6px', border: '2px solid #ffe066' }}>2x x{doublePoints}</div>}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {slowActive > 0 && <div style={{ fontSize: 9, color: '#63b3ed', background: '#1a365d', padding: '4px 8px', border: '2px solid #63b3ed' }}>SLOW x{slowActive}</div>}
+          {doublePoints > 0 && <div style={{ fontSize: 9, color: '#ffe066', background: '#5a4a0a', padding: '4px 8px', border: '2px solid #ffe066' }}>2x x{doublePoints}</div>}
         </div>
 
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 8, color: '#888' }}>BEST {displayedBestScore}</div>
-          <div style={{ fontSize: 8, color: '#fbbf24' }}>PERFECT x{perfectCount}</div>
+          <div style={{ fontSize: 10, color: '#b6b6d8' }}>BEST {displayedBestScore}</div>
+          <div style={{ fontSize: 10, color: '#fbbf24', marginTop: 4 }}>PERFECT x{perfectCount}</div>
         </div>
       </div>
 
       {/* ─── Status Strip ─── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-        padding: '3px 12px', minHeight: 22, flexShrink: 0, zIndex: 10,
+        padding: '5px 12px', minHeight: 28, flexShrink: 0, zIndex: 10,
         background: isFever ? '#2a0a1e' : 'transparent',
         borderBottom: isFever ? '2px solid #ec4899' : undefined,
       }}>
@@ -740,14 +761,6 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <div style={{ position: 'absolute', top: 6, left: 6, fontSize: 7, color: '#555', zIndex: 5 }}>
           {stack.length - 1}F
         </div>
-
-        {/* Guide lines */}
-        {showGuide && stack.length <= 3 && moving && (
-          <>
-            <div style={{ position: 'absolute', left: stack[stack.length - 1].x, top: 0, width: 1, height: '100%', background: 'rgba(255,255,255,0.08)', pointerEvents: 'none', zIndex: 1 }} />
-            <div style={{ position: 'absolute', left: stack[stack.length - 1].x + stack[stack.length - 1].width, top: 0, width: 1, height: '100%', background: 'rgba(255,255,255,0.08)', pointerEvents: 'none', zIndex: 1 }} />
-          </>
-        )}
 
         {/* ─── Stack Blocks ─── */}
         {stack.map((block, index) => {
@@ -863,18 +876,6 @@ function StackTowerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             pointerEvents: 'none', animation: 'st-pixel-pop 0.5s steps(6) forwards', zIndex: 25,
           }}>
             {milestoneText}
-          </div>
-        )}
-
-        {/* ─── Guide ─── */}
-        {showGuide && (
-          <div style={{
-            position: 'absolute', bottom: 50, left: 0, right: 0, textAlign: 'center',
-            pointerEvents: 'none', zIndex: 5,
-          }}>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', animation: 'st-blink 1.5s steps(3) infinite' }}>
-              TAP TO STACK
-            </div>
           </div>
         )}
 

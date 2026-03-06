@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
-import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
+import { AUDIO_ENABLED, DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import revealSfx from '../../../assets/sounds/mine-sweep-reveal.mp3'
 import flagSfx from '../../../assets/sounds/mine-sweep-flag.mp3'
 import explodeSfx from '../../../assets/sounds/mine-sweep-explode.mp3'
@@ -12,6 +12,7 @@ import shieldSfx from '../../../assets/sounds/mine-sweep-shield.mp3'
 import hintSfx from '../../../assets/sounds/mine-sweep-hint.mp3'
 import timebonusSfx from '../../../assets/sounds/mine-sweep-timebonus.mp3'
 import levelupSfx from '../../../assets/sounds/mine-sweep-levelup.mp3'
+import mineSweepBgmLoop from '../../../assets/sounds/generated/mine-sweep/mine-sweep-bgm-loop.mp3'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
 /* ─── CONSTANTS ─── */
@@ -39,6 +40,7 @@ const XRAY_COST = 20
 
 const COMBO_WINDOW_MS = 3000
 const COMBO_MULTIPLIER_STEP = 0.5
+const MINE_SWEEP_BGM_VOLUME = 0.18
 
 function getMineCount(level: number): number {
   return Math.min(MAX_MINES, BASE_MINE_COUNT + level * MINE_INCREASE_PER_LEVEL)
@@ -152,7 +154,7 @@ const PX = `
   background: #c0c0c0;
   font-family: 'Press Start 2P', monospace;
   image-rendering: pixelated;
-  padding: 4px; gap: 3px;
+  padding: 6px; gap: 5px;
   border-top: 3px solid #fff; border-left: 3px solid #fff;
   border-bottom: 3px solid #808080; border-right: 3px solid #808080;
 }
@@ -162,27 +164,28 @@ const PX = `
   background: #c0c0c0;
   border-bottom: 3px solid #808080; border-right: 3px solid #808080;
   border-top: 3px solid #fff; border-left: 3px solid #fff;
-  padding: 6px 8px;
+  padding: 10px 12px;
   display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
 }
 .ms-lcd {
-  background: #300; color: #f33; padding: 4px 8px;
-  font-size: clamp(0.7rem, 2.8vw, 1.1rem);
+  background: #300; color: #f33; padding: 6px 10px;
+  font-size: clamp(0.88rem, 3.4vw, 1.3rem);
   border-top: 2px solid #808080; border-left: 2px solid #808080;
   border-bottom: 2px solid #fff; border-right: 2px solid #fff;
-  min-width: 52px; text-align: center;
+  min-width: 72px; text-align: center;
   text-shadow: 0 0 6px rgba(255,50,50,0.5);
   letter-spacing: 2px;
 }
 .ms-lcd-green { color: #0f0; text-shadow: 0 0 6px rgba(0,255,0,0.5); }
 .ms-lcd-yellow { color: #ff0; text-shadow: 0 0 6px rgba(255,255,0,0.5); }
 .ms-face-btn {
-  width: 36px; height: 36px;
+  width: 50px; height: 50px;
   background: #c0c0c0;
   border-top: 3px solid #fff; border-left: 3px solid #fff;
   border-bottom: 3px solid #808080; border-right: 3px solid #808080;
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px; cursor: pointer;
+  font-size: 28px; cursor: pointer;
   line-height: 1;
 }
 .ms-face-btn:active {
@@ -192,22 +195,25 @@ const PX = `
 
 /* ── INFO ROW ── */
 .ms-info {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 3px 6px; gap: 6px;
-  font-size: clamp(0.3rem, 1.1vw, 0.38rem);
+  display: flex; align-items: center; justify-content: center;
+  flex-wrap: wrap;
+  padding: 6px 8px; gap: 8px;
+  font-size: clamp(0.35rem, 1.35vw, 0.48rem);
   color: #333;
+  flex-shrink: 0;
 }
 .ms-info-tag {
   background: #a0a0a0;
-  padding: 2px 6px;
+  padding: 4px 8px;
   border-top: 1px solid #808080; border-left: 1px solid #808080;
   border-bottom: 1px solid #fff; border-right: 1px solid #fff;
+  display: inline-flex; align-items: center; gap: 3px;
 }
 .ms-info-tag b { color: #000; }
 .ms-fever-tag {
   background: #ff0; color: #800; font-weight: 800;
   animation: ms-px-blink 0.4s steps(2) infinite;
-  padding: 2px 8px;
+  padding: 4px 10px;
 }
 @keyframes ms-px-blink { 50% { opacity: 0.5; } }
 .ms-shield-tag { background: #0a0; color: #fff; }
@@ -215,10 +221,11 @@ const PX = `
 
 /* ── PROGRESS ── */
 .ms-prog-wrap {
-  height: 8px; background: #808080;
+  height: 12px; background: #808080;
   border-top: 2px solid #404040; border-left: 2px solid #404040;
   border-bottom: 2px solid #fff; border-right: 2px solid #fff;
   overflow: hidden;
+  flex-shrink: 0;
 }
 .ms-prog-fill {
   height: 100%; transition: width 0.2s steps(8);
@@ -355,9 +362,10 @@ const PX = `
 
 /* ── COMBO TIMER ── */
 .ms-combo-bar {
-  height: 4px; background: #404040;
+  height: 6px; background: #404040;
   border-top: 1px solid #202020; border-left: 1px solid #202020;
   overflow: hidden;
+  flex-shrink: 0;
 }
 .ms-combo-fill {
   height: 100%; background: #f80; transition: width 0.1s linear;
@@ -365,17 +373,21 @@ const PX = `
 
 /* ── POWER BAR ── */
 .ms-pwr {
-  display: flex; gap: 3px; padding: 2px;
+  display: flex; align-items: stretch; gap: 5px; padding: 4px 2px 2px;
+  flex-shrink: 0;
 }
 .ms-pwr-btn {
   flex: 1; display: flex; flex-direction: column; align-items: center;
-  gap: 1px; padding: 4px 2px;
+  justify-content: center;
+  gap: 4px; padding: 8px 3px;
+  min-height: 72px;
   background: #c0c0c0;
   border-top: 2px solid #fff; border-left: 2px solid #fff;
   border-bottom: 2px solid #808080; border-right: 2px solid #808080;
   font-family: 'Press Start 2P', monospace;
-  font-size: clamp(0.25rem, 0.9vw, 0.32rem);
+  font-size: clamp(0.28rem, 1vw, 0.38rem);
   color: #333; cursor: pointer;
+  line-height: 1.3;
 }
 .ms-pwr-btn:active:not(:disabled) {
   border-top: 2px solid #808080; border-left: 2px solid #808080;
@@ -383,33 +395,21 @@ const PX = `
   background: #a0a0a0;
 }
 .ms-pwr-btn:disabled { opacity: 0.35; cursor: default; }
+.ms-pwr-btn span { text-align: center; }
 .ms-pwr-btn.active-flag {
   background: #fcc;
   border-top: 2px solid #808080; border-left: 2px solid #808080;
   border-bottom: 2px solid #fff; border-right: 2px solid #fff;
 }
-.ms-pwr-ico { font-size: clamp(0.55rem, 2vw, 0.8rem); }
-.ms-pwr-cost { color: #800; font-size: clamp(0.22rem, 0.8vw, 0.28rem); }
+.ms-pwr-ico { font-size: clamp(0.72rem, 2.6vw, 1rem); }
+.ms-pwr-cost { color: #800; font-size: clamp(0.24rem, 0.85vw, 0.31rem); }
 
 /* ── HINT ── */
 .ms-hint-row {
   display: flex; align-items: center; justify-content: center;
-  padding: 2px; gap: 6px;
-  font-size: clamp(0.28rem, 1vw, 0.35rem); color: #666;
-}
-/* ── EXIT ── */
-.ms-exit {
-  padding: 4px 8px; text-align: center;
-  background: #c0c0c0;
-  border-top: 2px solid #fff; border-left: 2px solid #fff;
-  border-bottom: 2px solid #808080; border-right: 2px solid #808080;
-  font-family: 'Press Start 2P', monospace;
-  font-size: clamp(0.3rem, 1vw, 0.38rem);
-  color: #333; cursor: pointer;
-}
-.ms-exit:active {
-  border-top: 2px solid #808080; border-left: 2px solid #808080;
-  border-bottom: 2px solid #fff; border-right: 2px solid #fff;
+  padding: 5px 4px 2px; gap: 10px;
+  font-size: clamp(0.33rem, 1.15vw, 0.42rem); color: #666;
+  flex-shrink: 0;
 }
 
 /* ── SCANLINE OVERLAY ── */
@@ -423,7 +423,7 @@ const PX = `
 `
 
 /* ─── GAME COMPONENT ─── */
-function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+function MineSweepMiniGame({ onFinish, onExit, bestScore = 0, isAudioMuted = false }: MiniGameSessionProps) {
   const fx = useGameEffects()
   const [board, setBoard] = useState<BoardState>(() => createEmptyBoard())
   const [score, setScore] = useState(0)
@@ -460,6 +460,8 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
   const gridRef = useRef<HTMLDivElement | null>(null)
   const comboRef = useRef(0)
   const comboMsRef = useRef(0)
+  const isAudioMutedRef = useRef(isAudioMuted)
+  const bgmRef = useRef<HTMLAudioElement | null>(null)
 
   const audioRefs = {
     reveal: useRef<HTMLAudioElement | null>(null),
@@ -475,7 +477,22 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
     levelup: useRef<HTMLAudioElement | null>(null),
   }
 
+  const stopBgm = useCallback((reset = false) => {
+    const bgm = bgmRef.current
+    if (bgm === null) return
+    bgm.pause()
+    if (reset) bgm.currentTime = 0
+  }, [])
+
+  const startBgm = useCallback(() => {
+    if (!AUDIO_ENABLED || isAudioMutedRef.current || finishedRef.current) return
+    const bgm = bgmRef.current
+    if (bgm === null || !bgm.paused) return
+    void bgm.play().catch(() => {})
+  }, [])
+
   const play = useCallback((ref: { current: HTMLAudioElement | null }, vol: number, rate = 1) => {
+    if (!AUDIO_ENABLED || isAudioMutedRef.current) return
     const a = ref.current
     if (!a) return
     a.currentTime = 0
@@ -506,9 +523,10 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
   const endGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
+    stopBgm(true)
     const elapsed = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     onFinish({ score: scoreRef.current, durationMs: elapsed })
-  }, [onFinish])
+  }, [onFinish, stopBgm])
 
   const handleMineHit = useCallback((row: number, col: number) => {
     if (hasShield) {
@@ -672,6 +690,7 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
 
   const onPtrDown = useCallback((row: number, col: number) => {
     if (finishedRef.current || gameOver) return
+    startBgm()
     ptrStartRef.current = { row, col }
     longFiredRef.current = false
     if (longTimerRef.current !== null) window.clearTimeout(longTimerRef.current)
@@ -680,7 +699,7 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
       longFiredRef.current = true
       flagMode ? openCell(row, col) : toggleFlag(row, col)
     }, LONG_PRESS_MS)
-  }, [gameOver, toggleFlag, openCell, flagMode])
+  }, [gameOver, toggleFlag, openCell, flagMode, startBgm])
 
   const onPtrUp = useCallback((row: number, col: number) => {
     if (longTimerRef.current !== null) { window.clearTimeout(longTimerRef.current); longTimerRef.current = null }
@@ -696,12 +715,14 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
 
   const onCtxMenu = useCallback((e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault()
+    startBgm()
     toggleFlag(row, col)
-  }, [toggleFlag])
+  }, [toggleFlag, startBgm])
 
   /* ── POWER-UPS ── */
   const useHint = useCallback(() => {
     if (scoreRef.current < HINT_COST || !boardRef.current.minesPlaced || gameOver) return
+    startBgm()
     const cur = boardRef.current
     const safe: [number, number][] = []
     for (let r = 0; r < GRID_SIZE; r += 1)
@@ -717,27 +738,30 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
     play(audioRefs.hint, 0.6, 1.2)
     const [cx, cy] = cellXY(hr, hc)
     fx.spawnParticles(3, cx, cy, ['?', '!'])
-  }, [gameOver, play, cellXY])
+  }, [gameOver, play, cellXY, startBgm])
 
   const useShield = useCallback(() => {
     if (scoreRef.current < SHIELD_COST || hasShield || gameOver) return
+    startBgm()
     scoreRef.current -= SHIELD_COST; setScore(scoreRef.current)
     setHasShield(true)
     play(audioRefs.shield, 0.7, 1.0)
     fx.triggerFlash('rgba(0,200,0,0.3)')
-  }, [hasShield, gameOver, play])
+  }, [hasShield, gameOver, play, startBgm])
 
   const useTimeBonus = useCallback(() => {
     if (scoreRef.current < TIME_BONUS_COST || gameOver) return
+    startBgm()
     scoreRef.current -= TIME_BONUS_COST; setScore(scoreRef.current)
     remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_MS)
     setRemainingMs(remainingMsRef.current)
     play(audioRefs.timebonus, 0.6, 1.0)
     fx.triggerFlash('rgba(0,100,255,0.3)')
-  }, [gameOver, play])
+  }, [gameOver, play, startBgm])
 
   const useXray = useCallback(() => {
     if (scoreRef.current < XRAY_COST || !boardRef.current.minesPlaced || gameOver) return
+    startBgm()
     const cur = boardRef.current
     const mines: [number, number][] = []
     for (let r = 0; r < GRID_SIZE; r += 1)
@@ -756,7 +780,16 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
     fx.triggerFlash('rgba(255,100,100,0.2)')
     const [cx, cy] = cellXY(picked[0], picked[1])
     fx.spawnParticles(3, cx, cy, ['!', 'X'])
-  }, [gameOver, play, cellXY])
+  }, [gameOver, play, cellXY, startBgm])
+
+  useEffect(() => {
+    isAudioMutedRef.current = isAudioMuted
+    if (isAudioMuted) {
+      stopBgm()
+      return
+    }
+    startBgm()
+  }, [isAudioMuted, startBgm, stopBgm])
 
   /* ── AUDIO INIT ── */
   useEffect(() => {
@@ -766,8 +799,18 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
       [audioRefs.warning, warningSfx], [audioRefs.shield, shieldSfx], [audioRefs.hint, hintSfx],
       [audioRefs.timebonus, timebonusSfx], [audioRefs.levelup, levelupSfx],
     ]
-    for (const [ref, src] of srcs) { const a = new Audio(src); a.preload = 'auto'; ref.current = a }
+    if (AUDIO_ENABLED) {
+      for (const [ref, src] of srcs) { const a = new Audio(src); a.preload = 'auto'; ref.current = a }
+      const bgm = new Audio(mineSweepBgmLoop)
+      bgm.preload = 'auto'
+      bgm.loop = true
+      bgm.volume = MINE_SWEEP_BGM_VOLUME
+      bgmRef.current = bgm
+      startBgm()
+    }
     return () => {
+      stopBgm(true)
+      bgmRef.current = null
       for (const [ref] of srcs) ref.current = null
       if (longTimerRef.current !== null) { window.clearTimeout(longTimerRef.current); longTimerRef.current = null }
       fx.cleanup()
@@ -775,10 +818,16 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
   }, [])
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
+    const h = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') {
+        e.preventDefault()
+        stopBgm(true)
+        onExit()
+      }
+    }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [onExit])
+  }, [onExit, stopBgm])
 
   /* ── GAME LOOP ── */
   useEffect(() => {
@@ -983,8 +1032,6 @@ function MineSweepMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         <span>|</span>
         <span>HOLD:{flagMode ? 'DIG' : 'FLAG'}</span>
       </div>
-
-      <button className="ms-exit" type="button" onClick={onExit}>EXIT</button>
 
       <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
       <ParticleRenderer particles={fx.particles} />

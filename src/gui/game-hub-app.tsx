@@ -108,13 +108,18 @@ import uiCoinCollectSfx from '../../assets/sounds/ui/coin-collect.mp3'
 import uiTabSwitchSfx from '../../assets/sounds/ui/tab-switch.mp3'
 import uiUnlockPopSfx from '../../assets/sounds/ui/unlock-pop.mp3'
 import uiErrorBuzzSfx from '../../assets/sounds/ui/error-buzz.mp3'
+import { STACK_TOWER_GAMEPLAY_BGM_VOLUME } from '../minigames/stack-tower/config'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
 const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
 const GAME_START_COUNTDOWN_STEP_MS = 1000
 const GAME_OVER_OVERLAY_MS = 1100
 const RESULT_ROLL_DURATION_MS = 1200
-const IN_GAME_MODULE_BGM_IDS = new Set<MiniGameId>(['tap-dash', 'same-character', 'gogunbuntu'])
+const IN_GAME_MODULE_BGM_IDS = new Set<MiniGameId>(['tap-dash', 'same-character', 'gogunbuntu', 'rope-swing', 'word-chain', 'ball-bounce-mini', 'drum-circle', 'connect-four', 'cannon-shot', 'flappy-singer'])
+const IN_GAME_BGM_VOLUME_BY_GAME_ID: Partial<Record<MiniGameId, number>> = {
+  'stack-tower': STACK_TOWER_GAMEPLAY_BGM_VOLUME,
+}
+const HIDDEN_GAME_DESCRIPTION_IDS = new Set<MiniGameId>(['stack-tower'])
 const LIVE_FX_SPARKS = [
   { left: '8%', top: '18%', delay: '0s', duration: '2.6s' },
   { left: '16%', top: '46%', delay: '0.35s', duration: '3.1s' },
@@ -235,11 +240,13 @@ interface RoundSettlement {
   readonly earnedCoins: number
   readonly bestScore: number
   readonly newBestScore: boolean
+  readonly endReason?: string
 }
 
 interface GameOverOverlayState {
   readonly gameId: MiniGameId
   readonly score: number
+  readonly endReason?: string
 }
 
 export function GameHubApp() {
@@ -354,12 +361,8 @@ export function GameHubApp() {
       playOneShotAudio(resultCoinRollSfx, 0.58)
     }
 
-    if (settlement.newBestScore) {
-      if (isAudioReady) {
-        playOneShotAudio(newRecordFanfareSfx, 0.8)
-      }
-    } else {
-
+    if (settlement.newBestScore && isAudioReady) {
+      playOneShotAudio(newRecordFanfareSfx, 0.8)
     }
 
     return () => {
@@ -410,7 +413,9 @@ export function GameHubApp() {
 
     const lobbyBgm = activeGameId === null && resultGameId === null ? pickRandomLobbyBgm() : ''
     const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : lobbyBgm
-    const nextVolume = activeGameId !== null ? 0.18 : resultGameId !== null ? 0.2 : 0.22
+    const nextVolume = activeGameId !== null
+      ? (IN_GAME_BGM_VOLUME_BY_GAME_ID[activeGameId] ?? 0.18)
+      : resultGameId !== null ? 0.2 : 0.22
     smPlayBgm(nextTrack, nextVolume)
   }, [activeGameId, countdownStepIndex, isAudioReady, resultGameId])
 
@@ -576,7 +581,7 @@ export function GameHubApp() {
       (error: unknown) => ({ error }),
     )
     setCountdownStepIndex(null)
-    setGameOverOverlay({ gameId: finishedGameId, score: result.score })
+    setGameOverOverlay({ gameId: finishedGameId, score: result.score, endReason: result.endReason })
 
     try {
       await wait(GAME_OVER_OVERLAY_MS)
@@ -602,6 +607,7 @@ export function GameHubApp() {
         earnedCoins: response.earnedCoins,
         bestScore: finishedCard.bestScore,
         newBestScore: response.newBestScore,
+        endReason: result.endReason,
       })
     } catch (caught) {
       setActiveGameId(null)
@@ -618,7 +624,11 @@ export function GameHubApp() {
   const isResultActionView = activeGameId === null && resultGameId !== null
   const isCountdownActive = activeGameId !== null && countdownStepIndex !== null
   const countdownLabel = isCountdownActive ? GAME_START_COUNTDOWN_LABELS[countdownStepIndex] : null
-  const countdownGuide = activeGameId ? (COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] ?? miniGameModuleById[activeGameId].manifest.description) : null
+  const countdownGuide = activeGameId === null
+    ? null
+    : HIDDEN_GAME_DESCRIPTION_IDS.has(activeGameId)
+      ? null
+      : (COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] ?? miniGameModuleById[activeGameId].manifest.description)
   const displayedSettlementScore = isRollingDone && settlement ? settlement.score : rollingScore
   const displayedSettlementCoins = isRollingDone && settlement ? settlement.earnedCoins : rollingCoins
 
@@ -698,7 +708,7 @@ export function GameHubApp() {
                 <div className="game-countdown-content">
                   <p className="game-countdown-text">{countdownLabel}</p>
                   <p className="game-countdown-title">{activeCard?.manifest.title ?? 'Mini Game'}</p>
-                  <p className="game-countdown-guide">{countdownGuide ?? activeCard?.manifest.description}</p>
+                  {countdownGuide !== null ? <p className="game-countdown-guide">{countdownGuide}</p> : null}
                 </div>
               </section>
             ) : (
@@ -712,6 +722,7 @@ export function GameHubApp() {
               <section className="game-over-overlay" aria-live="polite" aria-label="game-over-overlay">
                 <p className="game-over-title">GAME OVER</p>
                 <p className="game-over-score">{gameOverOverlay.score.toLocaleString()}</p>
+                {gameOverOverlay.endReason ? <p className="game-over-reason">{gameOverOverlay.endReason}</p> : null}
               </section>
             ) : null}
           </section>
@@ -726,6 +737,7 @@ export function GameHubApp() {
                   {displayedSettlementScore.toLocaleString()}
                 </p>
                 <p className="post-game-summary-coins">+{displayedSettlementCoins.toLocaleString()} COINS</p>
+                {settlement.endReason ? <p className="post-game-summary-reason">{settlement.endReason}</p> : null}
                 {settlement.newBestScore ? (
                   <p className={`post-game-record-banner ${isRollingDone ? 'active' : ''}`}>NEW RECORD!</p>
                 ) : null}
@@ -795,7 +807,7 @@ export function GameHubApp() {
             {isLobbyGamePicked && selectedCard ? (
               <section className="hub-selected-panel">
                 <h2>{selectedCard.manifest.title}</h2>
-                <p>{selectedCard.manifest.description}</p>
+                {!HIDDEN_GAME_DESCRIPTION_IDS.has(selectedCard.manifest.id) ? <p>{selectedCard.manifest.description}</p> : null}
                 <p className="panel-meta">Unlock: {selectedCard.manifest.unlockCost} coins</p>
                 <p className="panel-meta">Reward: +{selectedCard.manifest.baseReward} coins</p>
                 <p className="panel-meta">Best: {selectedCard.bestScore} · Plays: {selectedCard.playCount}</p>
@@ -869,7 +881,7 @@ export function GameHubApp() {
             if (reward.unlockedGameIds.length > 0) playUiUnlockSfx()
             const next = await useCases.addCoinsAndUnlockGames(
               reward.totalCoins,
-              reward.unlockedGameIds as any,
+              reward.unlockedGameIds as MiniGameId[],
               selectedGameId,
             )
             setSnapshot(next)

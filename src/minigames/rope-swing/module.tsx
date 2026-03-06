@@ -26,33 +26,34 @@ import starSfx from '../../../assets/sounds/rope-swing-star.mp3'
 import levelupSfx from '../../../assets/sounds/rope-swing-levelup.mp3'
 import bounceSfx from '../../../assets/sounds/rope-swing-bounce.mp3'
 import dashSfx from '../../../assets/sounds/rope-swing-dash.mp3'
+import ropeSwingBgm from '../../../assets/sounds/default-bgm-loop.mp3'
 
 const ALL_CHARS = [taeJinaSprite, kimYeonjaSprite, parkSangminSprite, parkWankyuSprite, seoTaijiSprite, songChangsikSprite]
+const PIXEL_FONT = '"Press Start 2P", "DungGeunMo", monospace'
 
 // --- Constants ---
 const VW = 360
 const VH = 720
-const ROPE_AY = 28
-const ROPE_LMIN = 140
-const ROPE_LMAX = 230
-const GRAB_R = 55
+const ROPE_AY = 56
+const ROPE_LMIN = 128
+const ROPE_LMAX = 212
+const GRAB_R = 68
 const G = 980
 const PDAMP = 0.998
-const WIND_MAX = 120
+const WIND_MAX = 92
 const WIND_MS = 3000
-const GAP_MIN0 = 95
-const GAP_MAX0 = 135
-const GAP_GROW = 1.6
-const GAP_CAP = 220
+const GAP_MIN0 = 78
+const GAP_MAX0 = 116
+const GAP_GROW = 0.95
+const GAP_CAP = 180
 const PW = 56
 const PH = 64
-const COMBO_DECAY = 2800
+const COMBO_DECAY = 3300
 const COMBO_STEP = 4
 const FALL_Y = VH + 60
-const SPD_GROW = 0.025
-const SPD_CAP = 2.5
+const SPD_GROW = 0.015
+const SPD_CAP = 2.05
 const COIN_CH = 0.7
-const COIN_R = 13
 const COIN_CR = 34
 const COIN_PTS = 5
 const DIST_DIV = 70
@@ -67,14 +68,31 @@ const DJ_CT = 2
 const SX2_MS = 8000
 const SPB_MS = 4000
 const SLO_MS = 3500
-const OBS_CH = 0.32
+const OBS_CH = 0.2
 const OBS_R = 18
 const TRAIL_N = 14
 const LVL_SW = 5
 const MAX_LVL = 20
 const STAR_CH = 0.15
-const STAR_R = 12
 const STAR_PTS = 25
+const ROPE_CATCH_RATIO = 0.72
+const GRAB_ASSIST_R = 110
+const GRAB_ASSIST_PULL = 880
+const RELEASE_READY_MIN = 0.18
+const RELEASE_READY_MAX = 1.08
+const SWAY_SWING_ACCEL = 7.6
+const SWAY_SWING_CAP = 3.1
+const SWAY_FLY_ACCEL = 220
+const SWAY_FLY_LIFT = 90
+
+const SKY_BANDS = ['#0b1023', '#101833', '#152245', '#1b3057', '#24416d', '#2f5585'] as const
+const FAR_HILLS = [84, 104, 128, 118, 138, 110, 150, 122, 142, 112, 96, 88] as const
+const NEAR_HILLS = [136, 118, 154, 134, 172, 150, 184, 142, 166, 138, 122, 114] as const
+const CLOUDS = [
+  { x: 28, y: 88 },
+  { x: 144, y: 126 },
+  { x: 250, y: 74 },
+] as const
 
 // --- Types ---
 interface Rope { readonly id: number; readonly anchorX: number; readonly length: number }
@@ -95,6 +113,10 @@ const cMul = (c: number) => 1 + Math.floor(c / COMBO_STEP)
 function gap(s: number) {
   const g = s * GAP_GROW
   return { mn: Math.min(GAP_MIN0 + g, GAP_CAP - 20), mx: Math.min(GAP_MAX0 + g, GAP_CAP) }
+}
+
+function ropeCatchY(length: number) {
+  return ROPE_AY + length * ROPE_CATCH_RATIO
 }
 
 function nxRope(px: number, sc: number, id: number): Rope {
@@ -126,10 +148,126 @@ const PUD: Record<PUType, { ic: string; cl: string; gl: string }> = {
   'slow-motion': { ic: '~', cl: '#8b5cf6', gl: '#c4b5fd' },
 }
 
-const OBS_E: Record<string, string> = { bat: '\u{1F987}', spike: '\u{1F480}', ghost: '\u{1F47B}' }
-
 function PxB({ x, y, s, c, o = 1 }: { x: number; y: number; s: number; c: string; o?: number }) {
   return <rect x={x} y={y} width={s} height={s} fill={c} opacity={o} shapeRendering="crispEdges" />
+}
+
+type PxPattern = ReadonlyArray<readonly [number, number]>
+
+const COIN_PATTERN: PxPattern = [
+  [-1, -2], [0, -2], [1, -2],
+  [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1],
+  [-2, 0], [-1, 0], [1, 0], [2, 0],
+  [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1],
+  [-1, 2], [0, 2], [1, 2],
+]
+const COIN_SHINE_PATTERN: PxPattern = [
+  [0, -1], [1, -1],
+  [0, 0], [1, 0],
+]
+const STAR_PATTERN: PxPattern = [
+  [0, -3],
+  [-1, -2], [0, -2], [1, -2],
+  [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1],
+  [-3, 0], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [3, 0],
+  [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1],
+  [-1, 2], [0, 2], [1, 2],
+  [0, 3],
+]
+const BAT_PATTERN: PxPattern = [
+  [-5, -1], [-4, -2], [-4, -1], [-3, -3], [-3, -2], [-3, -1], [-2, -2], [-2, -1],
+  [-1, -1], [0, -2], [1, -1], [2, -2], [2, -1], [3, -3], [3, -2], [3, -1], [4, -2], [4, -1], [5, -1],
+  [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0],
+  [-1, 1], [0, 1], [1, 1],
+]
+const GHOST_PATTERN: PxPattern = [
+  [-2, -3], [-1, -3], [0, -3], [1, -3], [2, -3],
+  [-3, -2], [-2, -2], [-1, -2], [0, -2], [1, -2], [2, -2], [3, -2],
+  [-3, -1], [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1], [3, -1],
+  [-3, 0], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [3, 0],
+  [-3, 1], [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1], [3, 1],
+  [-3, 2], [-2, 2], [0, 2], [2, 2], [3, 2],
+]
+const SPIKE_PATTERN: PxPattern = [
+  [0, -3],
+  [-1, -2], [0, -2], [1, -2],
+  [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1],
+  [-3, 0], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [3, 0],
+  [-4, 1], [-3, 1], [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1],
+]
+
+function renderPxPattern(pattern: PxPattern, size: number, color: string, originX = 0, originY = 0, opacity = 1) {
+  return pattern.map(([px, py], index) => (
+    <PxB key={`${originX}-${originY}-${px}-${py}-${index}`} x={originX + px * size} y={originY + py * size} s={size} c={color} o={opacity} />
+  ))
+}
+
+function PxCloud({ x, y }: { x: number; y: number }) {
+  return (
+    <g opacity={0.8}>
+      <PxB x={x} y={y} s={10} c="#f8fafc" o={0.55} />
+      <PxB x={x + 8} y={y - 6} s={12} c="#f8fafc" o={0.65} />
+      <PxB x={x + 18} y={y - 2} s={10} c="#f8fafc" o={0.6} />
+      <PxB x={x + 28} y={y + 2} s={8} c="#e2e8f0" o={0.42} />
+    </g>
+  )
+}
+
+function PxCoinGlyph({ x, y }: { x: number; y: number }) {
+  const size = 4
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      {renderPxPattern(COIN_PATTERN, size, '#b45309')}
+      {renderPxPattern(COIN_PATTERN, size - 1, '#f59e0b', 1, 1)}
+      {renderPxPattern(COIN_SHINE_PATTERN, size, '#fde68a')}
+    </g>
+  )
+}
+
+function PxStarGlyph({ x, y }: { x: number; y: number }) {
+  const size = 4
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      {renderPxPattern(STAR_PATTERN, size, '#ca8a04', 1, 1, 0.5)}
+      {renderPxPattern(STAR_PATTERN, size, '#fbbf24')}
+      {renderPxPattern([[0, -1], [-1, 0], [0, 0], [1, 0], [0, 1]], size, '#fef3c7')}
+    </g>
+  )
+}
+
+function PxObstacleGlyph({ x, y, type }: { x: number; y: number; type: Obs['type'] }) {
+  const size = 4
+  const pattern = type === 'bat' ? BAT_PATTERN : type === 'ghost' ? GHOST_PATTERN : SPIKE_PATTERN
+  const baseColor = type === 'ghost' ? '#c084fc' : type === 'bat' ? '#f87171' : '#ef4444'
+  const shadeColor = type === 'ghost' ? '#6d28d9' : '#7f1d1d'
+  const eyeColor = type === 'ghost' ? '#fef3c7' : '#111827'
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      {renderPxPattern(pattern, size, shadeColor, 1, 1, 0.35)}
+      {renderPxPattern(pattern, size, baseColor)}
+      {type === 'ghost' ? (
+        <>
+          <PxB x={-size} y={-size} s={size} c={eyeColor} />
+          <PxB x={size} y={-size} s={size} c={eyeColor} />
+          <PxB x={-size} y={0} s={size} c="#1f2937" />
+          <PxB x={size} y={0} s={size} c="#1f2937" />
+        </>
+      ) : (
+        <>
+          <PxB x={-size} y={0} s={size} c={eyeColor} />
+          <PxB x={size} y={0} s={size} c={eyeColor} />
+        </>
+      )}
+    </g>
+  )
+}
+
+function isReleaseReady(currentRope: Rope | undefined, nextRope: Rope | undefined, angle: number, angularVelocity: number) {
+  if (!currentRope || !nextRope) return false
+  if (nextRope.anchorX >= currentRope.anchorX) {
+    return angle >= RELEASE_READY_MIN && angle <= RELEASE_READY_MAX && angularVelocity > 0.15
+  }
+  return angle <= -RELEASE_READY_MIN && angle >= -RELEASE_READY_MAX && angularVelocity < -0.15
 }
 
 // --- Component ---
@@ -140,7 +278,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [phase, setPhase] = useState<Phase>('swinging')
-  const [pPos, setPPos] = useState({ x: VW / 2, y: ROPE_AY + 170 })
+  const [pPos, setPPos] = useState({ x: VW / 2, y: ROPE_AY + 190 })
   const [ropes, setRopes] = useState<Rope[]>(() => initRopes())
   const [cIdx, setCIdx] = useState(0)
   const [pAng, setPAng] = useState(0)
@@ -168,7 +306,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const coR = useRef(0)
   const lcAt = useRef(0)
   const phR = useRef<Phase>('swinging')
-  const pR = useRef<PState>({ x: VW / 2, y: ROPE_AY + 170, vx: 0, vy: 0, ang: 0, av: 1.8 })
+  const pR = useRef<PState>({ x: VW / 2, y: ROPE_AY + 190, vx: 0, vy: 0, ang: 0, av: 1.65 })
   const rsR = useRef<Rope[]>(ropes)
   const ciR = useRef(0)
   const ridR = useRef(3)
@@ -195,8 +333,11 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const swR = useRef(0)
   const lvR = useRef(1)
   const chiR = useRef(chI)
+  const leftDownR = useRef(false)
+  const rightDownR = useRef(false)
 
   const auR = useRef<Record<string, HTMLAudioElement | null>>({})
+  const bgmR = useRef<HTMLAudioElement | null>(null)
 
   const sfx = useCallback((k: string, v: number, r = 1) => {
     const a = auR.current[k]
@@ -217,6 +358,11 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     onFinishRef.current({ score: sR.current, durationMs: Math.round(Math.max(16.66, elR.current)) })
   }, [])
 
+  const setSway = useCallback((dir: 'left' | 'right', pressed: boolean) => {
+    if (dir === 'left') leftDownR.current = pressed
+    else rightDownR.current = pressed
+  }, [])
+
   const tap = useCallback(() => {
     if (dnR.current) return
     const ph = phR.current
@@ -228,10 +374,20 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       const pos = posOnR(r, p.ang)
       const ts = p.av * r.length
       p.x = pos.x; p.y = pos.y
-      p.vx = ts * Math.cos(p.ang); p.vy = -ts * Math.sin(p.ang)
-      p.vy = Math.min(p.vy, -50)
+      p.vx = ts * Math.cos(p.ang)
+      p.vy = -ts * Math.sin(p.ang)
+      const nextRope = rsR.current[ciR.current + 1]
+      if (nextRope) {
+        const dx = nextRope.anchorX - p.x
+        const dy = ropeCatchY(nextRope.length) - p.y
+        const dist = Math.max(1, Math.hypot(dx, dy))
+        const assist = clp(1 - Math.abs(dx) / 260, 0.18, 0.6)
+        p.vx += (dx / dist) * 92 * assist
+        p.vy += (dy / dist) * 70 * assist
+      }
+      p.vy = Math.min(p.vy - 18, -70)
       if (apuR.current.has('speed-boost')) {
-        p.vx *= 1.4; p.vy *= 0.8
+        p.vx *= 1.25; p.vy *= 0.88
         setDash(true); setTimeout(() => setDash(false), 400)
         sfx('dash', 0.5, 1.2)
       }
@@ -268,18 +424,50 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       speedup: speedupSfx, slowmo: slowmoSfx, star: starSfx, levelup: levelupSfx,
       bounce: bounceSfx, dash: dashSfx,
     }
-    for (const [k, src] of Object.entries(m)) { const a = new Audio(src); a.preload = 'auto'; auR.current[k] = a }
-    return () => { for (const a of Object.values(auR.current)) { if (a) { a.pause(); a.currentTime = 0 } }; fxRef.current.cleanup() }
+    const nextAudios: Record<string, HTMLAudioElement | null> = {}
+    for (const [k, src] of Object.entries(m)) { const a = new Audio(src); a.preload = 'auto'; nextAudios[k] = a }
+    auR.current = nextAudios
+    const bgm = new Audio(ropeSwingBgm)
+    bgm.loop = true
+    bgm.preload = 'auto'
+    bgm.volume = 0.2
+    bgmR.current = bgm
+    void bgm.play().catch(() => {})
+    return () => {
+      for (const a of Object.values(nextAudios)) { if (a) { a.pause(); a.currentTime = 0 } }
+      if (bgmR.current) {
+        bgmR.current.pause()
+        bgmR.current.currentTime = 0
+        bgmR.current = null
+      }
+      fxRef.current.cleanup()
+    }
   }, [])
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Escape') { e.preventDefault(); onExitRef.current(); return }
-      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); tap() }
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); tap(); return }
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); setSway('left', true); return }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); setSway('right', true) }
     }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [tap])
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); setSway('left', false); return }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); setSway('right', false) }
+    }
+    const onBlur = () => {
+      leftDownR.current = false
+      rightDownR.current = false
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [setSway, tap])
 
   // --- Main game loop ---
   useEffect(() => {
@@ -297,7 +485,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       wtR.current += raw
       if (wtR.current >= WIND_MS) {
         wtR.current = 0
-        const mw = Math.min(WIND_MAX, 30 + sR.current * 2.5 + lvR.current * 5)
+        const mw = Math.min(WIND_MAX, 25 + sR.current * 1.6 + lvR.current * 4)
         wR.current = rnd(-mw, mw)
         if (Math.abs(wR.current) > 55) sfx('wind', 0.25, 1)
       }
@@ -307,6 +495,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       }
 
       const p = pR.current, ph = phR.current
+      const swayDir = (leftDownR.current ? -1 : 0) + (rightDownR.current ? 1 : 0)
 
       if (ph === 'swinging') {
         const r = rsR.current[ciR.current]
@@ -314,18 +503,40 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           const ga = -(G / r.length) * Math.sin(p.ang)
           const wa = (wR.current / r.length) * Math.cos(p.ang)
           p.av += (ga + wa) * dt; p.av *= PDAMP; p.ang += p.av * dt
+          if (swayDir !== 0) {
+            const boost = 1 - Math.min(1, Math.abs(p.ang) / 1.35) * 0.35
+            p.av = clp(p.av + swayDir * SWAY_SWING_ACCEL * dt * boost, -SWAY_SWING_CAP, SWAY_SWING_CAP)
+          }
           const pos = posOnR(r, p.ang); p.x = pos.x; p.y = pos.y
         }
       } else if (ph === 'flying') {
         const sm = Math.min(SPD_CAP, 1 + sR.current * SPD_GROW)
         p.vy += G * dt; p.vx += wR.current * 0.3 * dt
+        if (swayDir !== 0) {
+          p.vx += swayDir * SWAY_FLY_ACCEL * dt
+          p.vy -= SWAY_FLY_LIFT * dt
+        }
         p.x += p.vx * dt * sm; p.y += p.vy * dt
 
         trR.current.push({ x: p.x, y: p.y, op: 1 })
         if (trR.current.length > TRAIL_N) trR.current.shift()
         trR.current.forEach((t, i) => { t.op = (i + 1) / trR.current.length })
 
-        const magOn = apuR.current.has('magnet'), magRad = 110
+        const magOn = apuR.current.has('magnet'), magRad = 124
+        const allR = rsR.current
+        const nextRope = allR[ciR.current + 1]
+        if (nextRope) {
+          const tx = nextRope.anchorX
+          const ty = ropeCatchY(nextRope.length)
+          const dx = tx - p.x
+          const dy = ty - p.y
+          const dist = Math.hypot(dx, dy)
+          if (dist < GRAB_ASSIST_R && dist > GRAB_R) {
+            const assist = (GRAB_ASSIST_R - dist) / (GRAB_ASSIST_R - GRAB_R)
+            p.vx += (dx / dist) * GRAB_ASSIST_PULL * assist * dt
+            p.vy += (dy / dist) * GRAB_ASSIST_PULL * assist * dt * 0.88
+          }
+        }
 
         for (const c of cnsR.current) {
           if (c.collected) continue
@@ -382,10 +593,9 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
         obR.current = obR.current.filter(o => o.x > -500 && o.x < VW + 500)
 
-        const allR = rsR.current
         for (let i = 0; i < allR.length; i++) {
           if (i <= ciR.current) continue
-          const r = allR[i], ey = ROPE_AY + r.length * 0.6
+          const r = allR[i], ey = ropeCatchY(r.length)
           const dist = Math.hypot(p.x - r.anchorX, p.y - ey)
           if (dist < GRAB_R && p.y < ROPE_AY + r.length + 20) {
             ciR.current = i; setCIdx(i); swR.current += 1; setSwCt(swR.current)
@@ -409,7 +619,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             if (fvOn && !fever) sfx('fever', 0.5, 1)
             setFever(fvOn)
 
-            const isPf = dist < GRAB_R * 0.35
+            const isPf = dist < GRAB_R * 0.42
             if (isPf) { setPerf(true); setTimeout(() => setPerf(false), 700) }
 
             const db = Math.floor(Math.abs(p.x - r.anchorX) / DIST_DIV)
@@ -428,20 +638,20 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
                 const ct = 1 + Math.floor(Math.random() * 3) + Math.floor(lvR.current / 4)
                 for (let c = 0; c < ct; c++) {
                   const t = (c + 1) / (ct + 1)
-                  cnsR.current.push({ id: cnidR.current++, x: r.anchorX + (nxA - r.anchorX) * t + rnd(-25, 25), y: rnd(ROPE_AY + 70, VH - 160), collected: false })
+                  cnsR.current.push({ id: cnidR.current++, x: r.anchorX + (nxA - r.anchorX) * t + rnd(-25, 25), y: rnd(ROPE_AY + 96, VH * 0.56), collected: false })
                 }
               }
               if (Math.random() < STAR_CH + lvR.current * 0.01)
-                stR.current.push({ id: stidR.current++, x: (r.anchorX + nxA) / 2 + rnd(-30, 30), y: rnd(ROPE_AY + 50, VH * 0.4), collected: false })
+                stR.current.push({ id: stidR.current++, x: (r.anchorX + nxA) / 2 + rnd(-30, 30), y: rnd(ROPE_AY + 72, VH * 0.42), collected: false })
               if (Math.random() < PU_CH) {
                 const ts: PUType[] = ['magnet', 'shield', 'double-jump', 'score-x2', 'speed-boost', 'slow-motion']
-                puR.current.push({ id: puidR.current++, x: (r.anchorX + nxA) / 2, y: rnd(ROPE_AY + 50, VH * 0.45), type: ts[Math.floor(Math.random() * ts.length)], collected: false })
+                puR.current.push({ id: puidR.current++, x: (r.anchorX + nxA) / 2, y: rnd(ROPE_AY + 72, VH * 0.48), type: ts[Math.floor(Math.random() * ts.length)], collected: false })
               }
-              const oc = OBS_CH + lvR.current * 0.015
+              const oc = OBS_CH + lvR.current * 0.008
               if (sR.current > 3 && Math.random() < oc) {
                 const d = Math.random() < 0.5 ? 1 : -1
                 const ots: Array<'bat' | 'spike' | 'ghost'> = ['bat', 'spike', 'ghost']
-                obR.current.push({ id: obidR.current++, x: d > 0 ? -50 : VW + 50, y: rnd(ROPE_AY + 80, VH * 0.6), type: ots[Math.floor(Math.random() * ots.length)], vx: d * rnd(50 + lvR.current * 5, 110 + lvR.current * 8), vy: rnd(-15, 15) })
+                obR.current.push({ id: obidR.current++, x: d > 0 ? -50 : VW + 50, y: rnd(ROPE_AY + 108, VH * 0.56), type: ots[Math.floor(Math.random() * ots.length)], vx: d * rnd(46 + lvR.current * 4, 94 + lvR.current * 6), vy: rnd(-12, 12) })
               }
             }
 
@@ -484,27 +694,30 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, pAng, pPos])
   const curCh = ALL_CHARS[chI]
+  const currentRope = ropes[cIdx]
+  const nextRope = ropes[cIdx + 1]
+  const releaseReady = phase === 'swinging' && isReleaseReady(currentRope, nextRope, pAng, pR.current.av)
 
   return (
     <section className="mini-game-panel rope-swing-panel" aria-label="rope-swing-game"
-      style={{ position: 'relative', width: '100%', maxWidth: '432px', height: '100%', margin: '0 auto', overflow: 'hidden', background: '#0a0a1a', imageRendering: 'pixelated', ...fx.getShakeStyle() }}>
+      style={{ position: 'relative', width: '100%', maxWidth: '432px', height: '100%', margin: '0 auto', overflow: 'hidden', background: '#090d19', imageRendering: 'pixelated', ...fx.getShakeStyle() }}>
       <div onClick={tap} onTouchStart={(e) => { e.preventDefault(); tap() }} role="presentation"
         style={{ width: '100%', height: '100%', position: 'relative', cursor: 'pointer' }}>
         <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid slice"
           style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, imageRendering: 'pixelated' }} shapeRendering="crispEdges">
-          <defs>
-            <linearGradient id="rbg" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#0a0a2e" /><stop offset="40%" stopColor="#1a1a4e" />
-              <stop offset="70%" stopColor="#0d2818" /><stop offset="100%" stopColor="#0a1a0a" />
-            </linearGradient>
-            <filter id="rgl"><feGaussianBlur stdDeviation="2.5" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-            <filter id="rg2"><feGaussianBlur stdDeviation="5" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-          </defs>
-          <rect width={VW} height={VH} fill="url(#rbg)" />
-
-          {/* Pixel stars */}
+          <rect width={VW} height={VH} fill="#0b1023" />
+          {SKY_BANDS.map((color, index) => (
+            <rect key={color} x={0} y={index * 42} width={VW} height={42} fill={color} opacity={0.98} />
+          ))}
           {Array.from({ length: 40 }, (_, i) => (
             <PxB key={`s${i}`} x={(i * 89 + 13) % VW} y={(i * 47 + 11) % (VH * 0.35)} s={i % 5 === 0 ? 4 : 2} c={i % 7 === 0 ? '#fbbf24' : '#fff'} o={0.15 + (i % 6) * 0.08} />
+          ))}
+          {CLOUDS.map((cloud, index) => <PxCloud key={`cloud-${index}`} x={cloud.x} y={cloud.y} />)}
+          {FAR_HILLS.map((height, index) => (
+            <rect key={`far-${index}`} x={index * 32} y={VH - 260 - height} width={32} height={height + 260} fill={index % 2 === 0 ? '#25345d' : '#1d2a4f'} />
+          ))}
+          {NEAR_HILLS.map((height, index) => (
+            <rect key={`near-${index}`} x={index * 32 - 6} y={VH - 190 - height} width={34} height={height + 190} fill={index % 2 === 0 ? '#30576d' : '#25455d'} />
           ))}
 
           {/* Ground */}
@@ -552,8 +765,9 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
                   {!past && <PxB x={r.anchorX - 4} y={ROPE_AY - 4} s={4} c="#fef3c7" o={0.6} />}
                   {pts.map((pt, pi) => <PxB key={pi} x={pt.x - 2} y={pt.y - 2} s={act && pi > segs * 0.7 ? 5 : 4} c={pi % 2 === 0 ? '#d97706' : '#fbbf24'} />)}
                   {isNx && (
-                    <rect x={r.anchorX - GRAB_R} y={ROPE_AY + r.length * 0.6 - GRAB_R} width={GRAB_R * 2} height={GRAB_R * 2}
-                      fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="8 4" opacity={0.35} rx={4}>
+                    <rect x={r.anchorX - GRAB_R} y={ropeCatchY(r.length) - GRAB_R} width={GRAB_R * 2} height={GRAB_R * 2}
+                      fill={releaseReady ? 'rgba(52,211,153,0.12)' : 'rgba(52,211,153,0.04)'}
+                      stroke={releaseReady ? '#86efac' : '#34d399'} strokeWidth={3} strokeDasharray="8 4" opacity={0.55} rx={4}>
                       <animate attributeName="opacity" values="0.2;0.45;0.2" dur="1.2s" repeatCount="indefinite" />
                     </rect>
                   )}
@@ -563,20 +777,12 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
             {/* Coins */}
             {coins.map(c => (
-              <g key={`c${c.id}`}>
-                <PxB x={c.x - COIN_R} y={c.y - COIN_R} s={COIN_R * 2} c="#f59e0b" o={0.9} />
-                <PxB x={c.x - COIN_R + 3} y={c.y - COIN_R + 3} s={6} c="#fef3c7" o={0.5} />
-                <text x={c.x} y={c.y + 5} textAnchor="middle" fill="#92400e" fontSize={14} fontWeight="bold" fontFamily="monospace">$</text>
-              </g>
+              <PxCoinGlyph key={`c${c.id}`} x={c.x} y={c.y} />
             ))}
 
             {/* Stars */}
             {stars.map(s => (
-              <g key={`st${s.id}`}>
-                <PxB x={s.x - STAR_R} y={s.y - STAR_R} s={STAR_R * 2} c="#fbbf24" />
-                <PxB x={s.x - STAR_R + 2} y={s.y - STAR_R + 2} s={4} c="#fef3c7" o={0.7} />
-                <text x={s.x} y={s.y + 6} textAnchor="middle" fill="#fff" fontSize={18} fontFamily="monospace" fontWeight="bold">*</text>
-              </g>
+              <PxStarGlyph key={`st${s.id}`} x={s.x} y={s.y} />
             ))}
 
             {/* Power-ups */}
@@ -595,8 +801,8 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             {/* Obstacles */}
             {obs.map(o => (
               <g key={`ob${o.id}`}>
-                <text x={o.x} y={o.y + 8} textAnchor="middle" fontSize={30}>{OBS_E[o.type]}</text>
-                <rect x={o.x - OBS_R} y={o.y - OBS_R} width={OBS_R * 2} height={OBS_R * 2} fill="none" stroke="#ef4444" strokeWidth={1} opacity={0.3} />
+                <PxObstacleGlyph x={o.x} y={o.y} type={o.type} />
+                <rect x={o.x - OBS_R} y={o.y - OBS_R} width={OBS_R * 2} height={OBS_R * 2} fill="none" stroke="#ef4444" strokeWidth={1} opacity={0.18} />
               </g>
             ))}
 
@@ -629,22 +835,27 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         </svg>
 
         {/* HUD */}
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '8px 14px', pointerEvents: 'none', zIndex: 10 }}>
-          <div style={{ display: 'inline-block', background: 'rgba(0,0,0,0.5)', border: '2px solid #fbbf24', borderRadius: 2, padding: '2px 10px', marginBottom: 4, fontFamily: 'monospace', fontSize: '0.8rem', color: '#fbbf24', fontWeight: 700 }}>
-            LV.{lvl}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <p style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 900, color: 'white', margin: 0, fontFamily: 'monospace', lineHeight: 1, textShadow: '2px 2px 0 #000, 0 0 10px rgba(251,191,36,0.3)' }}>{score}</p>
-              <p style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', margin: 0, fontFamily: 'monospace' }}>BEST {bestD}</p>
+        <div style={{ position: 'absolute', top: 10, left: 10, right: 10, pointerEvents: 'none', zIndex: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+            <div style={{ minWidth: 0, flex: 1, padding: '9px 11px 10px', background: 'rgba(7,10,20,0.84)', border: '3px solid #fbbf24', boxShadow: '0 0 0 2px rgba(12,18,34,0.8) inset' }}>
+              <p style={{ margin: '0 0 6px', fontSize: '0.5rem', color: '#fde68a', fontFamily: PIXEL_FONT, letterSpacing: '0.08em' }}>SCORE</p>
+              <p style={{ margin: 0, fontSize: 'clamp(2rem, 7.6vw, 3rem)', fontWeight: 900, color: '#f8fafc', fontFamily: PIXEL_FONT, lineHeight: 1, letterSpacing: '0.06em', textShadow: '3px 3px 0 #111827' }}>
+                {score.toString().padStart(4, '0')}
+              </p>
+              <p style={{ margin: '6px 0 0', fontSize: '0.48rem', color: '#cbd5e1', fontFamily: PIXEL_FONT, letterSpacing: '0.04em' }}>
+                BEST {bestD.toString().padStart(4, '0')}
+              </p>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              {combo > 1 && <p style={{ fontSize: 'clamp(1.3rem, 4.5vw, 2rem)', fontWeight: 900, margin: 0, fontFamily: 'monospace', color: cm >= 3 ? '#fbbf24' : '#34d399', textShadow: '2px 2px 0 #000, 0 0 8px currentColor' }}>x{cm}</p>}
-              {fever && <p style={{ fontSize: '1.1rem', fontWeight: 900, color: '#fbbf24', margin: 0, fontFamily: 'monospace', textShadow: '2px 2px 0 #000, 0 0 12px #f59e0b', animation: 'rs-bk 0.3s step-end infinite alternate' }}>FEVER!!</p>}
+            <div style={{ width: 118, padding: '9px 9px 8px', background: 'rgba(7,10,20,0.78)', border: '3px solid rgba(148,163,184,0.75)', boxShadow: '0 0 0 2px rgba(15,23,42,0.75) inset' }}>
+              <p style={{ margin: 0, fontSize: '0.5rem', color: '#fbbf24', fontFamily: PIXEL_FONT }}>LV {lvl.toString().padStart(2, '0')}</p>
+              <p style={{ margin: '7px 0 0', fontSize: '0.48rem', color: '#86efac', fontFamily: PIXEL_FONT }}>SW {swCt.toString().padStart(2, '0')}</p>
+              <p style={{ margin: '7px 0 0', fontSize: '0.48rem', color: '#fbbf24', fontFamily: PIXEL_FONT }}>CO {coinCt.toString().padStart(2, '0')}</p>
+              {combo > 1 && <p style={{ margin: '7px 0 0', fontSize: '0.58rem', color: cm >= 3 ? '#fbbf24' : '#34d399', fontFamily: PIXEL_FONT }}>x{cm}</p>}
+              {fever && <p style={{ margin: '7px 0 0', fontSize: '0.48rem', color: '#fbbf24', fontFamily: PIXEL_FONT, animation: 'rs-bk 0.3s step-end infinite alternate' }}>FEVER</p>}
             </div>
           </div>
           {(hasMag || shld || hasSx2 || hasSpd || sloMo || dj > 0) && (
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
               {hasMag && <PBdg i="M" l="MAG" c="#ef4444" />}
               {shld && <PBdg i="S" l="SHD" c="#3b82f6" />}
               {hasSx2 && <PBdg i="2x" l="SCR" c="#f59e0b" />}
@@ -655,23 +866,63 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           )}
         </div>
 
-        {wArr && <div style={{ position: 'absolute', top: '50%', right: wind > 0 ? 6 : 'auto', left: wind < 0 ? 6 : 'auto', color: 'rgba(255,255,255,0.35)', fontSize: '1.8rem', fontWeight: 900, pointerEvents: 'none', transform: 'translateY(-50%)', fontFamily: 'monospace' }}>{wArr}</div>}
+        {wArr && <div style={{ position: 'absolute', top: '53%', right: wind > 0 ? 6 : 'auto', left: wind < 0 ? 6 : 'auto', color: 'rgba(255,255,255,0.35)', fontSize: '1.8rem', fontWeight: 900, pointerEvents: 'none', transform: 'translateY(-50%)', fontFamily: PIXEL_FONT }}>{wArr}</div>}
 
-        {perf && <div style={{ position: 'absolute', top: '32%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 'clamp(2.2rem, 8vw, 3.2rem)', fontWeight: 900, color: '#fbbf24', fontFamily: 'monospace', textShadow: '3px 3px 0 #000, 0 0 20px #f59e0b', animation: 'rs-pp 0.7s steps(4) forwards', pointerEvents: 'none', zIndex: 20 }}>PERFECT!!</div>}
-        {lvUp && <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 'clamp(1.8rem, 6vw, 2.5rem)', fontWeight: 900, color: '#22c55e', fontFamily: 'monospace', textShadow: '3px 3px 0 #000, 0 0 15px #22c55e', animation: 'rs-pp 1.2s steps(6) forwards', pointerEvents: 'none', zIndex: 20 }}>LEVEL UP! LV.{lvl}</div>}
-        {dash && <div style={{ position: 'absolute', top: '38%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '2rem', fontWeight: 900, color: '#ec4899', fontFamily: 'monospace', textShadow: '2px 2px 0 #000', animation: 'rs-pp 0.4s steps(3) forwards', pointerEvents: 'none', zIndex: 20 }}>DASH!!</div>}
+        {phase === 'swinging' && nextRope && (
+          <div style={{ position: 'absolute', top: '31%', left: '50%', transform: 'translateX(-50%)', color: releaseReady ? '#86efac' : 'rgba(255,255,255,0.65)', fontSize: releaseReady ? '1.4rem' : '0.7rem', letterSpacing: '0.08em', fontWeight: 900, pointerEvents: 'none', fontFamily: PIXEL_FONT, textShadow: '2px 2px 0 #0f172a', zIndex: 18 }}>
+            {releaseReady ? 'NOW!' : 'GREEN BOX를 노려요'}
+          </div>
+        )}
 
-        <div style={{ position: 'absolute', bottom: 54, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', padding: '0 14px', pointerEvents: 'none', fontFamily: 'monospace' }}>
-          {coinCt > 0 && <span style={{ color: '#fbbf24', fontSize: '0.9rem', fontWeight: 700, textShadow: '1px 1px 0 #000' }}>${coinCt}</span>}
-          <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>{swCt} swings</span>
-        </div>
+        {perf && <div style={{ position: 'absolute', top: '32%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 'clamp(2.2rem, 8vw, 3.2rem)', fontWeight: 900, color: '#fbbf24', fontFamily: PIXEL_FONT, textShadow: '3px 3px 0 #000, 0 0 20px #f59e0b', animation: 'rs-pp 0.7s steps(4) forwards', pointerEvents: 'none', zIndex: 20 }}>PERFECT!!</div>}
+        {lvUp && <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 'clamp(1.8rem, 6vw, 2.5rem)', fontWeight: 900, color: '#22c55e', fontFamily: PIXEL_FONT, textShadow: '3px 3px 0 #000, 0 0 15px #22c55e', animation: 'rs-pp 1.2s steps(6) forwards', pointerEvents: 'none', zIndex: 20 }}>LEVEL UP! LV.{lvl}</div>}
+        {dash && <div style={{ position: 'absolute', top: '38%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '2rem', fontWeight: 900, color: '#ec4899', fontFamily: PIXEL_FONT, textShadow: '2px 2px 0 #000', animation: 'rs-pp 0.4s steps(3) forwards', pointerEvents: 'none', zIndex: 20 }}>DASH!!</div>}
 
-        {phase === 'flying' && dj > 0 && <div style={{ position: 'absolute', bottom: '22%', left: '50%', transform: 'translateX(-50%)', color: '#22c55e', fontSize: '1.1rem', fontWeight: 900, pointerEvents: 'none', fontFamily: 'monospace', textShadow: '2px 2px 0 #000', animation: 'rs-bk 0.6s step-end infinite' }}>TAP JUMP!</div>}
-        {phase === 'swinging' && score === 0 && <div style={{ position: 'absolute', bottom: '18%', left: '50%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '1.1rem', fontWeight: 700, pointerEvents: 'none', fontFamily: 'monospace', animation: 'rs-bk 1.2s step-end infinite' }}>TAP TO SWING!</div>}
-
-        <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, pointerEvents: 'auto', zIndex: 15 }}>
-          <PxBtn l="FINISH" onClick={(e) => { e.stopPropagation(); fin() }} />
-          <PxBtn l="EXIT" g onClick={(e) => { e.stopPropagation(); onExitRef.current() }} />
+        <div style={{ position: 'absolute', left: 10, right: 10, bottom: 18, display: 'flex', justifyContent: 'space-between', pointerEvents: 'auto', zIndex: 15 }}>
+          <button
+            type="button"
+            aria-label="swing left"
+            onPointerDown={(e) => { e.stopPropagation(); setSway('left', true) }}
+            onPointerUp={(e) => { e.stopPropagation(); setSway('left', false) }}
+            onPointerLeave={() => setSway('left', false)}
+            onPointerCancel={() => setSway('left', false)}
+            style={{
+              width: 78,
+              height: 78,
+              border: '4px solid rgba(148,163,184,0.72)',
+              background: 'rgba(7,10,20,0.62)',
+              color: '#e2e8f0',
+              fontFamily: PIXEL_FONT,
+              fontSize: '1.35rem',
+              letterSpacing: '0.06em',
+              boxShadow: '4px 4px 0 rgba(15,23,42,0.85)',
+              cursor: 'pointer',
+            }}
+          >
+            &lt;
+          </button>
+          <button
+            type="button"
+            aria-label="swing right"
+            onPointerDown={(e) => { e.stopPropagation(); setSway('right', true) }}
+            onPointerUp={(e) => { e.stopPropagation(); setSway('right', false) }}
+            onPointerLeave={() => setSway('right', false)}
+            onPointerCancel={() => setSway('right', false)}
+            style={{
+              width: 78,
+              height: 78,
+              border: '4px solid rgba(148,163,184,0.72)',
+              background: 'rgba(7,10,20,0.62)',
+              color: '#e2e8f0',
+              fontFamily: PIXEL_FONT,
+              fontSize: '1.35rem',
+              letterSpacing: '0.06em',
+              boxShadow: '4px 4px 0 rgba(15,23,42,0.85)',
+              cursor: 'pointer',
+            }}
+          >
+            &gt;
+          </button>
         </div>
       </div>
 
@@ -687,17 +938,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 }
 
 function PBdg({ i, l, c }: { i: string; l: string; c: string }) {
-  return <span style={{ background: c + '30', border: `1px solid ${c}`, borderRadius: 2, padding: '1px 6px', fontSize: '0.65rem', color: 'white', fontFamily: 'monospace', fontWeight: 700 }}>[{i}] {l}</span>
-}
-
-function PxBtn({ l, g, onClick }: { l: string; g?: boolean; onClick: (e: React.MouseEvent) => void }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      padding: '6px 18px', borderRadius: 2, border: `2px solid ${g ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.4)'}`,
-      background: g ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.5)', color: g ? 'rgba(255,255,255,0.6)' : 'white',
-      fontSize: '0.8rem', fontWeight: 700, fontFamily: 'monospace', cursor: 'pointer',
-    }}>{l}</button>
-  )
+  return <span style={{ background: c + '30', border: `1px solid ${c}`, borderRadius: 0, padding: '3px 6px', fontSize: '0.5rem', color: 'white', fontFamily: PIXEL_FONT, fontWeight: 700, letterSpacing: '0.04em' }}>[{i}] {l}</span>
 }
 
 export const ropeSwingModule: MiniGameModule = {

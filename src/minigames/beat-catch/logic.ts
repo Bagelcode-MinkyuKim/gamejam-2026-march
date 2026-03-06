@@ -8,6 +8,21 @@ export const BEAT_CATCH_FEVER_DURATION_MS = 5000
 export const BEAT_CATCH_FEVER_MULTIPLIER = 3
 export const BEAT_CATCH_GOLDEN_MULTIPLIER = 3
 export const BEAT_CATCH_CATCHES_PER_LEVEL = 8
+export const BEAT_CATCH_REVERSE_START_MS = 14000
+export const BEAT_CATCH_REVERSE_INTERVAL_MS = 21000
+export const BEAT_CATCH_REVERSE_DURATION_MS = 5000
+export const BEAT_CATCH_SPOTLIGHT_START_MS = 8000
+export const BEAT_CATCH_SPOTLIGHT_INTERVAL_MS = 16000
+export const BEAT_CATCH_SPOTLIGHT_DURATION_MS = 6000
+export const BEAT_CATCH_SPOTLIGHT_MULTIPLIER = 2
+export const BEAT_CATCH_RUSH_START_MS = 18000
+export const BEAT_CATCH_RUSH_INTERVAL_MS = 24000
+export const BEAT_CATCH_RUSH_DURATION_MS = 5500
+export const BEAT_CATCH_RUSH_SPEED_MULTIPLIER = 1.42
+export const BEAT_CATCH_RUSH_SPAWN_MULTIPLIER = 0.76
+export const BEAT_CATCH_GOLD_RAIN_START_MS = 11000
+export const BEAT_CATCH_GOLD_RAIN_INTERVAL_MS = 20000
+export const BEAT_CATCH_GOLD_RAIN_DURATION_MS = 4500
 
 export interface BeatCatchSpecialChances {
   readonly golden: number
@@ -28,7 +43,7 @@ export interface BeatCatchDifficultySnapshot {
   readonly specialChances: BeatCatchSpecialChances
 }
 
-const MAX_DIFFICULTY_RAMP_MS = 90000
+const MAX_DIFFICULTY_RAMP_MS = 68000
 
 function assertNonNegativeNumber(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
@@ -62,16 +77,16 @@ export function getBeatCatchDifficulty(elapsedMs: number): BeatCatchDifficultySn
   const ratioSquared = difficultyRatio * difficultyRatio
   const elapsedSec = elapsedMs / 1000
 
-  const fallSpeed = 0.32 + difficultyRatio * 0.46 + ratioSquared * 0.4
-  const spawnIntervalMs = Math.round(840 - difficultyRatio * 410 - ratioSquared * 270)
-  const maxActiveNotes = Math.floor(3 + difficultyRatio * 4 + ratioSquared * 5)
+  const fallSpeed = 0.56 + difficultyRatio * 0.64 + ratioSquared * 0.66
+  const spawnIntervalMs = Math.round(650 - difficultyRatio * 250 - ratioSquared * 300)
+  const maxActiveNotes = Math.floor(4 + difficultyRatio * 5 + ratioSquared * 5)
   const perfectZone = 0.038 - difficultyRatio * 0.012 - ratioSquared * 0.006
   const goodZone = 0.08 - difficultyRatio * 0.022 - ratioSquared * 0.012
 
-  const golden = 0.05 + difficultyRatio * 0.13
-  const double = elapsedSec >= 12 ? 0.03 + difficultyRatio * 0.12 : 0
-  const hold = elapsedSec >= 22 ? 0.02 + difficultyRatio * 0.1 : 0
-  const multiSpawn = elapsedSec >= 10 ? 0.04 + difficultyRatio * 0.41 : 0
+  const golden = 0.09 + difficultyRatio * 0.15
+  const double = elapsedSec >= 4.5 ? 0.06 + difficultyRatio * 0.14 : 0
+  const hold = elapsedSec >= 12 ? 0.04 + difficultyRatio * 0.12 : 0
+  const multiSpawn = elapsedSec >= 5.5 ? 0.1 + difficultyRatio * 0.4 : 0
   const dangerLevel = Math.round(difficultyRatio * 100)
 
   return {
@@ -79,15 +94,15 @@ export function getBeatCatchDifficulty(elapsedMs: number): BeatCatchDifficultySn
     dangerLevel,
     label: getBeatCatchDifficultyLabel(dangerLevel),
     fallSpeed,
-    spawnIntervalMs: Math.max(160, spawnIntervalMs),
-    maxActiveNotes: Math.min(12, maxActiveNotes),
+    spawnIntervalMs: Math.max(135, spawnIntervalMs),
+    maxActiveNotes: Math.min(13, maxActiveNotes),
     perfectZone: Math.max(0.018, perfectZone),
     goodZone: Math.max(0.04, goodZone),
     specialChances: {
-      golden: clampNumber(golden, 0, 0.2),
-      double: clampNumber(double, 0, 0.15),
-      hold: clampNumber(hold, 0, 0.12),
-      multiSpawn: clampNumber(multiSpawn, 0, 0.45),
+      golden: clampNumber(golden, 0, 0.24),
+      double: clampNumber(double, 0, 0.18),
+      hold: clampNumber(hold, 0, 0.14),
+      multiSpawn: clampNumber(multiSpawn, 0, 0.52),
     },
   }
 }

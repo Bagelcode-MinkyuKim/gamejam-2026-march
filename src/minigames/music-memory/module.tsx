@@ -36,11 +36,11 @@ const DOT_SHRINK_START_LEVEL = 7
 const MOVING_DOT_START_LEVEL = 9
 
 // Dot area bounds (percentage)
-const DOT_AREA_TOP = 18
-const DOT_AREA_BOTTOM = 78
-const DOT_AREA_LEFT = 8
-const DOT_AREA_RIGHT = 92
-const DOT_MIN_DIST = 14
+const DOT_AREA_TOP = 22
+const DOT_AREA_BOTTOM = 88
+const DOT_AREA_LEFT = 12
+const DOT_AREA_RIGHT = 88
+const DOT_MIN_GAP = 2.5
 
 type Phase = 'show' | 'play' | 'correct' | 'wrong' | 'game-over'
 
@@ -99,6 +99,38 @@ function createSfx(url: string, pool = 3) {
 
 function randRange(min: number, max: number) { return min + Math.random() * (max - min) }
 
+function getDotSizeRange(level: number, seqLen: number, isFake: boolean): { min: number; max: number } {
+  const densityShrink = Math.max(0, seqLen - 4) * 1.05
+  const levelShrink = Math.max(0, level - DOT_SHRINK_START_LEVEL) * 0.35
+  const totalShrink = densityShrink + levelShrink
+
+  if (isFake) {
+    return {
+      min: Math.max(9.5, 13.5 - totalShrink),
+      max: Math.max(11.5, 16.5 - totalShrink),
+    }
+  }
+
+  return {
+    min: Math.max(11.5, 18.5 - totalShrink),
+    max: Math.max(13.5, 22.5 - totalShrink),
+  }
+}
+
+function getPlacementBounds(size: number) {
+  const radius = size / 2
+  return {
+    left: DOT_AREA_LEFT + radius,
+    right: DOT_AREA_RIGHT - radius,
+    top: DOT_AREA_TOP + radius,
+    bottom: DOT_AREA_BOTTOM - radius,
+  }
+}
+
+function overlapsWithExistingDot(dots: readonly DotDef[], x: number, y: number, size: number): boolean {
+  return dots.some(dot => Math.hypot(dot.x - x, dot.y - y) < ((dot.size + size) / 2) + DOT_MIN_GAP)
+}
+
 function generateDots(level: number, seqLen: number): { dots: DotDef[]; sequence: number[] } {
   const noteCount = Math.min(NOTES.length, 4 + Math.floor((level - 1) / 3))
   const dots: DotDef[] = []
@@ -108,14 +140,16 @@ function generateDots(level: number, seqLen: number): { dots: DotDef[]; sequence
   // Place real dots
   for (let i = 0; i < seqLen; i++) {
     const noteIdx = Math.floor(Math.random() * noteCount)
+    const sizeRange = getDotSizeRange(level, seqLen, false)
+    const baseSize = randRange(sizeRange.min, sizeRange.max)
+    const bounds = getPlacementBounds(baseSize)
     let x: number, y: number, attempts = 0
     do {
-      x = randRange(DOT_AREA_LEFT, DOT_AREA_RIGHT)
-      y = randRange(DOT_AREA_TOP, DOT_AREA_BOTTOM)
+      x = randRange(bounds.left, bounds.right)
+      y = randRange(bounds.top, bounds.bottom)
       attempts++
-    } while (attempts < 50 && dots.some(d => Math.hypot(d.x - x, d.y - y) < DOT_MIN_DIST))
+    } while (attempts < 70 && overlapsWithExistingDot(dots, x, y, baseSize))
 
-    const baseSize = level >= DOT_SHRINK_START_LEVEL ? randRange(9, 12) : randRange(11, 15)
     const isMoving = level >= MOVING_DOT_START_LEVEL && Math.random() < 0.3
     dots.push({
       id: nextId++, noteIdx, x, y, size: baseSize, isFake: false,
@@ -130,14 +164,17 @@ function generateDots(level: number, seqLen: number): { dots: DotDef[]; sequence
     const fakeCount = Math.min(3, Math.floor((level - FAKE_DOT_START_LEVEL) / 2) + 1)
     for (let i = 0; i < fakeCount; i++) {
       const noteIdx = Math.floor(Math.random() * noteCount)
+      const sizeRange = getDotSizeRange(level, seqLen, true)
+      const size = randRange(sizeRange.min, sizeRange.max)
+      const bounds = getPlacementBounds(size)
       let x: number, y: number, attempts = 0
       do {
-        x = randRange(DOT_AREA_LEFT, DOT_AREA_RIGHT)
-        y = randRange(DOT_AREA_TOP, DOT_AREA_BOTTOM)
+        x = randRange(bounds.left, bounds.right)
+        y = randRange(bounds.top, bounds.bottom)
         attempts++
-      } while (attempts < 50 && dots.some(d => Math.hypot(d.x - x, d.y - y) < DOT_MIN_DIST))
+      } while (attempts < 70 && overlapsWithExistingDot(dots, x, y, size))
       dots.push({
-        id: nextId++, noteIdx, x, y, size: randRange(9, 13), isFake: true,
+        id: nextId++, noteIdx, x, y, size, isFake: true,
         vx: 0, vy: 0,
       })
     }
@@ -418,12 +455,17 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       let dotsChanged = false
       for (const d of r.dots) {
         if (d.vx !== 0 || d.vy !== 0) {
+          const radius = d.size / 2
+          const minX = DOT_AREA_LEFT + radius
+          const maxX = DOT_AREA_RIGHT - radius
+          const minY = DOT_AREA_TOP + radius
+          const maxY = DOT_AREA_BOTTOM - radius
           d.x += d.vx * dtSec
           d.y += d.vy * dtSec
-          if (d.x < DOT_AREA_LEFT || d.x > DOT_AREA_RIGHT) d.vx = -d.vx
-          if (d.y < DOT_AREA_TOP || d.y > DOT_AREA_BOTTOM) d.vy = -d.vy
-          d.x = Math.max(DOT_AREA_LEFT, Math.min(DOT_AREA_RIGHT, d.x))
-          d.y = Math.max(DOT_AREA_TOP, Math.min(DOT_AREA_BOTTOM, d.y))
+          if (d.x < minX || d.x > maxX) d.vx = -d.vx
+          if (d.y < minY || d.y > maxY) d.vy = -d.vy
+          d.x = Math.max(minX, Math.min(maxX, d.x))
+          d.y = Math.max(minY, Math.min(maxY, d.y))
           dotsChanged = true
         }
       }
@@ -466,8 +508,8 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const comboColor = getComboColor(level)
 
   const phaseText = (() => {
-    if (phase === 'show') return 'Watch the sequence...'
-    if (phase === 'play') return `Tap ${playerIdx}/${sequence.length}`
+    if (phase === 'show') return 'Watch the melody...'
+    if (phase === 'play') return `Repeat ${playerIdx}/${sequence.length}`
     if (phase === 'correct') return resultMsg
     if (phase === 'wrong') return resultMsg
     return 'Game Over!'
@@ -484,33 +526,33 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       <div className="mm-header">
         <div className="mm-left">
           <img className="mm-avatar" src={characterImage} alt="" />
-          <div>
+          <div className="mm-score-block">
+            <p className="mm-score-label">SCORE</p>
             <p className="mm-score">{score.toLocaleString()}</p>
             <p className="mm-best">BEST {displayBest.toLocaleString()}</p>
           </div>
         </div>
         <div className="mm-right">
+          <p className="mm-time-label">TIME</p>
           <p className={`mm-time ${isLowTime ? 'low' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
           <div className="mm-bar"><div className="mm-bar-fill" style={{ width: `${timePct}%`, background: isLowTime ? '#ef4444' : '#c026d3' }} /></div>
         </div>
       </div>
 
-      {/* Meta */}
-      <div className="mm-meta">
-        <span>LV <strong>{level}</strong></span>
-        <span>{sequence.length} dots</span>
-        {streak >= 3 && <span className="mm-streak-badge">STREAK x{streak}</span>}
-        {comboLabel && <span style={{ color: comboColor, fontWeight: 800, fontSize: 11 }}>{comboLabel}</span>}
-        {isFever && <span className="mm-fever-badge">FEVER x{FEVER_SCORE_MULT} {(feverMs / 1000).toFixed(1)}s</span>}
-      </div>
-
-      {/* Phase banner */}
-      <div className={`mm-phase ${phase}`}>
-        <p>{phaseText}</p>
-      </div>
-
       {/* Dot field */}
       <div className="mm-field">
+        <div className="mm-top-overlay">
+          <span className="mm-chip">LV <strong>{level}</strong></span>
+          <span className="mm-chip">{sequence.length} notes</span>
+          {comboLabel && <span className="mm-chip mm-chip-combo" style={{ color: comboColor }}>{comboLabel}</span>}
+          {streak >= 3 && <span className="mm-chip mm-streak-badge">STREAK x{streak}</span>}
+          {isFever && <span className="mm-chip mm-fever-badge">FEVER x{FEVER_SCORE_MULT} {(feverMs / 1000).toFixed(1)}s</span>}
+        </div>
+
+        <div className={`mm-phase ${phase}`}>
+          <p>{phaseText}</p>
+        </div>
+
         {/* Background grid lines */}
         <div className="mm-grid-bg" />
 
@@ -547,25 +589,31 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
                 left: `${dot.x}%`,
                 top: `${dot.y}%`,
                 width: `${dot.size}%`,
-                height: `${dot.size * 0.9}%`,
-                backgroundColor: isShowing || isTapped ? note.color : `${note.color}88`,
+                aspectRatio: '1 / 1',
+                background: `
+                  linear-gradient(180deg, rgba(255,255,255,${isShowing ? '0.26' : '0.14'}) 0 18%, transparent 18% 100%),
+                  repeating-linear-gradient(
+                    180deg,
+                    ${isShowing || isTapped ? note.color : `${note.color}dd`} 0 10px,
+                    ${isShowing || isTapped ? `${note.color}cc` : `${note.color}b8`} 10px 20px
+                  ),
+                  linear-gradient(90deg, rgba(255,255,255,0.08) 0 10%, transparent 10% 88%, rgba(0,0,0,0.18) 88% 100%)
+                `,
                 borderColor: note.color,
-                boxShadow: isShowing ? `0 0 20px ${note.glowColor}, 0 0 40px ${note.glowColor}` : isTapped ? 'none' : `0 0 8px ${note.glowColor}`,
+                boxShadow: isShowing
+                  ? `0 0 0 4px rgba(255,255,255,0.14), 0 0 0 8px ${note.color}30, 0 4px 0 rgba(3,7,18,0.82), 0 0 18px ${note.glowColor}`
+                  : isTapped
+                    ? 'none'
+                    : `0 4px 0 rgba(3,7,18,0.82), 0 0 12px ${note.glowColor}`,
               }}
               disabled={phase !== 'play' || isTapped}
               onClick={() => handleDotTap(idx)}
             >
-              <span className="mm-dot-emoji">{isShowing || !isTapped ? note.emoji : '✓'}</span>
+              <span className="mm-dot-note">{isShowing || !isTapped ? note.label.toUpperCase() : 'OK'}</span>
               {isShowing && <span className="mm-dot-order">{sequence.indexOf(idx) + 1}</span>}
             </button>
           )
         })}
-      </div>
-
-      {/* Footer */}
-      <div className="mm-footer">
-        <span className="mm-stat">Rounds {level - 1}</span>
-        <span className="mm-stat">Streak {streak}</span>
       </div>
     </section>
   )
@@ -573,81 +621,101 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
 const MM_CSS = `
 .mm-panel {
-  display: flex; flex-direction: column; height: 100%;
-  aspect-ratio: 9 / 16; max-width: 432px; margin: 0 auto;
-  background: linear-gradient(180deg, #0a0515 0%, #12082a 40%, #0d0d1a 100%);
+  display: flex; flex-direction: column; height: 100%; width: 100%;
+  aspect-ratio: 9 / 16; max-width: 520px; margin: 0 auto;
+  font-family: 'DungGeunMo', 'Press Start 2P', monospace;
+  background:
+    linear-gradient(0deg, rgba(8, 14, 28, 0.92), rgba(8, 14, 28, 0.92)),
+    repeating-linear-gradient(
+      0deg,
+      #18284a 0 14px,
+      #13213d 14px 28px
+    );
   user-select: none; -webkit-user-select: none; touch-action: manipulation;
   position: relative; overflow: hidden; color: #f5f3ff; padding: 0 !important;
+  image-rendering: pixelated;
 }
+.mm-panel * { image-rendering: pixelated; }
 .mm-panel::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
-  background-image:
-    radial-gradient(1.5px 1.5px at 12% 22%, rgba(192,38,211,0.5), transparent),
-    radial-gradient(1px 1px at 38% 55%, rgba(255,255,255,0.3), transparent),
-    radial-gradient(1.5px 1.5px at 62% 18%, rgba(37,99,235,0.4), transparent),
-    radial-gradient(1px 1px at 82% 48%, rgba(220,38,38,0.3), transparent),
-    radial-gradient(1px 1px at 28% 82%, rgba(22,163,74,0.3), transparent),
-    radial-gradient(1.5px 1.5px at 72% 78%, rgba(202,138,4,0.4), transparent);
+  background:
+    radial-gradient(circle at 12% 18%, rgba(255,255,255,0.16) 0 1.5%, transparent 1.5%),
+    radial-gradient(circle at 22% 34%, rgba(255,255,255,0.12) 0 1.2%, transparent 1.2%),
+    radial-gradient(circle at 78% 24%, rgba(255,255,255,0.18) 0 1.4%, transparent 1.4%),
+    radial-gradient(circle at 86% 64%, rgba(255,255,255,0.12) 0 1.2%, transparent 1.2%),
+    linear-gradient(180deg, rgba(255,255,255,0.08), transparent 20%),
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: auto, auto, auto, auto, auto, 32px 32px, 32px 32px;
   animation: mm-twinkle 15s ease-in-out infinite alternate;
 }
 @keyframes mm-twinkle { from { opacity: 0.6; } to { opacity: 1; } }
 
 .mm-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 12px 6px; flex-shrink: 0; z-index: 2;
-  background: linear-gradient(135deg, rgba(192,38,211,0.2) 0%, transparent 100%);
-  border-bottom: 1px solid rgba(192,38,211,0.15);
+  gap: 14px; padding: 14px 16px 12px; flex-shrink: 0; z-index: 2;
+  background:
+    linear-gradient(180deg, rgba(20, 31, 57, 0.96) 0%, rgba(14, 21, 40, 0.96) 100%);
+  border-bottom: 4px solid #3b4f80;
+  box-shadow: inset 0 -2px 0 rgba(10, 14, 26, 0.9), 0 4px 0 rgba(6, 10, 20, 0.75);
 }
-.mm-left { display: flex; align-items: center; gap: 8px; }
-.mm-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.mm-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.mm-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .mm-avatar {
-  width: clamp(36px, 9vw, 48px); height: clamp(36px, 9vw, 48px);
-  border-radius: 50%; border: 2px solid #c026d3;
-  object-fit: cover; box-shadow: 0 0 10px rgba(192,38,211,0.4);
-  image-rendering: pixelated;
+  width: clamp(52px, 13vw, 66px); height: clamp(52px, 13vw, 66px);
+  border-radius: 6px; border: 3px solid #fb7185;
+  object-fit: cover; box-shadow: 3px 3px 0 #4a1021;
+}
+.mm-score-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mm-score-label, .mm-time-label {
+  font-size: clamp(0.62rem, 2vw, 0.76rem); font-weight: 800; letter-spacing: 0.1em;
+  color: #cbd5f5; margin: 0; text-shadow: 1px 1px 0 #111827;
 }
 .mm-score {
-  font-size: clamp(1.3rem, 4.5vw, 1.8rem); font-weight: 900;
-  color: #e879f9; margin: 0; line-height: 1;
-  text-shadow: 0 0 14px rgba(192,38,211,0.5);
+  font-size: clamp(3.15rem, 13vw, 4.9rem); font-weight: 900;
+  color: #ff8ab6; margin: 0; line-height: 0.84;
+  text-shadow: 3px 3px 0 #5d1731, 0 0 12px rgba(255, 107, 162, 0.28);
 }
-.mm-best { font-size: clamp(0.4rem, 1.5vw, 0.55rem); color: #a78bfa; margin: 0; }
+.mm-best {
+  font-size: clamp(0.76rem, 2.25vw, 0.96rem);
+  color: #d8b4fe; margin: 0; font-weight: 700; text-shadow: 1px 1px 0 #141b2d;
+}
 .mm-time {
-  font-size: clamp(0.9rem, 3vw, 1.2rem); font-weight: 700;
-  color: #e4e4e7; margin: 0; font-variant-numeric: tabular-nums;
+  font-size: clamp(1.35rem, 4.4vw, 1.9rem); font-weight: 900;
+  color: #f8fafc; margin: 0; font-variant-numeric: tabular-nums;
+  text-shadow: 2px 2px 0 #111827;
 }
-.mm-time.low { color: #ef4444; animation: mm-pulse 0.5s ease-in-out infinite alternate; }
-@keyframes mm-pulse { from { opacity: 1; } to { opacity: 0.4; } }
-.mm-bar { width: 70px; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
-.mm-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
-
-.mm-meta {
-  display: flex; justify-content: center; align-items: center; gap: 8px;
-  padding: 4px 12px; flex-shrink: 0; flex-wrap: wrap; z-index: 2;
+.mm-time.low { color: #f87171; animation: mm-pulse 0.5s steps(2) infinite alternate; }
+@keyframes mm-pulse { from { opacity: 1; } to { opacity: 0.45; } }
+.mm-bar {
+  width: clamp(104px, 28vw, 136px); height: 10px; background: #15213f;
+  border: 2px solid #536b9f; overflow: hidden; box-shadow: inset 0 2px 0 rgba(5, 10, 20, 0.72);
 }
-.mm-meta span { font-size: clamp(0.38rem, 1.3vw, 0.5rem); color: #a78bfa; font-weight: 600; }
-.mm-meta strong { color: #e4e4e7; }
-.mm-streak-badge {
-  padding: 1px 6px; border-radius: 6px;
-  background: rgba(34,197,94,0.25); border: 1px solid #22c55e;
-  color: #86efac; font-weight: 800 !important;
-}
-.mm-fever-badge {
-  padding: 1px 6px; border-radius: 6px;
-  background: rgba(234,179,8,0.25); border: 1px solid #facc15;
-  color: #fef3c7; font-weight: 800 !important;
-  animation: mm-pulse 0.3s ease-in-out infinite alternate;
+.mm-bar-fill {
+  height: 100%;
+  background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 8px, transparent 8px 16px);
+  transition: width 0.2s steps(8);
 }
 
 .mm-phase {
-  text-align: center; padding: 6px 12px; flex-shrink: 0; z-index: 2;
+  position: absolute; top: 66px; left: 50%; transform: translateX(-50%);
+  min-width: min(88%, 340px); text-align: center; padding: 10px 18px;
+  border-radius: 8px; z-index: 8; pointer-events: none;
+  background: rgba(17, 24, 39, 0.94); border: 3px solid #475569;
+  box-shadow: 0 4px 0 #111827;
 }
 .mm-phase p {
-  font-size: clamp(0.65rem, 2.2vw, 0.85rem); font-weight: 700;
-  color: #c4b5fd; margin: 0;
+  font-size: clamp(0.92rem, 2.9vw, 1.08rem); font-weight: 800;
+  color: #f1f5f9; margin: 0; text-shadow: 2px 2px 0 #111827;
 }
-.mm-phase.correct p { color: #86efac; text-shadow: 0 0 10px rgba(34,197,94,0.4); }
-.mm-phase.wrong p { color: #fca5a5; text-shadow: 0 0 10px rgba(239,68,68,0.4); animation: mm-shake 0.3s ease; }
+.mm-phase.correct {
+  background: #14532d; border-color: #4ade80;
+}
+.mm-phase.correct p { color: #dcfce7; }
+.mm-phase.wrong {
+  background: #7f1d1d; border-color: #f87171;
+}
+ .mm-phase.wrong p { color: #fecaca; animation: mm-shake 0.3s steps(3); }
 @keyframes mm-shake {
   0%,100% { transform: translateX(0); }
   20% { transform: translateX(-5px); }
@@ -658,14 +726,38 @@ const MM_CSS = `
 
 .mm-field {
   flex: 1; position: relative; min-height: 0; z-index: 1;
-  margin: 0 4px;
+  margin: 0;
+}
+.mm-top-overlay {
+  position: absolute; top: 12px; left: 12px; right: 12px;
+  display: flex; justify-content: center; align-items: center; gap: 10px;
+  flex-wrap: wrap; z-index: 8; pointer-events: none;
+}
+.mm-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 6px;
+  background: #273655; border: 2px solid #536b9f;
+  color: #e5e7eb; font-size: clamp(0.72rem, 2.3vw, 0.88rem); font-weight: 800;
+  letter-spacing: 0.03em; box-shadow: 0 3px 0 #111827;
+  text-shadow: 1px 1px 0 #111827;
+}
+.mm-chip strong { color: #fff; }
+.mm-chip-combo { border-color: currentColor; }
+.mm-streak-badge {
+  background: #14532d; border-color: #4ade80;
+  color: #86efac;
+}
+.mm-fever-badge {
+  background: #7c2d12; border-color: #facc15;
+  color: #fef08a; animation: mm-pulse 0.35s steps(2) infinite alternate;
 }
 .mm-grid-bg {
   position: absolute; inset: 0; pointer-events: none;
   background-image:
-    linear-gradient(rgba(192,38,211,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(192,38,211,0.04) 1px, transparent 1px);
-  background-size: 10% 10%;
+    linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 16% 14%;
+  mask-image: linear-gradient(180deg, transparent 2%, rgba(0,0,0,1) 12%, rgba(0,0,0,1) 100%);
 }
 
 /* Ripple */
@@ -683,63 +775,68 @@ const MM_CSS = `
 /* Sequence number */
 .mm-seq-num {
   position: absolute; transform: translate(-50%, -50%); pointer-events: none;
-  font-size: 10px; font-weight: 900; color: rgba(255,255,255,0.3); z-index: 5;
+  width: 28px; height: 28px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: #1e293b; border: 2px solid #64748b;
+  font-size: 13px; font-weight: 900; color: #f8fafc; z-index: 5;
+  box-shadow: 0 2px 0 #111827;
 }
 .mm-seq-num.done { color: rgba(134,239,172,0.5); }
 
 /* Dots */
 .mm-dot {
   position: absolute; transform: translate(-50%, -50%);
-  border-radius: 50%; border: 3px solid;
+  border-radius: 50%; border: 4px solid;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  cursor: pointer; z-index: 3;
-  transition: transform 0.15s, box-shadow 0.15s, opacity 0.2s;
+  cursor: pointer; z-index: 3; padding: 0;
+  color: #fff; letter-spacing: 0.08em;
+  transition: transform 0.12s steps(2), box-shadow 0.12s steps(2), opacity 0.2s, filter 0.2s;
 }
 .mm-dot.showing {
-  transform: translate(-50%, -50%) scale(1.25);
+  transform: translate(-50%, -50%) scale(1.18);
   z-index: 10;
-  animation: mm-dot-glow 0.5s ease-in-out;
+  animation: mm-dot-glow 0.5s steps(4);
 }
 @keyframes mm-dot-glow {
   0% { transform: translate(-50%, -50%) scale(1); }
-  50% { transform: translate(-50%, -50%) scale(1.35); }
-  100% { transform: translate(-50%, -50%) scale(1.25); }
+  50% { transform: translate(-50%, -50%) scale(1.28); }
+  100% { transform: translate(-50%, -50%) scale(1.18); }
 }
 .mm-dot.tapped {
-  opacity: 0.25; transform: translate(-50%, -50%) scale(0.7);
+  opacity: 0.2; transform: translate(-50%, -50%) scale(0.78);
   pointer-events: none;
 }
 .mm-dot.target-hint {
-  animation: mm-target-pulse 0.8s ease-in-out infinite;
+  animation: mm-target-pulse 0.8s steps(2) infinite;
 }
 @keyframes mm-target-pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, -50%) scale(1.06); }
 }
-.mm-dot.fake { opacity: 0.7; }
+.mm-dot.fake { filter: saturate(0.82); }
 .mm-dot:disabled { cursor: default; }
-.mm-dot:active:not(:disabled):not(.tapped) { transform: translate(-50%, -50%) scale(0.9); }
-.mm-dot-emoji { font-size: clamp(1rem, 3.5vw, 1.6rem); line-height: 1; }
+.mm-dot:active:not(:disabled):not(.tapped) { transform: translate(-50%, -50%) scale(0.92); }
+.mm-dot-note {
+  font-size: clamp(0.92rem, 2.95vw, 1.14rem);
+  line-height: 1; font-weight: 900; text-transform: uppercase;
+  text-shadow: 2px 2px 0 rgba(0,0,0,0.45);
+}
 .mm-dot-order {
-  position: absolute; top: -6px; right: -6px;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: rgba(0,0,0,0.7); color: #fff;
-  font-size: 10px; font-weight: 900;
+  position: absolute; top: -10px; right: -10px;
+  width: 24px; height: 24px; border-radius: 6px;
+  background: #111827; color: #fff;
+  font-size: 12px; font-weight: 900;
+  border: 2px solid #94a3b8;
+  box-shadow: 0 2px 0 #020617;
   display: flex; align-items: center; justify-content: center;
 }
-
-.mm-footer {
-  display: flex; justify-content: center; gap: 14px;
-  padding: 6px 12px 10px; flex-shrink: 0; z-index: 2;
-}
-.mm-stat { font-size: clamp(0.38rem, 1.2vw, 0.48rem); color: #6b21a8; font-weight: 600; }
 `
 
 export const musicMemoryModule: MiniGameModule = {
   manifest: {
     id: 'music-memory',
     title: 'Music Memory',
-    description: 'Watch the dots light up, then tap them in order! Dodge fake dots!',
+    description: 'Watch the notes light up, then repeat the melody in order! Dodge fake notes!',
     unlockCost: 50,
     baseReward: 16,
     scoreRewardMultiplier: 1.25,

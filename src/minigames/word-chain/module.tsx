@@ -12,6 +12,7 @@ import gameOverSfx from '../../../assets/sounds/word-chain-game-over.mp3'
 import levelUpSfx from '../../../assets/sounds/word-chain-levelup.mp3'
 import powerupSfx from '../../../assets/sounds/word-chain-powerup.mp3'
 import tickSfx from '../../../assets/sounds/word-chain-tick.mp3'
+import wordChainBgmLoop from '../../../assets/sounds/generated/word-chain/word-chain-bgm-loop.mp3'
 
 // ── Game Config ──
 const ROUND_DURATION_MS = 50000
@@ -40,6 +41,7 @@ const WORD_GOAL_INTERVAL = 10
 const WORD_GOAL_BONUS_SCORE = 20
 const WORD_GOAL_BONUS_TIME_MS = 3000
 const TICK_SOUND_INTERVAL_MS = 1000
+const WORD_CHAIN_BGM_VOLUME = 0.22
 
 // ── Powerup Types ──
 type PowerupType = 'freeze' | 'double' | 'reveal'
@@ -219,6 +221,7 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const bossHpRef = useRef(0)
 
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
+  const bgmRef = useRef<HTMLAudioElement | null>(null)
 
   const clearTimeoutSafe = (r: { current: number | null }) => {
     if (r.current !== null) { window.clearTimeout(r.current); r.current = null }
@@ -233,6 +236,12 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     void a.play().catch(() => {})
   }, [])
 
+  const startBgm = useCallback(() => {
+    const bgm = bgmRef.current
+    if (bgm === null || finishedRef.current || !bgm.paused) return
+    void bgm.play().catch(() => {})
+  }, [])
+
   const triggerScreenFlash = useCallback((color: string) => {
     setScreenFlash(color)
     setTimeout(() => setScreenFlash(''), 150)
@@ -245,6 +254,10 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     clearTimeoutSafe(wrongShakeTimerRef)
     clearTimeoutSafe(freezeTimerRef)
     setCompanionMood('sad')
+    if (bgmRef.current !== null) {
+      bgmRef.current.pause()
+      bgmRef.current.currentTime = 0
+    }
     playAudio('gameover', 0.7, 0.95)
     onFinish({
       score: scoreRef.current,
@@ -312,6 +325,7 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
   const usePowerup = useCallback(() => {
     if (!powerupReady || activePowerup === null) return
+    startBgm()
     setPowerupReady(false)
     playAudio('powerup', 0.5, 1.5)
     triggerScreenFlash('rgba(251,191,36,0.3)')
@@ -330,11 +344,12 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       setHintActive(true)
     }
     setActivePowerup(activePowerup === 'double' ? 'double' : null)
-  }, [powerupReady, activePowerup, playAudio, effects, triggerScreenFlash])
+  }, [powerupReady, activePowerup, playAudio, effects, triggerScreenFlash, startBgm])
 
   const handleChoice = useCallback(
     (choiceIndex: number) => {
       if (finishedRef.current || inputLockedRef.current) return
+      startBgm()
       const currentRound = round
       const isCorrect = choiceIndex === currentRound.correctIndex
       const chosenWord = currentRound.choices[choiceIndex]
@@ -453,7 +468,7 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }, WRONG_SHAKE_DURATION_MS)
       }
     },
-    [round, advanceRound, playAudio, isFever, effects, activePowerup, powerupReady, triggerScreenFlash, bossActive],
+    [round, advanceRound, playAudio, isFever, effects, activePowerup, powerupReady, triggerScreenFlash, bossActive, startBgm],
   )
 
   // Audio setup
@@ -466,10 +481,21 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     for (const [k, s] of Object.entries(map)) {
       const a = new Audio(s); a.preload = 'auto'; audioRefs.current[k] = a
     }
+    const bgm = new Audio(wordChainBgmLoop)
+    bgm.preload = 'auto'
+    bgm.loop = true
+    bgm.volume = WORD_CHAIN_BGM_VOLUME
+    bgmRef.current = bgm
+    void bgm.play().catch(() => {})
     return () => {
       clearTimeoutSafe(correctFlashTimerRef)
       clearTimeoutSafe(wrongShakeTimerRef)
       clearTimeoutSafe(freezeTimerRef)
+      if (bgmRef.current !== null) {
+        bgmRef.current.pause()
+        bgmRef.current.currentTime = 0
+        bgmRef.current = null
+      }
       audioRefs.current = {}
       effects.cleanup()
     }
@@ -618,12 +644,14 @@ function WordChainGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           <div className="px-score-label">SCORE</div>
           <div className="px-score-val">{score.toLocaleString()}</div>
         </div>
-        <div className="px-level-badge" data-level={difficulty}>
-          <span>LV</span><strong>{difficulty}</strong>
-        </div>
-        <div className="px-stat-box">
-          <div className="px-stat-label">BEST</div>
-          <div className="px-stat-val">{displayedBestScore.toLocaleString()}</div>
+        <div className="px-header-meta">
+          <div className="px-level-badge" data-level={difficulty}>
+            <span>LV</span><strong>{difficulty}</strong>
+          </div>
+          <div className="px-stat-box">
+            <div className="px-stat-label">BEST</div>
+            <div className="px-stat-val">{displayedBestScore.toLocaleString()}</div>
+          </div>
         </div>
       </div>
 
@@ -739,7 +767,7 @@ const PX_STYLES = `
   .px-panel {
     display: flex;
     flex-direction: column;
-    max-width: 432px;
+    max-width: 560px;
     width: 100%;
     height: 100%;
     margin: 0 auto;
@@ -811,21 +839,21 @@ const PX_STYLES = `
   .px-hp-bar-wrap {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px 3px;
+    gap: 10px;
+    padding: 10px 14px 6px;
     flex-shrink: 0;
     z-index: 1;
   }
   .px-hp-label {
-    font-size: 0.5rem;
+    font-size: 0.8rem;
     color: #ef4444;
     font-weight: 700;
   }
   .px-hp-bar {
     flex: 1;
-    height: 8px;
+    height: 14px;
     background: #333;
-    border: 2px solid #555;
+    border: 3px solid #555;
     overflow: hidden;
   }
   .px-hp-fill {
@@ -839,10 +867,10 @@ const PX_STYLES = `
     animation: px-blink 0.4s infinite;
   }
   .px-time-num {
-    font-size: 0.55rem;
+    font-size: 0.9rem;
     color: #a3e635;
     font-variant-numeric: tabular-nums;
-    min-width: 40px;
+    min-width: 66px;
     text-align: right;
   }
   .px-time-num.low {
@@ -853,43 +881,69 @@ const PX_STYLES = `
   /* Header */
   .px-header {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     align-items: center;
-    padding: 4px 10px;
+    gap: 10px;
+    padding: 10px 14px 8px;
     flex-shrink: 0;
     z-index: 1;
   }
   .px-score-box, .px-stat-box {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 6px;
+  }
+  .px-score-box {
+    align-items: center;
+    text-align: center;
+    width: 100%;
+  }
+  .px-header-meta {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    flex-wrap: wrap;
   }
   .px-score-label, .px-stat-label {
-    font-size: 0.4rem;
+    font-size: 0.72rem;
     color: #737373;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
   }
   .px-score-val {
-    font-size: 1.1rem;
+    font-size: clamp(2.8rem, 14vw, 4.8rem);
     color: #fbbf24;
-    text-shadow: 2px 2px 0 #92400e;
+    line-height: 0.95;
+    text-shadow: 4px 4px 0 #92400e;
   }
   .px-stat-val {
-    font-size: 0.6rem;
+    font-size: 1.1rem;
     color: #a3a3a3;
+  }
+  .px-stat-box {
+    align-items: center;
+    justify-content: center;
+    min-width: 168px;
+    padding: 10px 14px;
+    background: rgba(15,23,42,0.65);
+    border: 3px solid #334155;
+    text-align: center;
   }
   .px-level-badge {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 3px 8px;
+    justify-content: center;
+    gap: 8px;
+    min-width: 168px;
+    padding: 10px 14px;
     background: #334155;
-    border: 2px solid #475569;
+    border: 3px solid #475569;
     color: #a3e635;
-    font-size: 0.5rem;
+    font-size: 0.8rem;
   }
   .px-level-badge strong {
-    font-size: 0.8rem;
+    font-size: 1.35rem;
     color: #fbbf24;
   }
   .px-level-badge[data-level="4"], .px-level-badge[data-level="5"] {
@@ -902,41 +956,41 @@ const PX_STYLES = `
   .px-combo-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
+    gap: 10px;
+    padding: 8px 14px;
     background: rgba(0,0,0,0.3);
     flex-shrink: 0;
     z-index: 1;
   }
   .px-combo-text {
-    font-size: 0.45rem;
+    font-size: 0.72rem;
     color: #a3a3a3;
   }
   .px-combo-num {
-    font-size: 0.65rem;
+    font-size: 1.1rem;
     color: #fbbf24;
-    text-shadow: 1px 1px 0 #92400e;
+    text-shadow: 2px 2px 0 #92400e;
   }
   .px-combo-x {
-    font-size: 0.45rem;
+    font-size: 0.72rem;
     color: #22d3ee;
-    margin-left: 3px;
+    margin-left: 6px;
   }
   .px-max-combo {
-    font-size: 0.35rem;
+    font-size: 0.58rem;
     color: #737373;
   }
   .px-goal-mini {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 6px;
     margin-left: auto;
   }
   .px-goal-track {
-    width: 36px;
-    height: 5px;
+    width: 72px;
+    height: 10px;
     background: #333;
-    border: 1px solid #555;
+    border: 2px solid #555;
     overflow: hidden;
   }
   .px-goal-fill {
@@ -945,7 +999,7 @@ const PX_STYLES = `
     transition: width 0.2s;
   }
   .px-goal-num {
-    font-size: 0.35rem;
+    font-size: 0.58rem;
     color: #737373;
   }
 
@@ -953,22 +1007,22 @@ const PX_STYLES = `
   .px-boss-bar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px 10px;
+    gap: 8px;
+    padding: 6px 14px;
     flex-shrink: 0;
     z-index: 1;
     animation: px-boss-enter 0.5s ease-out;
   }
   .px-boss-label {
-    font-size: 0.4rem;
+    font-size: 0.68rem;
     color: #ef4444;
     animation: px-blink 0.6s infinite;
   }
   .px-boss-track {
     flex: 1;
-    height: 6px;
+    height: 10px;
     background: #333;
-    border: 2px solid #dc2626;
+    border: 3px solid #dc2626;
     overflow: hidden;
   }
   .px-boss-fill {
@@ -977,70 +1031,70 @@ const PX_STYLES = `
     transition: width 0.2s;
   }
   .px-boss-hp {
-    font-size: 0.4rem;
+    font-size: 0.68rem;
     color: #fca5a5;
-    min-width: 32px;
+    min-width: 52px;
     text-align: right;
   }
 
   /* Powerup */
   .px-powerup-btn {
-    margin: 3px 10px;
-    padding: 6px 12px;
+    margin: 6px 14px;
+    padding: 10px 18px;
     font-family: 'Press Start 2P', monospace;
-    font-size: 0.55rem;
+    font-size: 0.82rem;
     color: #1a1c2c;
     background: #fbbf24;
-    border: 3px solid #f59e0b;
+    border: 4px solid #f59e0b;
     cursor: pointer;
     animation: px-powerup-pulse 0.6s infinite alternate;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 10px;
     flex-shrink: 0;
     z-index: 1;
     text-transform: uppercase;
   }
-  .px-pw-sub { font-size: 0.35rem; opacity: 0.5; }
+  .px-pw-sub { font-size: 0.52rem; opacity: 0.5; }
   .px-powerup-btn:active { transform: scale(0.95); }
 
   /* Banners */
   .px-fever-bar {
     text-align: center;
     color: #fbbf24;
-    font-size: 0.5rem;
-    padding: 4px 0;
+    font-size: 0.75rem;
+    padding: 8px 0;
     background: rgba(251,191,36,0.1);
-    border-top: 2px solid #f59e0b;
-    border-bottom: 2px solid #f59e0b;
+    border-top: 3px solid #f59e0b;
+    border-bottom: 3px solid #f59e0b;
     animation: px-glow 0.5s infinite alternate;
     flex-shrink: 0;
     z-index: 1;
     text-shadow: 0 0 8px #f59e0b;
-    letter-spacing: 2px;
+    letter-spacing: 3px;
   }
   .px-fever-bar.enter { animation: px-banner-enter 0.5s ease-out; }
   .px-bonus-bar {
-    text-align: center; color: #c084fc; font-size: 0.45rem;
-    padding: 3px 0; animation: px-banner-enter 0.4s ease-out;
+    text-align: center; color: #c084fc; font-size: 0.68rem;
+    padding: 6px 0; animation: px-banner-enter 0.4s ease-out;
     flex-shrink: 0; z-index: 1; letter-spacing: 1px;
   }
   .px-streak-bar {
-    text-align: center; color: #34d399; font-size: 0.55rem;
-    padding: 4px 0; animation: px-streak-anim 1.2s ease-out forwards;
+    text-align: center; color: #34d399; font-size: 0.82rem;
+    padding: 8px 0; animation: px-streak-anim 1.2s ease-out forwards;
     text-shadow: 0 0 6px #34d399; flex-shrink: 0; z-index: 1;
   }
   .px-goal-bar-banner {
-    text-align: center; color: #fbbf24; font-size: 0.5rem;
-    padding: 4px 0; animation: px-streak-anim 1.5s ease-out forwards;
+    text-align: center; color: #fbbf24; font-size: 0.75rem;
+    padding: 8px 0; animation: px-streak-anim 1.5s ease-out forwards;
     flex-shrink: 0; z-index: 1;
   }
   .px-levelup-bar {
-    text-align: center; color: #c084fc; font-size: 0.6rem;
-    padding: 6px 0; animation: px-levelup 1.5s ease-out forwards;
+    text-align: center; color: #c084fc; font-size: 0.95rem;
+    padding: 10px 0; animation: px-levelup 1.5s ease-out forwards;
     text-shadow: 0 0 12px #a855f7; flex-shrink: 0; z-index: 1;
-    letter-spacing: 2px;
+    letter-spacing: 3px;
   }
 
   /* Companion */
@@ -1116,10 +1170,10 @@ const PX_STYLES = `
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 10px 14px;
-    margin: 4px 8px;
-    border: 3px solid #475569;
+    gap: 12px;
+    padding: 14px 18px;
+    margin: 6px 10px;
+    border: 4px solid #475569;
     background: rgba(30,41,59,0.8);
     transition: background 0.15s, border-color 0.15s;
     min-height: 0;
@@ -1135,12 +1189,12 @@ const PX_STYLES = `
   }
 
   .px-word-display {
-    font-size: clamp(2rem, 12vw, 3.5rem);
-    letter-spacing: 4px;
+    font-size: clamp(2.4rem, 13vw, 4.2rem);
+    letter-spacing: 5px;
     text-align: center;
     word-break: break-all;
-    line-height: 1.2;
-    text-shadow: 3px 3px 0 rgba(0,0,0,0.5);
+    line-height: 1.15;
+    text-shadow: 4px 4px 0 rgba(0,0,0,0.5);
   }
   .px-word-body { color: #e5e7eb; }
   .px-word-last {
@@ -1154,26 +1208,27 @@ const PX_STYLES = `
     animation: px-arrow-bounce 0.6s infinite;
   }
   .px-arrow-char {
-    font-size: 1.2rem;
+    font-size: 1.8rem;
     color: #22d3ee;
     text-shadow: 0 0 6px #22d3ee;
   }
 
   .px-hint-row {
-    font-size: 0.5rem;
+    font-size: 0.78rem;
     color: #a3a3a3;
+    text-align: center;
   }
   .px-hint-letter {
-    font-size: 0.8rem;
+    font-size: 1.3rem;
     color: #22d3ee;
     text-shadow: 0 0 4px #22d3ee;
   }
 
   .px-word-timer {
     width: 80%;
-    height: 6px;
+    height: 10px;
     background: #333;
-    border: 1px solid #555;
+    border: 2px solid #555;
     overflow: hidden;
   }
   .px-word-timer-fill {
@@ -1188,50 +1243,50 @@ const PX_STYLES = `
   .px-history {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 10px;
+    gap: 6px;
+    padding: 4px 14px;
     overflow: hidden;
     flex-shrink: 0;
     z-index: 1;
   }
   .px-hist-word {
-    font-size: 0.35rem;
+    font-size: 0.52rem;
     color: #737373;
     background: rgba(255,255,255,0.05);
-    padding: 1px 4px;
-    border: 1px solid #333;
+    padding: 4px 6px;
+    border: 2px solid #333;
   }
 
   /* Choices */
   .px-choices {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    padding: 0 8px 4px;
+    gap: 10px;
+    padding: 0 10px 8px;
     flex-shrink: 0;
     z-index: 1;
   }
   .px-choice {
-    padding: 12px 6px;
+    padding: 18px 10px;
     font-family: 'Press Start 2P', monospace;
-    font-size: clamp(0.55rem, 2.5vw, 0.7rem);
+    font-size: clamp(0.92rem, 3.6vw, 1.25rem);
     color: #e5e7eb;
     background: #334155;
-    border: 3px solid #475569;
+    border: 4px solid #475569;
     cursor: pointer;
     transition: background 0.1s, border-color 0.1s, transform 0.08s, opacity 0.15s;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     position: relative;
-    min-height: 48px;
+    min-height: 82px;
     text-align: center;
-    line-height: 1.3;
+    line-height: 1.45;
   }
   .px-choice-key {
     position: absolute;
-    top: 2px;
-    left: 4px;
-    font-size: 0.35rem;
+    top: 6px;
+    left: 8px;
+    font-size: 0.52rem;
     color: #555;
   }
   .px-choice-first {
@@ -1263,9 +1318,9 @@ const PX_STYLES = `
 
   .px-hint-warn {
     text-align: center;
-    font-size: 0.35rem;
+    font-size: 0.58rem;
     color: #fbbf24;
-    padding: 2px 0;
+    padding: 4px 0;
     flex-shrink: 0;
     z-index: 1;
     animation: px-blink 0.8s infinite;
@@ -1275,22 +1330,46 @@ const PX_STYLES = `
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 3px 10px 6px;
-    font-size: 0.35rem;
+    padding: 6px 14px 10px;
+    font-size: 0.58rem;
     color: #555;
     flex-shrink: 0;
     z-index: 1;
+    gap: 12px;
   }
   .px-exit-btn {
     font-family: 'Press Start 2P', monospace;
-    font-size: 0.35rem;
-    padding: 4px 10px;
+    font-size: 0.58rem;
+    padding: 8px 14px;
     color: #737373;
     background: #1e293b;
-    border: 2px solid #475569;
+    border: 3px solid #475569;
     cursor: pointer;
   }
   .px-exit-btn:active { background: #334155; }
+
+  @media (max-width: 480px) {
+    .px-header-meta {
+      gap: 8px;
+    }
+    .px-level-badge,
+    .px-stat-box {
+      min-width: 140px;
+      padding: 8px 10px;
+    }
+    .px-score-val {
+      font-size: clamp(2.4rem, 14vw, 3.8rem);
+    }
+    .px-word-display {
+      font-size: clamp(2rem, 12vw, 3.4rem);
+      letter-spacing: 3px;
+    }
+    .px-choice {
+      min-height: 72px;
+      padding: 14px 8px;
+      font-size: clamp(0.82rem, 3.8vw, 1.05rem);
+    }
+  }
 
   /* === ANIMATIONS === */
   @keyframes px-blink {

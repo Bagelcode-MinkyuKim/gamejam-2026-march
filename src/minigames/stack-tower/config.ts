@@ -1,0 +1,1 @@
+export const STACK_TOWER_GAMEPLAY_BGM_VOLUME = 0.24

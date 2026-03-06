@@ -15,6 +15,8 @@ import perfectSfx from '../../../assets/sounds/tic-tac-perfect.mp3'
 import tickSfx from '../../../assets/sounds/tic-tac-tick.mp3'
 import newroundSfx from '../../../assets/sounds/tic-tac-newround.mp3'
 import explosionSfx from '../../../assets/sounds/tic-tac-explosion.mp3'
+import ticTacProBgmLoop from '../../../assets/sounds/generated/tic-tac-pro/tic-tac-pro-bgm-loop.mp3'
+import { getActiveBgmTrack, playBackgroundAudio as playSharedBgm, stopBackgroundAudio as stopSharedBgm } from '../../gui/sound-manager'
 
 /* ── Constants ────────────────────────────────── */
 const ROUND_DURATION_MS = 60000
@@ -36,6 +38,10 @@ const GOLDEN_CELL_BONUS = 20
 const BOMB_CELL_PENALTY = -10
 const SPECIAL_CELL_CHANCE = 0.18
 const TICK_INTERVAL_MS = 1000
+const TIC_TAC_PRO_BGM_VOLUME = 0.22
+const TIC_TAC_PRO_PANEL_MAX_WIDTH_PX = 500
+const TIC_TAC_PRO_BOARD_MAX_WIDTH_PX = 456
+const TIC_TAC_PRO_MARK_SIZE_PX = 84
 
 const WINNING_LINES: readonly (readonly [number, number, number])[] = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -62,6 +68,17 @@ const AI_FACES: Record<AIEmotion, string> = {
   angry: '(>_<)',
   shocked: '(O_O)',
 }
+
+const EXPLOSION_PARTICLE_SPECS = [
+  { dist: 22, delay: 0 },
+  { dist: 34, delay: 0.02 },
+  { dist: 27, delay: 0.04 },
+  { dist: 42, delay: 0.06 },
+  { dist: 30, delay: 0.01 },
+  { dist: 38, delay: 0.05 },
+  { dist: 25, delay: 0.03 },
+  { dist: 45, delay: 0.07 },
+] as const
 
 /* ── Pure Functions ───────────────────────────── */
 function checkWinner(board: BoardState): CellValue {
@@ -220,11 +237,11 @@ function PixelX({ size, glow }: { size: number; glow?: boolean }) {
 function PixelExplosion({ x, y, color }: { x: number; y: number; color: string }) {
   return (
     <div className="px-explosion" style={{ left: x, top: y }}>
-      {Array.from({ length: 8 }).map((_, i) => (
+      {EXPLOSION_PARTICLE_SPECS.map((spec, i) => (
         <div key={i} className="px-explosion-particle" style={{
           '--angle': `${i * 45}deg`,
-          '--dist': `${20 + Math.random() * 30}px`,
-          '--delay': `${Math.random() * 0.1}s`,
+          '--dist': `${spec.dist}px`,
+          '--delay': `${spec.delay}s`,
           background: color,
         } as React.CSSProperties} />
       ))}
@@ -248,6 +265,20 @@ function TimerBar({ remainingMs, totalMs, isLow }: { remainingMs: number; totalM
 /* ── Main Game Component ─────────────────────── */
 function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const effects = useGameEffects()
+  const {
+    particles,
+    scorePopups,
+    isFlashing,
+    flashColor,
+    spawnParticles,
+    triggerShake,
+    triggerFlash,
+    showScorePopup,
+    comboHitBurst,
+    updateParticles,
+    cleanup: cleanupEffects,
+    getShakeStyle,
+  } = effects
   const [board, setBoard] = useState<BoardState>(EMPTY_BOARD)
   const [specialCells, setSpecialCells] = useState<readonly SpecialCell[]>(EMPTY_SPECIALS)
   const [isPlayerTurn, setIsPlayerTurn] = useState(true)
@@ -291,6 +322,8 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const lastTickSecRef = useRef(-1)
 
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
+  const panelRef = useRef<HTMLElement | null>(null)
+  const boardElementRef = useRef<HTMLDivElement | null>(null)
 
   const clearTimeoutSafe = (timerRef: { current: number | null }) => {
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null }
@@ -305,6 +338,85 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     void audio.play().catch(() => {})
   }, [])
 
+  const ensureBgm = useCallback(() => {
+    playSharedBgm(ticTacProBgmLoop, TIC_TAC_PRO_BGM_VOLUME)
+  }, [])
+
+  const stopOwnBgm = useCallback(() => {
+    if (getActiveBgmTrack() === ticTacProBgmLoop) {
+      stopSharedBgm()
+    }
+  }, [])
+
+  const getPanelCenterPoint = useCallback((xRatio = 0.5, yRatio = 0.5) => {
+    const panel = panelRef.current
+    if (panel === null) return { x: 216, y: 320 }
+    return {
+      x: panel.clientWidth * xRatio,
+      y: panel.clientHeight * yRatio,
+    }
+  }, [])
+
+  const getBoardCellPanelCenter = useCallback((index: number) => {
+    const col = index % 3
+    const row = Math.floor(index / 3)
+    const panel = panelRef.current
+    const boardElement = boardElementRef.current
+
+    if (panel === null || boardElement === null) {
+      return {
+        x: col * 120 + 60,
+        y: row * 120 + 60,
+      }
+    }
+
+    const panelRect = panel.getBoundingClientRect()
+    const boardRect = boardElement.getBoundingClientRect()
+    const cellWidth = boardRect.width / 3
+    const cellHeight = boardRect.height / 3
+
+    return {
+      x: boardRect.left - panelRect.left + col * cellWidth + cellWidth / 2,
+      y: boardRect.top - panelRect.top + row * cellHeight + cellHeight / 2,
+    }
+  }, [])
+
+  const getBoardCellExplosionCenter = useCallback((index: number) => {
+    const col = index % 3
+    const row = Math.floor(index / 3)
+    const boardElement = boardElementRef.current
+
+    if (boardElement === null) {
+      return {
+        x: col * 120 + 60,
+        y: row * 120 + 60,
+      }
+    }
+
+    const cellWidth = boardElement.clientWidth / 3
+    const cellHeight = boardElement.clientHeight / 3
+    return {
+      x: col * cellWidth + cellWidth / 2,
+      y: row * cellHeight + cellHeight / 2,
+    }
+  }, [])
+
+  const getRandomBoardExplosionPoint = useCallback(() => {
+    const boardElement = boardElementRef.current
+
+    if (boardElement === null) {
+      return {
+        x: 60 + Math.random() * 240,
+        y: 60 + Math.random() * 240,
+      }
+    }
+
+    return {
+      x: boardElement.clientWidth * (0.12 + Math.random() * 0.76),
+      y: boardElement.clientHeight * (0.12 + Math.random() * 0.76),
+    }
+  }, [])
+
   const spawnExplosion = useCallback((x: number, y: number, color: string) => {
     const id = explosionIdRef.current++
     setExplosions((prev) => [...prev, { id, x, y, color }])
@@ -316,9 +428,10 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     finishedRef.current = true
     clearTimeoutSafe(aiTimerRef)
     clearTimeoutSafe(roundTransitionTimerRef)
+    stopOwnBgm()
     playAudio('lose', 0.6, 0.95)
     onFinish({ score: scoreRef.current, durationMs: Math.round(Math.max(16.66, ROUND_DURATION_MS - remainingMsRef.current)) })
-  }, [onFinish, playAudio])
+  }, [onFinish, playAudio, stopOwnBgm])
 
   const startNewRound = useCallback(() => {
     const newSpecials = generateSpecialCells()
@@ -351,25 +464,26 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const handlePowerupSelect = useCallback((type: PowerupType) => {
     setShowPowerupPicker(false)
     playAudio('powerup', 0.65)
+    const panelCenterPoint = getPanelCenterPoint(0.5, 0.28)
 
     if (type === 'hint') {
       const hint = getHintCell(boardRef.current)
       setHintCell(hint)
-      if (hint !== null) effects.showScorePopup(5, 200, 200)
+      if (hint !== null) showScorePopup(5, panelCenterPoint.x, panelCenterPoint.y)
     } else if (type === 'time') {
       remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + POWERUP_TIME_BONUS_MS)
       setRemainingMs(remainingMsRef.current)
-      effects.triggerFlash('rgba(59,130,246,0.4)')
-      effects.showScorePopup(5, 200, 200)
+      triggerFlash('rgba(59,130,246,0.4)')
+      showScorePopup(5, panelCenterPoint.x, panelCenterPoint.y)
     } else if (type === 'double') {
       doubleScoreRoundsRef.current = POWERUP_DOUBLE_ROUNDS
       setDoubleScoreRounds(POWERUP_DOUBLE_ROUNDS)
-      effects.triggerFlash('rgba(250,204,21,0.4)')
+      triggerFlash('rgba(250,204,21,0.4)')
     } else if (type === 'freeze') {
       // AI can't move for next round - skip AI difficulty boost
-      effects.triggerFlash('rgba(147,197,253,0.5)')
+      triggerFlash('rgba(147,197,253,0.5)')
     }
-  }, [playAudio, effects])
+  }, [getPanelCenterPoint, playAudio, showScorePopup, triggerFlash])
 
   const resolveRound = useCallback(
     (currentBoard: BoardState) => {
@@ -380,6 +494,7 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       let roundOutcome: GameOutcome
       let roundScore: number
       const playerMoves = countPlayerMoves(currentBoard)
+      const boardCenterPoint = getPanelCenterPoint(0.5, 0.56)
 
       if (winner === 'O') {
         roundOutcome = 'win'
@@ -421,25 +536,23 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         const wLine = getWinningLine(currentBoard)
         if (wLine) {
           wLine.forEach((idx, i) => {
-            const cx = (idx % 3) * 33.3 + 16
-            const cy = Math.floor(idx / 3) * 33.3 + 16
+            const point = getBoardCellExplosionCenter(idx)
             setTimeout(() => {
               setCellAnimations((prev) => ({ ...prev, [idx]: 'win-cell-pop' }))
-              spawnExplosion(cx, cy, '#0d9488')
+              spawnExplosion(point.x, point.y, '#0d9488')
               playAudio('explosion', 0.3, 1.2 + i * 0.15)
             }, i * 120)
           })
         }
 
-        effects.comboHitBurst(200, 300, nextStreak, roundScore)
-        if (feverActive) effects.triggerFlash('rgba(250,204,21,0.5)')
+        comboHitBurst(boardCenterPoint.x, boardCenterPoint.y, nextStreak, roundScore)
+        if (feverActive) triggerFlash('rgba(250,204,21,0.5)')
         if (isPerfectWin) {
           for (let i = 0; i < 5; i++) {
-            setTimeout(() => spawnExplosion(
-              Math.random() * 80 + 10,
-              Math.random() * 80 + 10,
-              ['#fbbf24', '#0d9488', '#3b82f6', '#a855f7', '#ef4444'][i],
-            ), i * 80)
+            setTimeout(() => {
+              const point = getRandomBoardExplosionPoint()
+              spawnExplosion(point.x, point.y, ['#fbbf24', '#0d9488', '#3b82f6', '#a855f7', '#ef4444'][i])
+            }, i * 80)
           }
         }
 
@@ -455,18 +568,15 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         setLosses((prev) => prev + 1)
         setAiEmotion('happy')
         playAudio('lose', 0.5, 0.8)
-        effects.triggerFlash('rgba(239,68,68,0.4)')
-        effects.triggerShake(10)
+        triggerFlash('rgba(239,68,68,0.4)')
+        triggerShake(10)
 
         // Crack effect on losing
         const wLine = getWinningLine(currentBoard)
         if (wLine) {
           wLine.forEach((idx, i) => {
-            setTimeout(() => spawnExplosion(
-              (idx % 3) * 33.3 + 16,
-              Math.floor(idx / 3) * 33.3 + 16,
-              '#ef4444',
-            ), i * 80)
+            const point = getBoardCellExplosionCenter(idx)
+            setTimeout(() => spawnExplosion(point.x, point.y, '#ef4444'), i * 80)
           })
         }
       } else {
@@ -476,8 +586,8 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         setDraws((prev) => prev + 1)
         setAiEmotion('idle')
         playAudio('draw', 0.55, 0.95)
-        effects.triggerFlash('rgba(250,204,21,0.3)')
-        effects.showScorePopup(roundScore, 200, 280)
+        triggerFlash('rgba(250,204,21,0.3)')
+        showScorePopup(roundScore, boardCenterPoint.x, boardCenterPoint.y + 28)
       }
 
       outcomeRef.current = roundOutcome
@@ -495,7 +605,7 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         if (!finishedRef.current) startNewRound()
       }, 1400)
     },
-    [playAudio, startNewRound, effects, spawnExplosion],
+    [comboHitBurst, getBoardCellExplosionCenter, getPanelCenterPoint, getRandomBoardExplosionPoint, playAudio, showScorePopup, startNewRound, triggerFlash, triggerShake, spawnExplosion],
   )
 
   const performAiMove = useCallback(
@@ -515,13 +625,12 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       setAiEmotion('idle')
       playAudio('place', 0.35, 0.85)
 
-      const col = aiCell % 3
-      const row = Math.floor(aiCell / 3)
-      effects.spawnParticles(3, col * 120 + 60, row * 120 + 60)
+      const cellPoint = getBoardCellPanelCenter(aiCell)
+      spawnParticles(3, cellPoint.x, cellPoint.y)
 
       resolveRound(nextBoard)
     },
-    [playAudio, resolveRound, effects],
+    [getBoardCellPanelCenter, playAudio, resolveRound, spawnParticles],
   )
 
   const handleCellClick = useCallback(
@@ -537,10 +646,10 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       setCellAnimations((prev) => ({ ...prev, [index]: 'cell-place-bounce' }))
       playAudio('place', 0.5, 1.0 + Math.random() * 0.15)
 
-      const col = index % 3
-      const row = Math.floor(index / 3)
-      effects.spawnParticles(6, col * 120 + 60, row * 120 + 60)
-      effects.triggerShake(3)
+      const cellPoint = getBoardCellPanelCenter(index)
+      const explosionPoint = getBoardCellExplosionCenter(index)
+      spawnParticles(6, cellPoint.x, cellPoint.y)
+      triggerShake(3)
 
       // Special cell effects
       const special = specialCells[index]
@@ -548,19 +657,19 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         const nextScore = scoreRef.current + GOLDEN_CELL_BONUS
         scoreRef.current = nextScore
         setScore(nextScore)
-        effects.showScorePopup(GOLDEN_CELL_BONUS, col * 120 + 60, row * 120 + 60)
+        showScorePopup(GOLDEN_CELL_BONUS, cellPoint.x, cellPoint.y)
         playAudio('combo', 0.6, 1.3)
-        spawnExplosion(col * 33.3 + 16, row * 33.3 + 16, '#fbbf24')
-        effects.triggerFlash('rgba(250,204,21,0.3)')
+        spawnExplosion(explosionPoint.x, explosionPoint.y, '#fbbf24')
+        triggerFlash('rgba(250,204,21,0.3)')
       } else if (special === 'bomb') {
         const nextScore = Math.max(0, scoreRef.current + BOMB_CELL_PENALTY)
         scoreRef.current = nextScore
         setScore(nextScore)
-        effects.showScorePopup(BOMB_CELL_PENALTY, col * 120 + 60, row * 120 + 60)
+        showScorePopup(BOMB_CELL_PENALTY, cellPoint.x, cellPoint.y)
         playAudio('explosion', 0.6, 0.8)
-        spawnExplosion(col * 33.3 + 16, row * 33.3 + 16, '#ef4444')
-        effects.triggerShake(12)
-        effects.triggerFlash('rgba(239,68,68,0.5)')
+        spawnExplosion(explosionPoint.x, explosionPoint.y, '#ef4444')
+        triggerShake(12)
+        triggerFlash('rgba(239,68,68,0.5)')
       }
 
       const winner = checkWinner(nextBoard)
@@ -573,10 +682,21 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       clearTimeoutSafe(aiTimerRef)
       aiTimerRef.current = window.setTimeout(() => { aiTimerRef.current = null; performAiMove(nextBoard) }, AI_MOVE_DELAY_MS)
     },
-    [performAiMove, playAudio, resolveRound, effects, specialCells, showPowerupPicker, spawnExplosion],
+    [getBoardCellExplosionCenter, getBoardCellPanelCenter, performAiMove, playAudio, resolveRound, showPowerupPicker, showScorePopup, spawnExplosion, spawnParticles, specialCells, triggerFlash, triggerShake],
   )
 
-  const handleExit = useCallback(() => { playAudio('place', 0.4); onExit() }, [onExit, playAudio])
+  const handleExit = useCallback(() => {
+    playAudio('place', 0.4)
+    stopOwnBgm()
+    onExit()
+  }, [onExit, playAudio, stopOwnBgm])
+
+  useEffect(() => {
+    ensureBgm()
+    return () => {
+      stopOwnBgm()
+    }
+  }, [ensureBgm, stopOwnBgm])
 
   useEffect(() => {
     const sounds: Record<string, string> = {
@@ -596,9 +716,9 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       clearTimeoutSafe(aiTimerRef)
       clearTimeoutSafe(roundTransitionTimerRef)
       audioRefs.current = {}
-      effects.cleanup()
+      cleanupEffects()
     }
-  }, [])
+  }, [cleanupEffects])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -616,7 +736,7 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       lastFrameAtRef.current = now
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
-      effects.updateParticles()
+      updateParticles()
 
       // Tick sound every second in low time
       if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && remainingMsRef.current > 0) {
@@ -639,13 +759,13 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       if (animationFrameRef.current !== null) { window.cancelAnimationFrame(animationFrameRef.current); animationFrameRef.current = null }
       lastFrameAtRef.current = null
     }
-  }, [finishGame, playAudio])
+  }, [finishGame, playAudio, updateParticles])
 
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
   const difficulty = getDifficulty(score)
   const diffLabel = getDifficultyLabel(difficulty)
-  const cellSize = 70 // px for pixel art marks
+  const cellSize = TIC_TAC_PRO_MARK_SIZE_PX
 
   const outcomeLabel = outcome === 'win'
     ? isPerfect ? 'PERFECT!' : `WIN +${SCORE_WIN}${movesThisRound <= QUICK_WIN_MOVES ? ' QUICK!' : ''}`
@@ -654,7 +774,12 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     : null
 
   return (
-    <section className="mini-game-panel tic-tac-pro-panel" aria-label="tic-tac-pro-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
+    <section
+      ref={panelRef}
+      className="mini-game-panel tic-tac-pro-panel"
+      aria-label="tic-tac-pro-game"
+      style={{ maxWidth: TIC_TAC_PRO_PANEL_MAX_WIDTH_PX, aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...getShakeStyle() }}
+    >
       <style>{GAME_EFFECTS_CSS}{TIC_TAC_PRO_CSS}</style>
 
       {/* CRT Scanline Overlay */}
@@ -671,7 +796,7 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           <p className="ttp-ai-face">{AI_FACES[aiEmotion]}</p>
         </div>
         <div className="ttp-hud-right">
-          <p className="ttp-time">{(remainingMs / 1000).toFixed(1)}</p>
+          <p className={`ttp-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}</p>
           <p className="ttp-best-label">HI {displayedBestScore.toLocaleString()}</p>
         </div>
       </div>
@@ -706,7 +831,7 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           </div>
         )}
 
-        <div className="ttp-board">
+        <div ref={boardElementRef} className="ttp-board">
           {/* Grid lines - pixel style */}
           <div className="ttp-grid-h ttp-grid-h1" />
           <div className="ttp-grid-h ttp-grid-h2" />
@@ -803,9 +928,9 @@ function TicTacProGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         </div>
       )}
 
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={isFlashing} flashColor={flashColor} />
+      <ParticleRenderer particles={particles} />
+      <ScorePopupRenderer popups={scorePopups} />
     </section>
   )
 }
@@ -819,9 +944,9 @@ const TIC_TAC_PRO_CSS = `
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
+  gap: 8px;
   overflow: hidden;
-  padding: 8px 10px !important;
+  padding: 12px 14px 14px !important;
   background: #1a1a2e;
   position: relative;
   image-rendering: pixelated;
@@ -849,23 +974,23 @@ const TIC_TAC_PRO_CSS = `
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 2px 0;
+  padding: 4px 0 2px;
 }
-.ttp-hud-left, .ttp-hud-right { display: flex; flex-direction: column; gap: 1px; }
-.ttp-hud-center { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.ttp-hud-left, .ttp-hud-right { display: flex; flex-direction: column; gap: 2px; }
+.ttp-hud-center { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .ttp-hud-right { align-items: flex-end; }
-.ttp-score-label { margin: 0; font-size: 0.35rem; color: #4ade80; letter-spacing: 2px; }
-.ttp-score { margin: 0; font-size: clamp(1.6rem, 5.5vw, 2.2rem); color: #4ade80; font-weight: 800; line-height: 1; text-shadow: 0 0 8px rgba(74,222,128,0.5), 2px 2px 0 #065f46; }
-.ttp-round-badge { margin: 0; font-size: 0.45rem; color: #fbbf24; padding: 1px 6px; border: 2px solid #fbbf24; }
-.ttp-ai-face { margin: 0; font-size: clamp(0.6rem, 2.5vw, 0.85rem); color: #f87171; font-weight: 700; transition: color 0.2s; min-height: 1.2em; }
-.ttp-time { margin: 0; font-size: clamp(1.2rem, 4vw, 1.6rem); color: #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ttp-score-label { margin: 0; font-size: 0.48rem; color: #4ade80; letter-spacing: 2.5px; }
+.ttp-score { margin: 0; font-size: clamp(2rem, 7vw, 2.9rem); color: #4ade80; font-weight: 800; line-height: 1; text-shadow: 0 0 8px rgba(74,222,128,0.5), 2px 2px 0 #065f46; }
+.ttp-round-badge { margin: 0; font-size: 0.62rem; color: #fbbf24; padding: 2px 8px; border: 2px solid #fbbf24; }
+.ttp-ai-face { margin: 0; font-size: clamp(0.84rem, 3vw, 1.12rem); color: #f87171; font-weight: 700; transition: color 0.2s; min-height: 1.2em; }
+.ttp-time { margin: 0; font-size: clamp(1.55rem, 5vw, 2rem); color: #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ttp-time.low-time { color: #f87171; animation: ttp-blink 0.5s steps(2) infinite; }
-.ttp-best-label { margin: 0; font-size: 0.35rem; color: #64748b; }
+.ttp-best-label { margin: 0; font-size: 0.46rem; color: #64748b; }
 
 /* Timer Bar */
 .ttp-timer-bar-wrap {
   width: 100%;
-  height: 6px;
+  height: 10px;
   background: #0f172a;
   border: 2px solid #334155;
   overflow: hidden;
@@ -887,26 +1012,27 @@ const TIC_TAC_PRO_CSS = `
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 8px;
-  font-size: 0.42rem;
+  gap: 12px;
+  font-size: 0.58rem;
   color: #94a3b8;
+  flex-wrap: wrap;
 }
-.ttp-s-item { font-weight: 700; }
+.ttp-s-item { font-weight: 700; line-height: 1; }
 .ttp-s-w { color: #4ade80; margin-right: 2px; }
 .ttp-s-d { color: #fbbf24; margin-right: 2px; }
 .ttp-s-l { color: #f87171; margin-right: 2px; }
 .ttp-s-sep { color: #334155; }
-.ttp-s-diff { color: #a78bfa; border: 1px solid #a78bfa; padding: 0 4px; }
+.ttp-s-diff { color: #a78bfa; border: 1px solid #a78bfa; padding: 1px 6px; }
 .ttp-s-streak { color: #fbbf24; animation: ttp-blink 0.8s steps(2) infinite; }
 
 /* Fever / Double */
 .ttp-fever {
   width: 100%;
   text-align: center;
-  font-size: clamp(0.55rem, 2vw, 0.75rem);
+  font-size: clamp(0.74rem, 2.5vw, 0.95rem);
   color: #fbbf24;
   font-weight: 800;
-  padding: 2px;
+  padding: 4px 6px;
   background: rgba(251,191,36,0.1);
   border-top: 2px solid #fbbf24;
   border-bottom: 2px solid #fbbf24;
@@ -916,7 +1042,7 @@ const TIC_TAC_PRO_CSS = `
 .ttp-double {
   width: 100%;
   text-align: center;
-  font-size: 0.42rem;
+  font-size: 0.62rem;
   color: #c084fc;
   font-weight: 700;
   animation: ttp-blink 0.6s steps(2) infinite;
@@ -931,7 +1057,7 @@ const TIC_TAC_PRO_CSS = `
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 8px;
   min-height: 0;
 }
 .ttp-arena.round-end { pointer-events: none; }
@@ -944,9 +1070,9 @@ const TIC_TAC_PRO_CSS = `
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 20;
-  padding: 8px 20px;
+  padding: 12px 22px;
   border: 3px solid;
-  font-size: clamp(0.8rem, 3vw, 1.1rem);
+  font-size: clamp(1rem, 3.6vw, 1.35rem);
   font-weight: 800;
   text-align: center;
   animation: ttp-outcome-pop 0.25s steps(3);
@@ -958,7 +1084,7 @@ const TIC_TAC_PRO_CSS = `
 .ttp-outcome.lose { color: #f87171; border-color: #f87171; text-shadow: 0 0 12px rgba(248,113,113,0.6); }
 .ttp-outcome.perfect { animation: ttp-perfect-flash 0.15s steps(2) 4; border-color: #fbbf24; color: #fbbf24; }
 .ttp-outcome p { margin: 0; }
-.ttp-outcome-score { font-size: 0.5rem; margin-top: 2px !important; opacity: 0.8; }
+.ttp-outcome-score { font-size: 0.68rem; margin-top: 4px !important; opacity: 0.8; }
 
 /* Board */
 .ttp-board {
@@ -966,12 +1092,12 @@ const TIC_TAC_PRO_CSS = `
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
   gap: 0;
-  width: min(98%, 400px);
+  width: min(100%, ${TIC_TAC_PRO_BOARD_MAX_WIDTH_PX}px);
   aspect-ratio: 1;
   position: relative;
   background: #16213e;
-  border: 4px solid #4ade80;
-  box-shadow: 0 0 20px rgba(74,222,128,0.2), inset 0 0 20px rgba(0,0,0,0.3);
+  border: 5px solid #4ade80;
+  box-shadow: 0 0 24px rgba(74,222,128,0.24), inset 0 0 20px rgba(0,0,0,0.3);
 }
 
 /* Pixel grid lines */
@@ -982,12 +1108,12 @@ const TIC_TAC_PRO_CSS = `
   pointer-events: none;
   box-shadow: 0 0 6px rgba(74,222,128,0.4);
 }
-.ttp-grid-h { left: 0; right: 0; height: 4px; }
-.ttp-grid-v { top: 0; bottom: 0; width: 4px; }
-.ttp-grid-h1 { top: calc(33.33% - 2px); }
-.ttp-grid-h2 { top: calc(66.66% - 2px); }
-.ttp-grid-v1 { left: calc(33.33% - 2px); }
-.ttp-grid-v2 { left: calc(66.66% - 2px); }
+.ttp-grid-h { left: 0; right: 0; height: 5px; }
+.ttp-grid-v { top: 0; bottom: 0; width: 5px; }
+.ttp-grid-h1 { top: calc(33.33% - 2.5px); }
+.ttp-grid-h2 { top: calc(66.66% - 2.5px); }
+.ttp-grid-v1 { left: calc(33.33% - 2.5px); }
+.ttp-grid-v2 { left: calc(66.66% - 2.5px); }
 
 /* Cells */
 .ttp-cell {
@@ -1006,7 +1132,7 @@ const TIC_TAC_PRO_CSS = `
 }
 .ttp-cell.clickable { cursor: pointer; }
 .ttp-cell.clickable:hover { background: rgba(74,222,128,0.08); }
-.ttp-cell.clickable:active { background: rgba(74,222,128,0.15); transform: scale(0.92); }
+.ttp-cell.clickable:active { background: rgba(74,222,128,0.15); transform: scale(0.94); }
 .ttp-cell.hint { background: rgba(59,130,246,0.12); animation: ttp-hint-pulse 0.6s steps(3) infinite alternate; }
 .ttp-cell.special-golden { background: rgba(251,191,36,0.06); }
 .ttp-cell.special-bomb { background: rgba(248,113,113,0.06); }
@@ -1020,7 +1146,7 @@ const TIC_TAC_PRO_CSS = `
 
 /* Special cell icons */
 .ttp-special {
-  font-size: clamp(1rem, 4vw, 1.6rem);
+  font-size: clamp(1.4rem, 5vw, 2rem);
   font-weight: 800;
   animation: ttp-special-float 1.2s steps(4) infinite alternate;
 }
@@ -1029,7 +1155,7 @@ const TIC_TAC_PRO_CSS = `
 
 /* AI Thinking */
 .ttp-ai-thinking {
-  font-size: 0.5rem;
+  font-size: 0.74rem;
   color: #f87171;
   text-align: center;
 }
@@ -1039,13 +1165,13 @@ const TIC_TAC_PRO_CSS = `
 .ttp-turn-strip {
   width: 100%;
   text-align: center;
-  padding: 3px 0;
+  padding: 6px 0 4px;
 }
 .ttp-turn-indicator {
-  font-size: clamp(0.5rem, 1.8vw, 0.65rem);
+  font-size: clamp(0.74rem, 2.4vw, 0.92rem);
   color: #64748b;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 2.5px;
 }
 .ttp-turn-indicator.your-turn {
   color: #4ade80;
@@ -1054,7 +1180,7 @@ const TIC_TAC_PRO_CSS = `
 
 /* Streak info */
 .ttp-streak-info {
-  font-size: 0.38rem;
+  font-size: 0.54rem;
   color: #94a3b8;
   text-align: center;
 }
@@ -1088,48 +1214,72 @@ const TIC_TAC_PRO_CSS = `
 .ttp-pw-frame {
   border: 4px solid #fbbf24;
   background: #1a1a2e;
-  padding: 16px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   box-shadow: 0 0 20px rgba(251,191,36,0.3);
+  width: min(100%, 420px);
 }
 .ttp-pw-title {
   margin: 0;
-  font-size: clamp(0.7rem, 2.5vw, 0.9rem);
+  font-size: clamp(0.92rem, 3vw, 1.15rem);
   color: #fbbf24;
   font-weight: 800;
   letter-spacing: 2px;
   text-shadow: 0 0 8px #f59e0b;
   animation: ttp-blink 0.5s steps(2) infinite;
 }
-.ttp-pw-options { display: flex; gap: 10px; }
+.ttp-pw-options { display: flex; gap: 12px; width: 100%; flex-wrap: wrap; justify-content: center; }
 .ttp-pw-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 14px;
+  gap: 6px;
+  padding: 12px 16px;
   border: 3px solid #334155;
   background: #0f172a;
   cursor: pointer;
   transition: border-color 0.1s, transform 0.1s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  min-width: 75px;
+  min-width: 96px;
+  flex: 1 1 110px;
 }
 .ttp-pw-btn:hover { border-color: #fbbf24; }
 .ttp-pw-btn:active { transform: scale(0.92); }
 .ttp-pw-icon {
-  font-size: clamp(1rem, 3.5vw, 1.4rem);
+  font-size: clamp(1.3rem, 4vw, 1.8rem);
   font-weight: 800;
 }
 .hint-icon { color: #60a5fa; text-shadow: 0 0 6px #3b82f6; }
 .time-icon { color: #4ade80; text-shadow: 0 0 6px #22c55e; }
 .double-icon { color: #c084fc; text-shadow: 0 0 6px #a855f7; }
-.ttp-pw-label { font-size: 0.4rem; color: #e2e8f0; font-weight: 700; }
-.ttp-pw-desc { font-size: 0.3rem; color: #64748b; }
+.ttp-pw-label { font-size: 0.56rem; color: #e2e8f0; font-weight: 700; }
+.ttp-pw-desc { font-size: 0.42rem; color: #64748b; }
+
+@media (max-width: 420px) {
+  .tic-tac-pro-panel {
+    padding: 10px 10px 12px !important;
+  }
+
+  .ttp-score {
+    font-size: clamp(1.7rem, 8vw, 2.3rem);
+  }
+
+  .ttp-board {
+    width: min(100%, 392px);
+  }
+
+  .ttp-pw-frame {
+    padding: 14px;
+  }
+
+  .ttp-pw-btn {
+    min-width: 84px;
+  }
+}
 
 /* ── Animations (step-based for pixel feel) ── */
 @keyframes ttp-blink { 50% { opacity: 0; } }

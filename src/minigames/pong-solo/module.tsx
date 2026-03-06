@@ -16,7 +16,9 @@ import pongBallLostSfx from '../../../assets/sounds/pong-ball-lost.mp3'
 import pongChainSfx from '../../../assets/sounds/pong-chain.mp3'
 import pongStarSfx from '../../../assets/sounds/pong-star.mp3'
 import pongPerfectSfx from '../../../assets/sounds/pong-perfect.mp3'
+import pongSoloBgmLoop from '../../../assets/sounds/generated/pong-solo/pong-solo-bgm-loop.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import { getActiveBgmTrack, playBackgroundAudio as playSharedBgm, stopBackgroundAudio as stopSharedBgm } from '../../gui/sound-manager'
 
 // ─── DOT GAME PALETTE (Limited 16-color retro palette) ──────
 const PAL = {
@@ -123,9 +125,22 @@ const GRAVITY_BOMB_FORCE = 300
 
 // Starfield BG
 const STAR_COUNT = 50
+const PORTAL_INTERVAL_MS = 14_000
+const PORTAL_DURATION_MS = 6500
+const PORTAL_RADIUS = PX * 5
+const PORTAL_SCORE_BONUS = 12
+const PORTAL_SPEED_BOOST = 1.08
+const PORTAL_COOLDOWN_MS = 700
+const PRISM_INTERVAL_MS = 10_000
+const PRISM_DURATION_MS = 7000
+const PRISM_RADIUS = PX * 5
+const PRISM_SCORE_BONUS = 18
+const OVERDRIVE_DURATION_MS = 4500
+const OVERDRIVE_MULTIPLIER = 2
+const PONG_SOLO_BGM_VOLUME = 0.22
 
 interface Vec2 { x: number; y: number }
-interface BallState { x: number; y: number; vx: number; vy: number; speed: number; trail: Vec2[]; isFireball: boolean; spin: number }
+interface BallState { x: number; y: number; vx: number; vy: number; speed: number; trail: Vec2[]; isFireball: boolean; spin: number; portalCooldownUntil: number }
 interface PowerUp { id: number; type: PowerUpType; x: number; y: number }
 interface Brick { row: number; col: number; alive: boolean; hp: number; color: string }
 interface PixelParticle { id: number; x: number; y: number; vx: number; vy: number; color: string; life: number; maxLife: number; size: number }
@@ -133,6 +148,22 @@ interface FloatingText { id: number; x: number; y: number; text: string; color: 
 interface ChainArc { id: number; x1: number; y1: number; x2: number; y2: number; createdAt: number; color: string }
 interface StarCoin { id: number; x: number; y: number; spawnAt: number }
 interface BgStar { x: number; y: number; size: number; twinkleSpeed: number; phase: number }
+interface PortalPair { a: Vec2; b: Vec2; radius: number; expiresAt: number }
+interface PrismCore { x: number; y: number; radius: number; vx: number; vy: number; expiresAt: number; phase: number }
+interface Shockwave { id: number; x: number; y: number; color: string; createdAt: number; maxRadius: number; durationMs: number }
+
+const PONG_SOLO_UI_CSS = `
+@keyframes pong-score-pop {
+  0% { transform: scale(0.9); filter: brightness(1.5); }
+  70% { transform: scale(1.08); filter: brightness(1.15); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes pong-combo-float {
+  0% { transform: translateX(-50%) translateY(4px); opacity: 0.4; }
+  100% { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+`
 
 // ─── Helpers ────────────────────────────────────────────────
 function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)) }
@@ -140,7 +171,7 @@ function snap(v: number) { return Math.round(v / PX) * PX }
 
 function createInitialBall(cx: number, cy: number): BallState {
   const angle = INITIAL_BALL_ANGLE_MIN + Math.random() * (INITIAL_BALL_ANGLE_MAX - INITIAL_BALL_ANGLE_MIN)
-  return { x: cx, y: cy, vx: Math.cos(angle) * INITIAL_BALL_SPEED, vy: Math.sin(angle) * INITIAL_BALL_SPEED, speed: INITIAL_BALL_SPEED, trail: [], isFireball: false, spin: 0 }
+  return { x: cx, y: cy, vx: Math.cos(angle) * INITIAL_BALL_SPEED, vy: Math.sin(angle) * INITIAL_BALL_SPEED, speed: INITIAL_BALL_SPEED, trail: [], isFireball: false, spin: 0, portalCooldownUntil: 0 }
 }
 
 const BRICK_COLORS = [PAL.red, PAL.orange, PAL.yellow, PAL.green, PAL.blue, PAL.purple, PAL.pink, PAL.cyan]
@@ -220,6 +251,11 @@ interface GameState {
   gravBombActive: boolean; gravBombEndTime: number; gravBombX: number; gravBombY: number
   bgStars: BgStar[]
   perfectStreak: number
+  portalPair: PortalPair | null; portalTimer: number
+  prismCore: PrismCore | null; prismTimer: number
+  shockwaves: Shockwave[]
+  overdriveEndTime: number
+  bannerText: string; bannerColor: string; bannerUntil: number
 }
 
 function initState(): GameState {
@@ -244,6 +280,11 @@ function initState(): GameState {
     gravBombActive: false, gravBombEndTime: 0, gravBombX: 0, gravBombY: 0,
     bgStars: [],
     perfectStreak: 0,
+    portalPair: null, portalTimer: 0,
+    prismCore: null, prismTimer: 0,
+    shockwaves: [],
+    overdriveEndTime: 0,
+    bannerText: '', bannerColor: PAL.white, bannerUntil: 0,
   }
 }
 
@@ -271,10 +312,15 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     void a.play().catch(() => {})
   }, [])
 
+  const ensureBgm = useCallback(() => {
+    playSharedBgm(pongSoloBgmLoop, PONG_SOLO_BGM_VOLUME)
+  }, [])
+
   const finishGame = useCallback(() => {
     const s = stateRef.current
     if (s.finished) return
     s.finished = true
+    if (getActiveBgmTrack() === pongSoloBgmLoop) stopSharedBgm()
     playAudio('gameOver', 0.6)
     s.screenShakeAmount = 18
     effectsRef.current.triggerFlash('rgba(239,68,68,0.6)')
@@ -295,6 +341,18 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     for (const [k, src] of Object.entries(srcs)) { const a = new Audio(src); a.preload = 'auto'; audioRefs.current[k] = a }
     return () => { for (const a of Object.values(audioRefs.current)) { if (a) { a.pause(); a.currentTime = 0 } }; audioRefs.current = {} }
   }, [])
+
+  useEffect(() => {
+    ensureBgm()
+    const activateAudio = () => ensureBgm()
+    window.addEventListener('pointerdown', activateAudio, true)
+    window.addEventListener('keydown', activateAudio, true)
+    return () => {
+      window.removeEventListener('pointerdown', activateAudio, true)
+      window.removeEventListener('keydown', activateAudio, true)
+      if (getActiveBgmTrack() === pongSoloBgmLoop) stopSharedBgm()
+    }
+  }, [ensureBgm])
 
   // Input
   useEffect(() => {
@@ -399,7 +457,16 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       }
     }
 
+    const pushShockwave = (x: number, y: number, color: string, createdAt: number, maxRadius = PX * 14, durationMs = 560) => {
+      s.shockwaves.push({ id: nid(), x, y, color, createdAt, maxRadius, durationMs })
+    }
+
     const shake = (amt: number) => { s.screenShakeAmount = Math.max(s.screenShakeAmount, amt) }
+    const showBanner = (text: string, color: string, now: number, durationMs = 1400) => {
+      s.bannerText = text
+      s.bannerColor = color
+      s.bannerUntil = now + durationMs
+    }
 
     const chainLightning = (bx: number, by: number, depth: number, now: number) => {
       if (depth >= CHAIN_MAX_DEPTH) return
@@ -412,10 +479,12 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       const target = nearby[Math.floor(Math.random() * nearby.length)]
       const tr = getBrickRect(target, s.fieldW)
       const tx = tr.x + tr.w / 2; const ty = tr.y + tr.h / 2
+      const bonusMul = (s.feverMode ? FEVER_SCORE_MULTIPLIER : 1) * (s.overdriveEndTime > now ? OVERDRIVE_MULTIPLIER : 1)
       s.chainArcs.push({ id: nid(), x1: bx, y1: by, x2: tx, y2: ty, createdAt: now, color: PAL.cyan })
       target.hp = 0; target.alive = false; s.bricksDestroyed++
-      s.score += BRICK_SCORE * (s.feverMode ? FEVER_SCORE_MULTIPLIER : 1); setScore(s.score)
-      spawnPx(tx, ty, PAL.cyan, 5, 70)
+      s.score += BRICK_SCORE * bonusMul; setScore(s.score)
+      spawnPx(tx, ty, PAL.cyan, 8, 100)
+      pushShockwave(tx, ty, 'rgba(64,216,216,0.9)', now, PX * 8, 420)
       playAudio('chain', 0.35, 1 + depth * 0.15)
       chainLightning(tx, ty, depth + 1, now)
     }
@@ -434,6 +503,9 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       s.shieldActive = s.activePowerUps['shield'] != null && s.activePowerUps['shield'] > now
       if (s.feverMode && now > s.feverEndTime) s.feverMode = false
       if (s.gravBombActive && now > s.gravBombEndTime) s.gravBombActive = false
+      if (s.bannerUntil <= now) s.bannerText = ''
+      if (s.portalPair && now > s.portalPair.expiresAt) s.portalPair = null
+      if (s.prismCore && now > s.prismCore.expiresAt) s.prismCore = null
       if (s.screenShakeAmount > 0) { s.screenShakeAmount *= 0.85; if (s.screenShakeAmount < 0.5) s.screenShakeAmount = 0 }
 
       const basePW = Math.max(MIN_PADDLE_WIDTH, PADDLE_INITIAL_WIDTH - Math.floor(s.rallyCount / PADDLE_SHRINK_INTERVAL) * PADDLE_SHRINK_AMOUNT)
@@ -441,7 +513,60 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       s.paddleWidth = isWide ? Math.min(basePW * 1.6, s.fieldW * 0.5) : basePW
       const paddleY = s.fieldH - PX * 7
       const W = s.fieldW; const H = s.fieldH
-      const scoreMul = s.feverMode ? FEVER_SCORE_MULTIPLIER : 1
+      const overdriveActive = s.overdriveEndTime > now
+      const scoreMul = (s.feverMode ? FEVER_SCORE_MULTIPLIER : 1) * (overdriveActive ? OVERDRIVE_MULTIPLIER : 1)
+
+      // Portal gates + prism core gimmicks
+      const gimmickTop = BRICK_TOP_OFFSET + (BRICK_ROWS + Math.min(s.waveNumber, 2)) * (BRICK_HEIGHT + BRICK_GAP) + PX * 8
+      const gimmickBottom = paddleY - PX * 12
+
+      s.portalTimer += rawDt
+      if (!s.portalPair && s.portalTimer >= PORTAL_INTERVAL_MS && gimmickBottom - gimmickTop > PX * 10) {
+        s.portalTimer = 0
+        const laneSpan = Math.max(PX * 16, gimmickBottom - gimmickTop)
+        const leftX = snap(PX * 10 + Math.random() * Math.max(PX * 8, W * 0.24))
+        const rightX = snap(W - PX * 10 - Math.random() * Math.max(PX * 8, W * 0.24))
+        const y1 = snap(gimmickTop + Math.random() * laneSpan)
+        const y2Base = snap(gimmickTop + Math.random() * laneSpan)
+        const y2 = Math.abs(y1 - y2Base) < PX * 8 ? clamp(y2Base + PX * 10, gimmickTop, gimmickBottom) : y2Base
+        s.portalPair = {
+          a: { x: clamp(leftX, PX * 8, W - PX * 8), y: clamp(y1, gimmickTop, gimmickBottom) },
+          b: { x: clamp(rightX, PX * 8, W - PX * 8), y: clamp(y2, gimmickTop, gimmickBottom) },
+          radius: PORTAL_RADIUS,
+          expiresAt: now + PORTAL_DURATION_MS,
+        }
+        addFloat(W / 2, H * 0.26, 'WARP GATES', PAL.cyan, now, 12)
+        showBanner('WARP GATES OPEN', PAL.cyan, now, 1600)
+        playAudio('wave', 0.42, 1.08)
+        pushShockwave(W / 2, H * 0.3, 'rgba(64,216,216,0.85)', now, PX * 18, 640)
+      }
+
+      s.prismTimer += rawDt
+      if (!s.prismCore && s.prismTimer >= PRISM_INTERVAL_MS && gimmickBottom - gimmickTop > PX * 10) {
+        s.prismTimer = 0
+        s.prismCore = {
+          x: snap(PX * 12 + Math.random() * (W - PX * 24)),
+          y: snap(gimmickTop + Math.random() * Math.max(PX * 10, gimmickBottom - gimmickTop)),
+          radius: PRISM_RADIUS,
+          vx: (Math.random() > 0.5 ? 1 : -1) * (48 + Math.random() * 36),
+          vy: (Math.random() > 0.5 ? 1 : -1) * (22 + Math.random() * 28),
+          expiresAt: now + PRISM_DURATION_MS,
+          phase: Math.random() * Math.PI * 2,
+        }
+        addFloat(W / 2, H * 0.22, 'PRISM CORE', PAL.gold, now, 12)
+        showBanner('PRISM CORE ONLINE', PAL.gold, now, 1400)
+        playAudio('star', 0.4, 1.06)
+      }
+
+      if (s.prismCore) {
+        const core = s.prismCore
+        core.x += core.vx * scaledDt
+        core.y += core.vy * scaledDt
+        if (core.x - core.radius <= PX * 6 || core.x + core.radius >= W - PX * 6) core.vx *= -1
+        if (core.y - core.radius <= gimmickTop || core.y + core.radius >= gimmickBottom) core.vy *= -1
+        core.x = clamp(core.x, PX * 6 + core.radius, W - PX * 6 - core.radius)
+        core.y = clamp(core.y, gimmickTop + core.radius, gimmickBottom - core.radius)
+      }
 
       // Star coins spawning
       s.starCoinTimer += rawDt
@@ -488,6 +613,7 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         let ny = ball.y + ball.vy * scaledDt
         let nvx = ball.vx; let nvy = ball.vy; let nspeed = ball.speed
         let spin = ball.spin * 0.99
+        let portalCooldownUntil = ball.portalCooldownUntil
 
         if (s.magnetActive && nvy > 0) { nvx += (s.paddleX - nx) * 2.5 * scaledDt }
         if (Math.abs(spin) > 0.1) { nvx += spin * 50 * scaledDt }
@@ -507,6 +633,36 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           }
         }
 
+        // Portal gates
+        if (s.portalPair && now >= portalCooldownUntil) {
+          const gateAHit = Math.hypot(nx - s.portalPair.a.x, ny - s.portalPair.a.y) <= s.portalPair.radius + BALL_RADIUS
+          const gateBHit = Math.hypot(nx - s.portalPair.b.x, ny - s.portalPair.b.y) <= s.portalPair.radius + BALL_RADIUS
+          if (gateAHit || gateBHit) {
+            const fromGate = gateAHit ? s.portalPair.a : s.portalPair.b
+            const toGate = gateAHit ? s.portalPair.b : s.portalPair.a
+            const dirX = nvx === 0 ? 0 : nvx / Math.abs(nvx)
+            const dirY = nvy === 0 ? -1 : nvy / Math.abs(nvy)
+            const boosted = Math.min(MAX_BALL_SPEED, nspeed * PORTAL_SPEED_BOOST)
+            const mag = Math.max(1, Math.hypot(nvx, nvy))
+            nspeed = boosted
+            nvx = (nvx / mag) * boosted
+            nvy = (nvy / mag) * boosted
+            nx = clamp(toGate.x + dirX * (PORTAL_RADIUS + PX * 2), BALL_RADIUS + PX, W - BALL_RADIUS - PX)
+            ny = clamp(toGate.y + dirY * (PORTAL_RADIUS + PX * 2), BALL_RADIUS + PX, H - BALL_RADIUS - PX * 4)
+            portalCooldownUntil = now + PORTAL_COOLDOWN_MS
+            s.score += PORTAL_SCORE_BONUS * scoreMul; setScore(s.score)
+            addFloat(toGate.x, toGate.y - PX * 6, `WARP +${PORTAL_SCORE_BONUS * scoreMul}`, PAL.cyan, now, 10)
+            spawnPx(fromGate.x, fromGate.y, PAL.cyan, 10, 150)
+            spawnPx(toGate.x, toGate.y, PAL.blue, 14, 180)
+            pushShockwave(fromGate.x, fromGate.y, 'rgba(64,216,216,0.9)', now, PX * 10, 420)
+            pushShockwave(toGate.x, toGate.y, 'rgba(72,136,248,0.9)', now, PX * 14, 520)
+            effectsRef.current.triggerFlash('rgba(64,216,216,0.16)', 110)
+            playAudio('chain', 0.4, 1.1)
+            shake(6)
+            showBanner('WARP BONUS', PAL.cyan, now, 900)
+          }
+        }
+
         // Star coin collection
         for (let sci = s.starCoins.length - 1; sci >= 0; sci--) {
           const sc = s.starCoins[sci]
@@ -519,6 +675,34 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           }
         }
 
+        // Prism core
+        if (s.prismCore && Math.hypot(nx - s.prismCore.x, ny - s.prismCore.y) <= s.prismCore.radius + BALL_RADIUS + PX) {
+          const dx = nx - s.prismCore.x
+          const dy = ny - s.prismCore.y
+          const dist = Math.max(1, Math.hypot(dx, dy))
+          const normalX = dx / dist
+          const normalY = dy / dist
+          const dot = nvx * normalX + nvy * normalY
+          nvx -= 2 * dot * normalX
+          nvy -= 2 * dot * normalY
+          nspeed = Math.min(MAX_BALL_SPEED, nspeed * 1.06)
+          const mag = Math.max(1, Math.hypot(nvx, nvy))
+          nvx = (nvx / mag) * nspeed
+          nvy = (nvy / mag) * nspeed
+          s.score += PRISM_SCORE_BONUS * scoreMul; setScore(s.score)
+          s.overdriveEndTime = now + OVERDRIVE_DURATION_MS
+          addFloat(s.prismCore.x, s.prismCore.y - PX * 6, `PRISM +${PRISM_SCORE_BONUS * scoreMul}`, PAL.gold, now, 11)
+          addFloat(W / 2, H * 0.34, 'OVERDRIVE x2', PAL.gold, now, 14)
+          spawnPx(s.prismCore.x, s.prismCore.y, PAL.gold, 18, 180)
+          spawnPx(s.prismCore.x, s.prismCore.y, PAL.pink, 12, 130)
+          pushShockwave(s.prismCore.x, s.prismCore.y, 'rgba(248,184,48,0.95)', now, PX * 18, 640)
+          effectsRef.current.triggerFlash('rgba(248,184,48,0.24)', 160)
+          playAudio('milestone', 0.6, 1.18)
+          shake(8)
+          showBanner('OVERDRIVE x2', PAL.gold, now, 1800)
+          s.prismCore = null
+        }
+
         // Bricks
         for (const brick of s.bricks) {
           if (!brick.alive) continue
@@ -528,7 +712,8 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
             if (brick.hp <= 0) {
               brick.alive = false; s.bricksDestroyed++
               s.score += BRICK_SCORE * scoreMul; setScore(s.score)
-              spawnPx(br.x + br.w / 2, br.y + br.h / 2, brick.color, 10, 120)
+              spawnPx(br.x + br.w / 2, br.y + br.h / 2, brick.color, 14, 150)
+              pushShockwave(br.x + br.w / 2, br.y + br.h / 2, brick.color, now, PX * 6, 320)
               playAudio('brickBreak', 0.4, 0.9 + Math.random() * 0.3); shake(2)
               if (Math.random() < CHAIN_CHANCE) chainLightning(br.x + br.w / 2, br.y + br.h / 2, 0, now)
               if (Math.random() < POWERUP_DROP_CHANCE) {
@@ -579,7 +764,8 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           if (isPerfect) {
             hitScore *= PERFECT_HIT_MULTIPLIER; s.perfectStreak++
             addFloat(nx, pTop - PX * 6, s.perfectStreak >= 3 ? `PERFECT x${s.perfectStreak}!` : 'PERFECT!', PAL.gold, now, 12)
-            spawnPx(nx, pTop, PAL.gold, 12, 100)
+            spawnPx(nx, pTop, PAL.gold, 16, 130)
+            pushShockwave(nx, pTop, 'rgba(248,184,48,0.95)', now, PX * 10, 420)
             playAudio('perfect', 0.5, 1 + s.perfectStreak * 0.05); shake(4)
             if (s.perfectStreak >= 3) {
               s.score += s.perfectStreak * 5 * scoreMul; setScore(s.score)
@@ -597,7 +783,8 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
               s.feverMode = true; s.feverEndTime = now + FEVER_DURATION_MS
               addFloat(W / 2, H * 0.35, 'FEVER!', PAL.fire, now, 16)
               shake(10); effectsRef.current.triggerFlash('rgba(248,104,48,0.3)', 200)
-              playAudio('combo', 0.7, 1.3); spawnPx(W / 2, H / 2, PAL.fire, 25, 160)
+              playAudio('combo', 0.7, 1.3); spawnPx(W / 2, H / 2, PAL.fire, 30, 190)
+              pushShockwave(W / 2, H / 2, 'rgba(248,104,48,0.95)', now, PX * 18, 620)
             }
             if (s.comboCount >= 5 && s.comboCount % 5 === 0) {
               const bonus = s.comboCount * 2 * scoreMul; s.score += bonus; setScore(s.score)
@@ -621,7 +808,8 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
             if (s.rallyCount >= m && s.lastMilestone < m) {
               s.lastMilestone = m; s.score += RALLY_MILESTONE_BONUS * scoreMul; setScore(s.score)
               playAudio('milestone', 0.6); addFloat(W / 2, H * 0.35, `${m} RALLIES! +${RALLY_MILESTONE_BONUS * scoreMul}`, PAL.purple, now, 14)
-              shake(7); effectsRef.current.triggerFlash('rgba(168,88,248,0.2)', 150); spawnPx(W / 2, H * 0.35, PAL.purple, 18, 140)
+              shake(7); effectsRef.current.triggerFlash('rgba(168,88,248,0.2)', 150); spawnPx(W / 2, H * 0.35, PAL.purple, 22, 170)
+              pushShockwave(W / 2, H * 0.35, 'rgba(168,88,248,0.95)', now, PX * 16, 560)
               break
             }
           }
@@ -635,14 +823,15 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
             ny = H - BALL_RADIUS - PX; nvy = -Math.abs(nvy) * 0.8
             s.activePowerUps['shield'] = 0; s.shieldActive = false
             addFloat(W / 2, H - PX * 15, 'SHIELD!', PAL.cyan, now, 13)
-            spawnPx(nx, H - PX * 2, PAL.cyan, 12, 110); playAudio('shield', 0.5); shake(5)
+            spawnPx(nx, H - PX * 2, PAL.cyan, 16, 140); playAudio('shield', 0.5); shake(5)
+            pushShockwave(nx, H - PX * 2, 'rgba(64,216,216,0.95)', now, PX * 12, 460)
           } else if (s.balls.length <= 1) {
             playAudio('ballLost', 0.5); finishGame(); return
           } else { playAudio('ballLost', 0.3); continue }
         }
 
         const trail = [...ball.trail, { x: nx, y: ny }].slice(-TRAIL_LENGTH)
-        newBalls.push({ x: nx, y: ny, vx: nvx, vy: nvy, speed: nspeed, trail, isFireball: ball.isFireball, spin })
+        newBalls.push({ x: nx, y: ny, vx: nvx, vy: nvy, speed: nspeed, trail, isFireball: ball.isFireball, spin, portalCooldownUntil })
       }
       s.balls = newBalls
 
@@ -661,7 +850,7 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
             if (base) {
               for (let i = 0; i < 2; i++) {
                 const sp = (i === 0 ? -1 : 1) * (0.4 + Math.random() * 0.3)
-                s.balls.push({ x: base.x, y: base.y, vx: base.vx * sp - base.vy * 0.5, vy: base.vy * 0.9, speed: base.speed * 0.9, trail: [], isFireball: false, spin: 0 })
+                s.balls.push({ x: base.x, y: base.y, vx: base.vx * sp - base.vy * 0.5, vy: base.vy * 0.9, speed: base.speed * 0.9, trail: [], isFireball: false, spin: 0, portalCooldownUntil: 0 })
               }
             }
           }
@@ -682,8 +871,9 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
       // Particle update
       s.pixelParticles = s.pixelParticles.filter(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 100 * dt; p.life -= rawDt; return p.life > 0 })
-      if (s.pixelParticles.length > 120) s.pixelParticles = s.pixelParticles.slice(-90)
+      if (s.pixelParticles.length > 220) s.pixelParticles = s.pixelParticles.slice(-180)
 
+      s.shockwaves = s.shockwaves.filter(sw => now - sw.createdAt < sw.durationMs)
       s.chainArcs = s.chainArcs.filter(a => now - a.createdAt < 400)
       s.floatingTexts = s.floatingTexts.filter(t => now - t.createdAt < 1000)
       if (s.activePowerUps['fireball'] != null && s.activePowerUps['fireball'] <= now) { for (const b of s.balls) b.isFireball = false }
@@ -693,13 +883,34 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       if (s.screenShakeAmount > 0) ctx.translate((Math.random() - 0.5) * s.screenShakeAmount * 2, (Math.random() - 0.5) * s.screenShakeAmount * 2)
 
       // BG
-      ctx.fillStyle = PAL.bg; ctx.fillRect(-8, -8, W + 16, H + 16)
+      const bgGradient = ctx.createLinearGradient(0, 0, W, H)
+      if (overdriveActive) {
+        bgGradient.addColorStop(0, '#160a26')
+        bgGradient.addColorStop(0.45, '#0b122c')
+        bgGradient.addColorStop(1, '#09060f')
+      } else if (s.feverMode) {
+        bgGradient.addColorStop(0, '#220f17')
+        bgGradient.addColorStop(0.45, '#150c21')
+        bgGradient.addColorStop(1, '#09060f')
+      } else {
+        bgGradient.addColorStop(0, PAL.bgLight)
+        bgGradient.addColorStop(0.45, '#11112a')
+        bgGradient.addColorStop(1, PAL.bg)
+      }
+      ctx.fillStyle = bgGradient; ctx.fillRect(-8, -8, W + 16, H + 16)
 
       // Starfield
       for (const star of s.bgStars) {
         const tw = 0.3 + 0.7 * Math.abs(Math.sin(now * star.twinkleSpeed + star.phase))
         ctx.fillStyle = `rgba(240,240,232,${tw * 0.45})`
         ctx.fillRect(snap(star.x * W), snap(star.y * H), star.size, star.size)
+      }
+
+      for (let band = 0; band < 3; band++) {
+        const bandY = ((now * (0.015 + band * 0.002)) + band * PX * 18) % (H + PX * 16) - PX * 8
+        const bandAlpha = overdriveActive ? 0.12 : s.feverMode ? 0.08 : 0.05
+        ctx.fillStyle = band % 2 === 0 ? `rgba(72,136,248,${bandAlpha})` : `rgba(168,88,248,${bandAlpha})`
+        ctx.fillRect(0, snap(bandY), W, PX * (band + 4))
       }
 
       // Checkerboard
@@ -717,6 +928,14 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         ctx.fillStyle = `rgba(248,104,48,${0.05 + 0.04 * Math.sin(now * 0.008)})`; ctx.fillRect(0, 0, W, H)
         ctx.strokeStyle = `rgba(248,104,48,${0.3 + 0.2 * Math.sin(now * 0.01)})`; ctx.lineWidth = PX; ctx.strokeRect(PX, PX, W - PX * 2, H - PX * 2)
       }
+      if (overdriveActive) {
+        ctx.fillStyle = `rgba(248,184,48,${0.06 + 0.03 * Math.sin(now * 0.012)})`
+        ctx.fillRect(0, 0, W, H)
+        for (let sx = 0; sx < W; sx += PX * 5) {
+          ctx.fillStyle = `rgba(248,184,48,${0.12 + 0.05 * Math.sin(now * 0.01 + sx)})`
+          ctx.fillRect(sx, 0, PX, H)
+        }
+      }
 
       // Gravity bomb vortex
       if (s.gravBombActive) {
@@ -733,8 +952,55 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       const mainBall = s.balls[0]
       if (mainBall && mainBall.speed > INITIAL_BALL_SPEED * 1.3) {
         const si = clamp((mainBall.speed - INITIAL_BALL_SPEED * 1.3) / (MAX_BALL_SPEED - INITIAL_BALL_SPEED * 1.3), 0, 1)
-        ctx.fillStyle = `rgba(168,88,248,${0.12 * si})`
+        ctx.fillStyle = overdriveActive ? `rgba(248,184,48,${0.14 * si})` : `rgba(168,88,248,${0.12 * si})`
         for (let i = 0; i < 14; i++) ctx.fillRect(snap(Math.random() * W), snap(Math.random() * H), PX, snap(16 + Math.random() * 32))
+      }
+
+      // Portal gates
+      if (s.portalPair) {
+        const gates = [
+          { ...s.portalPair.a, color: 'rgba(64,216,216,0.95)', core: PAL.cyan },
+          { ...s.portalPair.b, color: 'rgba(72,136,248,0.95)', core: PAL.blue },
+        ]
+        for (const [index, gate] of gates.entries()) {
+          const pulse = 1 + 0.12 * Math.sin(now * 0.01 + index)
+          ctx.save()
+          ctx.globalAlpha = 0.22 + 0.1 * Math.sin(now * 0.012 + index)
+          dotCircle(ctx, gate.x, gate.y, s.portalPair.radius * 1.6 * pulse, gate.color)
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = gate.color
+          ctx.lineWidth = PX
+          ctx.beginPath()
+          ctx.arc(gate.x, gate.y, s.portalPair.radius * pulse, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.arc(gate.x, gate.y, s.portalPair.radius * 0.62 * pulse, 0, Math.PI * 2)
+          ctx.stroke()
+          for (let i = 0; i < 8; i++) {
+            const angle = now * 0.006 + index + (i / 8) * Math.PI * 2
+            ctx.fillStyle = gate.core
+            ctx.fillRect(
+              snap(gate.x + Math.cos(angle) * s.portalPair.radius * 1.15),
+              snap(gate.y + Math.sin(angle) * s.portalPair.radius * 1.15),
+              PX * 2,
+              PX * 2,
+            )
+          }
+          ctx.restore()
+        }
+      }
+
+      // Prism core
+      if (s.prismCore) {
+        const pulse = 1 + 0.15 * Math.sin(now * 0.012 + s.prismCore.phase)
+        dotDiamond(ctx, s.prismCore.x, s.prismCore.y, s.prismCore.radius * 2.2 * pulse, 'rgba(248,184,48,0.32)')
+        dotDiamond(ctx, s.prismCore.x, s.prismCore.y, s.prismCore.radius * 1.6, PAL.gold)
+        dotRect(ctx, s.prismCore.x - PX, s.prismCore.y - PX, PX * 2, PX * 2, PAL.white)
+        ctx.strokeStyle = 'rgba(248,88,168,0.85)'
+        ctx.lineWidth = PX
+        ctx.beginPath()
+        ctx.arc(s.prismCore.x, s.prismCore.y, s.prismCore.radius * 1.2, 0, Math.PI * 2)
+        ctx.stroke()
       }
 
       // Score zones
@@ -782,7 +1048,10 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       for (const ball of s.balls) {
         for (let i = 0; i < ball.trail.length; i++) {
           const t = i / ball.trail.length
-          ctx.fillStyle = ball.isFireball ? PAL.red : PAL.purple; ctx.globalAlpha = t * 0.4
+          ctx.fillStyle = overdriveActive
+            ? (i % 2 === 0 ? PAL.gold : PAL.pink)
+            : ball.isFireball ? PAL.red : PAL.purple
+          ctx.globalAlpha = t * (overdriveActive ? 0.55 : 0.4)
           const sz = Math.max(PX, snap(BALL_RADIUS * t * 1.5))
           ctx.fillRect(snap(ball.trail[i].x - sz / 2), snap(ball.trail[i].y - sz / 2), sz, sz)
         }
@@ -797,14 +1066,15 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           dotRect(ctx, ball.x - PX / 2, ball.y - PX / 2, PX, PX, PAL.yellow)
           if (Math.random() > 0.5) spawnPx(ball.x + (Math.random() - 0.5) * BALL_RADIUS, ball.y + (Math.random() - 0.5) * BALL_RADIUS, PAL.red, 1, 25)
         } else {
+          if (overdriveActive) dotCircle(ctx, ball.x, ball.y, BALL_RADIUS + PX * 1.4, 'rgba(248,184,48,0.22)')
           dotCircle(ctx, ball.x, ball.y, BALL_RADIUS, PAL.white)
-          dotRect(ctx, ball.x - PX, ball.y - PX, PX, PX, s.magnetActive ? PAL.gold : PAL.purple)
+          dotRect(ctx, ball.x - PX, ball.y - PX, PX, PX, overdriveActive ? PAL.gold : s.magnetActive ? PAL.gold : PAL.purple)
         }
       }
 
       // Paddle
       const pw = s.paddleWidth; const pY = paddleY
-      const pColor = s.feverMode ? PAL.fire : isWide ? PAL.green : PAL.orange
+      const pColor = overdriveActive ? PAL.gold : s.feverMode ? PAL.fire : isWide ? PAL.green : PAL.orange
       dotRect(ctx, s.paddleX - pw / 2, pY - PADDLE_HEIGHT / 2, pw, PADDLE_HEIGHT, pColor)
       ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.fillRect(snap(s.paddleX - pw / 2 + PX), snap(pY - PADDLE_HEIGHT / 2), snap(pw - PX * 2), PX)
       ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(snap(s.paddleX - pw / 2), snap(pY + PADDLE_HEIGHT / 2 - PX), snap(pw), PX)
@@ -820,6 +1090,21 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       // Particles
       for (const p of s.pixelParticles) { ctx.fillStyle = p.color; ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1); ctx.fillRect(snap(p.x), snap(p.y), p.size, p.size) }
       ctx.globalAlpha = 1
+
+      // Shockwaves
+      for (const sw of s.shockwaves) {
+        const age = (now - sw.createdAt) / sw.durationMs
+        if (age >= 1) continue
+        const radius = sw.maxRadius * age
+        ctx.save()
+        ctx.globalAlpha = 1 - age
+        ctx.strokeStyle = sw.color
+        ctx.lineWidth = PX
+        ctx.beginPath()
+        ctx.arc(sw.x, sw.y, radius, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.restore()
+      }
 
       // Chain arcs
       for (const arc of s.chainArcs) {
@@ -846,8 +1131,8 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       // ── HUD ──
       const hudY = H - PX * 3
       dotRect(ctx, 0, hudY - PX, W, PX * 4, 'rgba(0,0,0,0.6)')
-      ctx.fillStyle = PAL.white; ctx.font = `bold ${PX * 2 + 2}px "Press Start 2P", monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillText(`${s.score}`, PX * 2, hudY + PX / 2)
+      ctx.fillStyle = overdriveActive ? PAL.gold : PAL.white; ctx.font = `bold ${PX * 3}px "Press Start 2P", monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText(`${s.score.toLocaleString()}`, PX * 2, hudY + PX / 2)
       ctx.textAlign = 'right'; ctx.fillStyle = PAL.purple; ctx.font = `bold ${PX * 2}px "Press Start 2P", monospace`
       ctx.fillText(`Lv${s.speedLevel}`, W - PX * 2, hudY + PX / 2)
       const remainSec = Math.max(0, Math.ceil((GAME_TIMEOUT_MS - s.elapsedMs) / 1000))
@@ -873,6 +1158,16 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         ctx.fillStyle = PAL.fire; ctx.font = `bold ${PX * 3}px "Press Start 2P", monospace`; ctx.textAlign = 'center'
         ctx.fillText('FEVER', W / 2, BRICK_TOP_OFFSET + BRICK_ROWS * (BRICK_HEIGHT + BRICK_GAP) + PX * 5)
       }
+      if (overdriveActive) {
+        ctx.fillStyle = PAL.gold; ctx.font = `bold ${PX * 2}px "Press Start 2P", monospace`; ctx.textAlign = 'center'
+        ctx.fillText('OVERDRIVE x2', W / 2, BRICK_TOP_OFFSET + BRICK_ROWS * (BRICK_HEIGHT + BRICK_GAP) + PX * 9)
+      }
+      if (s.bannerText) {
+        ctx.fillStyle = s.bannerColor
+        ctx.font = `bold ${PX * 2}px "Press Start 2P", monospace`
+        ctx.textAlign = 'center'
+        ctx.fillText(s.bannerText, W / 2, PX * 7)
+      }
 
       // Slow motion
       if (isSlow) { ctx.fillStyle = 'rgba(72,136,248,0.04)'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = 'rgba(72,136,248,0.08)'; for (let sy = 0; sy < H; sy += PX * 2) ctx.fillRect(0, sy, W, 1) }
@@ -896,16 +1191,60 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
   const comboLabel = getComboLabel(score)
   const comboColor = getComboColor(score)
+  const bestDisplay = Math.max(bestScore, score)
 
   return (
     <section className="mini-game-panel pong-solo-panel" aria-label="pong-solo-game" style={{
       maxWidth: '432px', margin: '0 auto', width: '100%', height: '100%',
       display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', background: PAL.bg,
     }}>
-      <style>{GAME_EFFECTS_CSS}</style>
+      <style>{`${GAME_EFFECTS_CSS}\n${PONG_SOLO_UI_CSS}`}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr auto 1fr',
+        alignItems: 'center',
+        gap: `${PX * 2}px`,
+        padding: `${PX * 3}px ${PX * 3}px ${PX * 2}px`,
+        background: 'linear-gradient(180deg, rgba(13,12,34,0.96), rgba(8,8,20,0.88))',
+        borderBottom: '1px solid rgba(168,88,248,0.35)',
+        boxShadow: '0 10px 28px rgba(0,0,0,0.26)',
+        zIndex: 1,
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: 'rgba(240,240,232,0.65)', fontSize: '8px', fontFamily: '"Press Start 2P", monospace' }}>BEST</div>
+          <div style={{ color: PAL.cyan, fontSize: '13px', fontWeight: 900, fontFamily: '"Press Start 2P", monospace', textShadow: `0 0 10px ${PAL.cyan}` }}>
+            {bestDisplay.toLocaleString()}
+          </div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ color: 'rgba(240,240,232,0.68)', fontSize: '8px', fontFamily: '"Press Start 2P", monospace', marginBottom: '4px' }}>SCORE</div>
+          <div
+            key={score}
+            style={{
+              color: PAL.yellow,
+              fontSize: '24px',
+              fontWeight: 900,
+              lineHeight: 1,
+              fontFamily: '"Press Start 2P", monospace',
+              textShadow: `0 0 16px rgba(248,216,72,0.65)`,
+              animation: 'pong-score-pop 180ms ease-out',
+            }}
+          >
+            {score.toLocaleString()}
+          </div>
+        </div>
+        <div style={{ minWidth: 0, textAlign: 'right' }}>
+          <div style={{ color: 'rgba(240,240,232,0.65)', fontSize: '8px', fontFamily: '"Press Start 2P", monospace' }}>
+            {comboDisplay >= 3 ? 'COMBO' : 'MODE'}
+          </div>
+          <div style={{ color: comboDisplay >= 3 ? PAL.orange : PAL.purple, fontSize: '11px', fontWeight: 900, fontFamily: '"Press Start 2P", monospace', textShadow: `0 0 10px ${comboDisplay >= 3 ? PAL.orange : PAL.purple}` }}>
+            {comboDisplay >= 3 ? `${comboDisplay}x` : 'SOLO'}
+          </div>
+        </div>
+      </div>
       <div ref={containerRef} style={{ flex: 1, width: '100%', position: 'relative', touchAction: 'none' }}
         onPointerMove={(e) => {
           const c = canvasRef.current; if (!c || stateRef.current.finished) return
@@ -913,15 +1252,15 @@ function PongSoloGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           s.paddleX = clamp(rel * s.fieldW, s.paddleWidth / 2, s.fieldW - s.paddleWidth / 2)
         }}>
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%', imageRendering: 'pixelated' }} />
+        {comboDisplay >= 3 && (
+          <div style={{ position: 'absolute', top: `${PX * 3}px`, left: '50%', transform: 'translateX(-50%)', color: PAL.yellow, fontSize: '9px', fontWeight: 900, fontFamily: '"Press Start 2P", monospace', textShadow: '0 0 10px rgba(248,216,72,0.7)', pointerEvents: 'none', zIndex: 10, animation: 'pong-combo-float 180ms ease-out' }}>
+            {comboDisplay}x COMBO
+          </div>
+        )}
       </div>
       {comboLabel && (
         <div style={{ position: 'absolute', bottom: `${PX * 7}px`, left: '50%', transform: 'translateX(-50%)', color: comboColor, fontSize: '10px', fontWeight: 900, fontFamily: '"Press Start 2P", monospace', textShadow: `0 0 12px ${comboColor}`, pointerEvents: 'none', zIndex: 10 }}>
           {comboLabel}
-        </div>
-      )}
-      {comboDisplay >= 3 && (
-        <div style={{ position: 'absolute', top: `${PX * 2}px`, left: '50%', transform: 'translateX(-50%)', color: PAL.yellow, fontSize: '9px', fontWeight: 900, fontFamily: '"Press Start 2P", monospace', textShadow: `0 0 8px rgba(248,216,72,0.5)`, pointerEvents: 'none', zIndex: 10, animation: 'pulse 0.3s ease-in-out' }}>
-          {comboDisplay}x COMBO
         </div>
       )}
     </section>

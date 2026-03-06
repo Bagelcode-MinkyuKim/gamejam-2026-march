@@ -18,10 +18,11 @@ import perfectSfx from '../../../assets/sounds/sequence-perfect.mp3'
 import bossSfx from '../../../assets/sounds/sequence-boss.mp3'
 import lifeLostSfx from '../../../assets/sounds/sequence-life-lost.mp3'
 import powerupSfx from '../../../assets/sounds/sequence-powerup.mp3'
+import sequenceMasterBgmLoop from '../../../assets/sounds/sequence-master-bgm-loop.mp3'
 
 // ─── Constants ──────────────────────────────────────────
-const ROUND_DURATION_MS = 90000
-const LOW_TIME_THRESHOLD_MS = 15000
+const QUESTION_DURATION_MS = 30000
+const LOW_TIME_THRESHOLD_MS = 10000
 const CRITICAL_TIME_THRESHOLD_MS = 5000
 const CORRECT_SCORE = 10
 const WRONG_PENALTY = 5
@@ -32,15 +33,11 @@ const SPEED_BONUS_POINTS = 8
 const FEVER_COMBO_THRESHOLD = 5
 const FEVER_DURATION_MS = 8000
 const FEVER_MULTIPLIER = 3
-const TIME_BONUS_PER_CORRECT_MS = 1200
-const HINT_COOLDOWN_MS = 12000
-const HINT_PENALTY = 3
 const STREAK_MILESTONE = 10
 const INITIAL_LIVES = 3
-const MAX_LIVES = 5
+const MAX_LIVES = 3
 const BOSS_INTERVAL = 8
 const BOSS_BONUS_SCORE = 30
-const BOSS_BONUS_TIME_MS = 5000
 const PERFECT_THRESHOLD_MS = 1200
 
 const DIFFICULTY_THRESHOLDS = [0, 30, 60, 100, 160] as const
@@ -53,8 +50,6 @@ interface SequenceProblem {
   readonly displayed: number[]
   readonly answer: number
   readonly choices: number[]
-  readonly patternLabel: string
-  readonly patternKind: PatternKind
   readonly isBoss: boolean
 }
 
@@ -165,11 +160,6 @@ function generateSequence(pattern: PatternKind, length: number, difficulty: numb
   }
 }
 
-const PATTERN_LABELS: Record<PatternKind, string> = {
-  arithmetic: 'ADD', geometric: 'MUL', fibonacci: 'FIB',
-  squares: 'SQR', cubes: 'CUB', triangular: 'TRI', primes: 'PRM',
-}
-
 function generateDistractors(answer: number, count: number): number[] {
   const distractors = new Set<number>()
   for (const offset of shuffle([1, 2, 3, 5, 7, 10, -1, -2, -3, -5])) {
@@ -195,7 +185,7 @@ function createProblem(score: number, solvedCount: number): SequenceProblem {
   const answer = fullSequence[length]
   const distractors = generateDistractors(answer, 3)
   const choices = shuffle([answer, ...distractors])
-  return { displayed, answer, choices, patternLabel: PATTERN_LABELS[pattern], patternKind: pattern, isBoss }
+  return { displayed, answer, choices, isBoss }
 }
 
 function shouldDropPowerUp(): PowerUpKind | null {
@@ -213,16 +203,14 @@ type FeedbackState = { choiceIndex: number; kind: 'correct' | 'wrong' } | null
 function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
-  const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
+  const [remainingMs, setRemainingMs] = useState(QUESTION_DURATION_MS)
   const [problem, setProblem] = useState<SequenceProblem>(() => createProblem(0, 0))
   const [solvedCount, setSolvedCount] = useState(0)
   const [feedback, setFeedback] = useState<FeedbackState>(null)
   const [isFever, setIsFever] = useState(false)
+  const [isFreezeActive, setIsFreezeActive] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
-  const [showHint, setShowHint] = useState(false)
-  const [hintAvailableMs, setHintAvailableMs] = useState(0)
   const [showLevelUp, setShowLevelUp] = useState<string | null>(null)
-  const [timeBonusAnim, setTimeBonusAnim] = useState(false)
   const [streak, setStreak] = useState(0)
   const [showStreakMilestone, setShowStreakMilestone] = useState(false)
   const [numberRevealIndex, setNumberRevealIndex] = useState(-1)
@@ -234,22 +222,23 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const [showPowerUpGet, setShowPowerUpGet] = useState<PowerUpKind | null>(null)
   const [showBossLabel, setShowBossLabel] = useState(false)
   const [pixelStars, setPixelStars] = useState(0) // 0-3 stars based on speed
+  const [isLocked, setIsLocked] = useState(false)
 
   const effects = useGameEffects()
 
   const scoreRef = useRef(0)
   const comboRef = useRef(0)
-  const remainingMsRef = useRef(ROUND_DURATION_MS)
+  const remainingMsRef = useRef(QUESTION_DURATION_MS)
   const solvedCountRef = useRef(0)
   const finishedRef = useRef(false)
   const feverRef = useRef(false)
   const feverRemainingMsRef = useRef(0)
+  const feedbackRemainingMsRef = useRef(0)
   const animationFrameRef = useRef<number | null>(null)
   const lastFrameAtRef = useRef<number | null>(null)
-  const feedbackTimerRef = useRef<number | null>(null)
+  const gameStartedAtRef = useRef<number>(window.performance.now())
   const lastAnswerAtRef = useRef(0)
   const lockedRef = useRef(false)
-  const hintAvailableMsRef = useRef(0)
   const streakRef = useRef(0)
   const prevDiffRef = useRef(0)
   const timeWarningPlayedRef = useRef(false)
@@ -260,10 +249,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
   // Audio refs
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
-
-  const clearTimeoutSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null }
-  }
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const playAudio = useCallback((name: string, volume: number, playbackRate = 1) => {
     const audio = audioRefs.current[name]
@@ -274,9 +260,21 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     void audio.play().catch(() => {})
   }, [])
 
+  const ensureBgm = useCallback(() => {
+    const bgm = bgmAudioRef.current
+    if (bgm === null || !bgm.paused) return
+    void bgm.play().catch(() => {})
+  }, [])
+
+  const stopBgm = useCallback(() => {
+    const bgm = bgmAudioRef.current
+    if (bgm === null) return
+    bgm.pause()
+    bgm.currentTime = 0
+  }, [])
+
   // Number reveal animation
   useEffect(() => {
-    setNumberRevealIndex(-1)
     let cancelled = false
     const timers = problem.displayed.map((_, i) =>
       window.setTimeout(() => { if (!cancelled) setNumberRevealIndex(i) }, i * 60)
@@ -287,51 +285,110 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   // Boss label animation
   useEffect(() => {
     if (problem.isBoss) {
-      setShowBossLabel(true)
+      const showTimer = window.setTimeout(() => setShowBossLabel(true), 0)
       playAudio('boss', 0.6)
-      const t = window.setTimeout(() => setShowBossLabel(false), 1500)
-      return () => window.clearTimeout(t)
+      const hideTimer = window.setTimeout(() => setShowBossLabel(false), 1500)
+      return () => {
+        window.clearTimeout(showTimer)
+        window.clearTimeout(hideTimer)
+      }
     }
   }, [problem, playAudio])
 
+  const resetQuestionTimer = useCallback(() => {
+    timeWarningPlayedRef.current = false
+    remainingMsRef.current = QUESTION_DURATION_MS
+    setRemainingMs(QUESTION_DURATION_MS)
+  }, [])
+
+  const clearTransientVisuals = useCallback(() => {
+    setShowPerfect(false)
+    setShowStreakMilestone(false)
+    setShowLevelUp(null)
+    setShowPowerUpGet(null)
+    setShowBossLabel(false)
+    setCharReaction(feverRef.current ? 'fever' : 'idle')
+  }, [])
+
   const advanceProblem = useCallback((currentScore: number, currentSolved: number) => {
     const next = createProblem(currentScore, currentSolved)
+    feedbackRemainingMsRef.current = 0
+    setNumberRevealIndex(-1)
+    setFeedback(null)
+    clearTransientVisuals()
     setProblem(next)
-    setShowHint(false)
     setPixelStars(0)
+    resetQuestionTimer()
     lastAnswerAtRef.current = window.performance.now()
     lockedRef.current = false
+    setIsLocked(false)
     // Random character change
     if (Math.random() < 0.3) setCharImage(pickRandom(PIXEL_CHARS))
-  }, [])
+  }, [clearTransientVisuals, resetQuestionTimer])
 
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
-    clearTimeoutSafe(feedbackTimerRef)
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
+    feedbackRemainingMsRef.current = 0
+    stopBgm()
+    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, window.performance.now() - gameStartedAtRef.current))
     onFinish({ score: scoreRef.current, durationMs: elapsedMs })
-  }, [onFinish])
+  }, [onFinish, stopBgm])
 
-  const useHint = useCallback(() => {
-    if (hintAvailableMsRef.current > 0 || finishedRef.current || lockedRef.current || showHint) return
-    setShowHint(true)
-    hintAvailableMsRef.current = HINT_COOLDOWN_MS
-    setHintAvailableMs(HINT_COOLDOWN_MS)
-    const nextScore = Math.max(0, scoreRef.current - HINT_PENALTY)
+  const registerMiss = useCallback((choiceIndex: number) => {
+    if (finishedRef.current || lockedRef.current) return
+
+    lockedRef.current = true
+    setIsLocked(true)
+
+    const nextScore = Math.max(0, scoreRef.current - WRONG_PENALTY)
     scoreRef.current = nextScore
     setScore(nextScore)
-  }, [showHint])
+
+    comboRef.current = 0
+    setCombo(0)
+    streakRef.current = 0
+    setStreak(0)
+    setPixelStars(0)
+
+    livesRef.current = Math.max(0, livesRef.current - 1)
+    setLives(livesRef.current)
+
+    if (feverRef.current) {
+      feverRef.current = false
+      feverRemainingMsRef.current = 0
+      setIsFever(false)
+      setFeverRemainingMs(0)
+    }
+
+    setFeedback({ choiceIndex, kind: 'wrong' })
+    feedbackRemainingMsRef.current = FEEDBACK_DURATION_MS
+    setCharReaction('sad')
+    window.setTimeout(() => setCharReaction('idle'), 800)
+
+    if (livesRef.current <= 0) {
+      playAudio('gameover', 0.64, 0.95)
+      window.setTimeout(() => finishGame(), 600)
+    } else {
+      playAudio('lifelost', 0.5)
+    }
+
+    playAudio('wrong', 0.5, 0.8)
+    effects.triggerShake(8)
+    effects.triggerFlash('rgba(239,68,68,0.5)')
+  }, [effects, finishGame, playAudio])
 
   const handleChoice = useCallback(
     (choiceIndex: number) => {
+      ensureBgm()
       if (finishedRef.current || lockedRef.current) return
 
       const chosen = problem.choices[choiceIndex]
       const isCorrect = chosen === problem.answer
-      lockedRef.current = true
 
       if (isCorrect) {
+        lockedRef.current = true
+        setIsLocked(true)
         const now = window.performance.now()
         const timeSinceLast = now - lastAnswerAtRef.current
         const keptCombo = timeSinceLast <= COMBO_KEEP_WINDOW_MS || comboRef.current === 0
@@ -374,15 +431,6 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         solvedCountRef.current = nextSolved
         setSolvedCount(nextSolved)
 
-        // Time bonus
-        const timeBonus = problem.isBoss ? BOSS_BONUS_TIME_MS : TIME_BONUS_PER_CORRECT_MS
-        if (!freezeActiveRef.current) {
-          remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + timeBonus)
-          setRemainingMs(remainingMsRef.current)
-        }
-        setTimeBonusAnim(true)
-        window.setTimeout(() => setTimeBonusAnim(false), 600)
-
         // Level up check
         const newDiff = getDifficulty(nextScore)
         if (newDiff > prevDiffRef.current) {
@@ -414,10 +462,20 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
               setLives(livesRef.current)
             }
           } else {
+            if (activePowerUpRef.current?.kind === 'freeze') {
+              freezeActiveRef.current = false
+              setIsFreezeActive(false)
+            }
+            if (activePowerUpRef.current?.kind === 'double') {
+              doubleActiveRef.current = false
+            }
             const dur = POWER_UP_DURATION[powerDrop]
             activePowerUpRef.current = { kind: powerDrop, remainingMs: dur }
             setActivePowerUp({ kind: powerDrop, remainingMs: dur })
-            if (powerDrop === 'freeze') freezeActiveRef.current = true
+            if (powerDrop === 'freeze') {
+              freezeActiveRef.current = true
+              setIsFreezeActive(true)
+            }
             if (powerDrop === 'double') doubleActiveRef.current = true
           }
           setShowPowerUpGet(powerDrop)
@@ -426,6 +484,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         setFeedback({ choiceIndex, kind: 'correct' })
+        feedbackRemainingMsRef.current = FEEDBACK_DURATION_MS
         setCharReaction('happy')
         window.setTimeout(() => setCharReaction(feverRef.current ? 'fever' : 'idle'), 600)
 
@@ -437,65 +496,28 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
         effects.comboHitBurst(200, 300, nextCombo, earned)
       } else {
-        // Wrong answer
-        const nextScore = Math.max(0, scoreRef.current - WRONG_PENALTY)
-        scoreRef.current = nextScore
-        setScore(nextScore)
-
-        comboRef.current = 0
-        setCombo(0)
-        streakRef.current = 0
-        setStreak(0)
-
-        // Lose a life
-        livesRef.current = Math.max(0, livesRef.current - 1)
-        setLives(livesRef.current)
-
-        if (feverRef.current) {
-          feverRef.current = false
-          feverRemainingMsRef.current = 0
-          setIsFever(false)
-          setFeverRemainingMs(0)
-        }
-
-        setFeedback({ choiceIndex, kind: 'wrong' })
-        setCharReaction('sad')
-        window.setTimeout(() => setCharReaction('idle'), 800)
-
-        if (livesRef.current <= 0) {
-          playAudio('gameover', 0.64, 0.95)
-          window.setTimeout(() => finishGame(), 600)
-        } else {
-          playAudio('lifelost', 0.5)
-        }
-
-        playAudio('wrong', 0.5, 0.8)
-        effects.triggerShake(8)
-        effects.triggerFlash('rgba(239,68,68,0.5)')
+        registerMiss(choiceIndex)
+        return
       }
-
-      clearTimeoutSafe(feedbackTimerRef)
-      feedbackTimerRef.current = window.setTimeout(() => {
-        feedbackTimerRef.current = null
-        setFeedback(null)
-        if (!finishedRef.current) advanceProblem(scoreRef.current, solvedCountRef.current)
-      }, FEEDBACK_DURATION_MS)
     },
-    [problem, playAudio, advanceProblem, finishGame, effects],
+    [effects, ensureBgm, playAudio, problem, registerMiss],
   )
 
-  const handleExit = useCallback(() => { onExit() }, [onExit])
+  const handleExit = useCallback(() => {
+    stopBgm()
+    onExit()
+  }, [onExit, stopBgm])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      ensureBgm()
       if (event.code === 'Escape') { event.preventDefault(); handleExit() }
-      if (event.code === 'KeyH') { event.preventDefault(); useHint() }
       const keyMap: Record<string, number> = { 'Digit1': 0, 'Digit2': 1, 'Digit3': 2, 'Digit4': 3 }
       if (event.code in keyMap) { event.preventDefault(); handleChoice(keyMap[event.code]) }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleExit, useHint, handleChoice])
+  }, [ensureBgm, handleExit, handleChoice])
 
   useEffect(() => {
     const sources: Record<string, string> = {
@@ -506,13 +528,22 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     for (const [name, src] of Object.entries(sources)) {
       const a = new Audio(src); a.preload = 'auto'; audioRefs.current[name] = a
     }
+    const bgm = new Audio(sequenceMasterBgmLoop)
+    bgm.loop = true
+    bgm.preload = 'auto'
+    bgm.volume = 0.3
+    bgmAudioRef.current = bgm
+    void bgm.play().catch(() => {})
+    gameStartedAtRef.current = window.performance.now()
     lastAnswerAtRef.current = window.performance.now()
     return () => {
-      clearTimeoutSafe(feedbackTimerRef)
-      for (const name of Object.keys(audioRefs.current)) audioRefs.current[name] = null
+      feedbackRemainingMsRef.current = 0
+      stopBgm()
+      bgmAudioRef.current = null
+      audioRefs.current = {}
       effects.cleanup()
     }
-  }, [])
+  }, [effects, stopBgm])
 
   useEffect(() => {
     const step = (now: number) => {
@@ -527,12 +558,6 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         setRemainingMs(remainingMsRef.current)
       }
 
-      // Hint cooldown
-      if (hintAvailableMsRef.current > 0) {
-        hintAvailableMsRef.current = Math.max(0, hintAvailableMsRef.current - deltaMs)
-        setHintAvailableMs(hintAvailableMsRef.current)
-      }
-
       // Fever countdown
       if (feverRef.current) {
         feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
@@ -544,7 +569,10 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       if (activePowerUpRef.current) {
         activePowerUpRef.current.remainingMs -= deltaMs
         if (activePowerUpRef.current.remainingMs <= 0) {
-          if (activePowerUpRef.current.kind === 'freeze') freezeActiveRef.current = false
+          if (activePowerUpRef.current.kind === 'freeze') {
+            freezeActiveRef.current = false
+            setIsFreezeActive(false)
+          }
           if (activePowerUpRef.current.kind === 'double') doubleActiveRef.current = false
           activePowerUpRef.current = null
           setActivePowerUp(null)
@@ -554,18 +582,26 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       }
 
       // Time warning
-      if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && !timeWarningPlayedRef.current) {
+      if (remainingMsRef.current > 0 && remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && !timeWarningPlayedRef.current) {
         timeWarningPlayedRef.current = true
         playAudio('timewarning', 0.5)
       }
 
       effects.updateParticles()
 
-      if (remainingMsRef.current <= 0) {
-        playAudio('gameover', 0.64, 0.95)
-        finishGame()
-        animationFrameRef.current = null
-        return
+      if (feedbackRemainingMsRef.current > 0) {
+        feedbackRemainingMsRef.current = Math.max(0, feedbackRemainingMsRef.current - deltaMs)
+      }
+
+      if (feedbackRemainingMsRef.current <= 0 && lockedRef.current && feedback !== null) {
+        setFeedback(null)
+        if (!finishedRef.current && livesRef.current > 0) {
+          advanceProblem(scoreRef.current, solvedCountRef.current)
+        }
+      }
+
+      if (remainingMsRef.current <= 0 && !lockedRef.current) {
+        registerMiss(-1)
       }
 
       animationFrameRef.current = window.requestAnimationFrame(step)
@@ -575,7 +611,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current)
       animationFrameRef.current = null; lastFrameAtRef.current = null
     }
-  }, [finishGame, playAudio, effects])
+  }, [advanceProblem, effects, feedback, playAudio, registerMiss])
 
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
@@ -586,12 +622,12 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const difficultyLabel = difficultyLabels[difficulty] ?? 'LV.5'
   const difficultyColor = difficultyColors[difficulty] ?? '#c084fc'
   const timeSeconds = Math.ceil(remainingMs / 1000)
-  const timeProgressPercent = (remainingMs / ROUND_DURATION_MS) * 100
+  const timeProgressPercent = (remainingMs / QUESTION_DURATION_MS) * 100
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
 
   return (
-    <section className="mini-game-panel sm-px" aria-label="sequence-master-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
+    <section className="mini-game-panel sm-px" aria-label="sequence-master-game" style={{ maxWidth: '540px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
       <style>{GAME_EFFECTS_CSS}{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
@@ -629,17 +665,17 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         /* ── Pixel Header ── */
         .sm-px-header {
           background: #16213e;
-          padding: 8px 10px;
+          padding: 14px 16px;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 12px;
           border-bottom: 4px solid #0f3460;
           flex-shrink: 0;
         }
 
         .sm-px-char-wrap {
-          width: 48px;
-          height: 48px;
+          width: 72px;
+          height: 72px;
           border: 3px solid #0f3460;
           background: #1a1a2e;
           flex-shrink: 0;
@@ -668,19 +704,22 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           flex: 1;
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 8px;
           min-width: 0;
+          align-items: center;
+          text-align: center;
         }
 
         .sm-px-score {
-          font-size: 16px;
+          font-size: clamp(28px, 8vw, 40px);
           color: #e2e8f0;
           margin: 0;
-          text-shadow: 2px 2px 0 #0f3460;
+          line-height: 1.1;
+          text-shadow: 3px 3px 0 #0f3460;
         }
 
         .sm-px-best {
-          font-size: 7px;
+          font-size: 10px;
           color: #64748b;
           margin: 0;
         }
@@ -688,13 +727,13 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         /* ── Lives (pixel hearts) ── */
         .sm-px-lives {
           display: flex;
-          gap: 3px;
+          gap: 6px;
           flex-shrink: 0;
         }
 
         .sm-px-heart {
-          width: 16px;
-          height: 14px;
+          width: 24px;
+          height: 21px;
           position: relative;
         }
 
@@ -706,7 +745,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         .sm-px-heart::before {
-          width: 16px; height: 10px; top: 2px; left: 0;
+          width: 24px; height: 15px; top: 3px; left: 0;
           clip-path: polygon(0 40%, 25% 0, 50% 30%, 75% 0, 100% 40%, 50% 100%);
         }
 
@@ -721,10 +760,10 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
         /* ── Time Bar ── */
         .sm-px-timebar {
-          height: 8px;
+          height: 14px;
           background: #16213e;
           border-bottom: 2px solid #0f3460;
-          padding: 1px 2px;
+          padding: 2px 4px;
           flex-shrink: 0;
           position: relative;
         }
@@ -735,19 +774,11 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           image-rendering: pixelated;
         }
 
-        .sm-px-timebar.flash { animation: sm-px-time-flash 0.5s steps(3); }
-
-        @keyframes sm-px-time-flash {
-          0% { background: #16213e; }
-          50% { background: #22c55e; }
-          100% { background: #16213e; }
-        }
-
         .sm-px-time-text {
           position: absolute;
-          right: 6px;
-          top: -1px;
-          font-size: 6px;
+          right: 10px;
+          top: 0;
+          font-size: 9px;
           color: #94a3b8;
         }
 
@@ -761,14 +792,14 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 6px 10px;
+          padding: 10px 14px;
           flex-shrink: 0;
-          gap: 4px;
+          gap: 8px;
         }
 
         .sm-px-tag {
-          font-size: 7px;
-          padding: 3px 6px;
+          font-size: 10px;
+          padding: 5px 8px;
           border: 2px solid;
           display: inline-block;
         }
@@ -778,7 +809,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           background: #1a1a2e;
           border-top: 2px solid #facc15;
           border-bottom: 2px solid #facc15;
-          padding: 4px 10px;
+          padding: 6px 14px;
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -792,28 +823,28 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         .sm-px-fever-text {
-          font-size: 10px;
+          font-size: 14px;
           color: #facc15;
           margin: 0;
           text-shadow: 2px 2px 0 #78350f;
         }
 
-        .sm-px-fever-timer { font-size: 8px; color: #fbbf24; margin: 0; }
+        .sm-px-fever-timer { font-size: 10px; color: #fbbf24; margin: 0; }
 
         /* ── Power-up indicator ── */
         .sm-px-powerup-bar {
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 3px 10px;
+          gap: 10px;
+          padding: 6px 14px;
           background: rgba(0,0,0,0.3);
           flex-shrink: 0;
         }
 
-        .sm-px-powerup-label { font-size: 7px; margin: 0; }
+        .sm-px-powerup-label { font-size: 10px; margin: 0; }
         .sm-px-powerup-meter {
           flex: 1;
-          height: 4px;
+          height: 6px;
           background: #1e293b;
         }
         .sm-px-powerup-meter-fill {
@@ -828,24 +859,10 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 10px;
-          gap: 10px;
+          padding: 18px 16px;
+          gap: 16px;
           min-height: 0;
           position: relative;
-        }
-
-        .sm-px-pattern-tag {
-          font-size: 8px;
-          color: #94a3b8;
-          padding: 2px 8px;
-          border: 2px solid #334155;
-          background: #1e293b;
-          animation: sm-px-tag-in 0.2s steps(3);
-        }
-
-        @keyframes sm-px-tag-in {
-          from { opacity: 0; transform: translateY(-4px); }
-          to { opacity: 1; transform: translateY(0); }
         }
 
         .sm-px-seq-box {
@@ -853,12 +870,12 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           align-items: center;
           justify-content: center;
           flex-wrap: wrap;
-          gap: 2px;
-          padding: 14px 10px;
+          gap: 6px;
+          padding: 22px 16px;
           background: #16213e;
           border: 3px solid #0f3460;
           width: 100%;
-          min-height: 72px;
+          min-height: 112px;
           transition: border-color 0.2s steps(2);
         }
 
@@ -867,26 +884,26 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         .sm-px-seq-box.fever-box { border-color: #facc15; }
 
         .sm-px-num-cell {
-          font-size: clamp(18px, 5.5vw, 28px);
+          font-size: clamp(28px, 7.2vw, 40px);
           color: #93c5fd;
-          padding: 2px 4px;
-          text-shadow: 2px 2px 0 #1e3a5f;
+          padding: 4px 6px;
+          text-shadow: 3px 3px 0 #1e3a5f;
           opacity: 0;
           transition: opacity 0.1s steps(2);
         }
 
         .sm-px-num-cell.on { opacity: 1; }
 
-        .sm-px-sep { color: #334155; font-size: 14px; margin: 0 1px; }
+        .sm-px-sep { color: #334155; font-size: 22px; margin: 0 2px; }
 
         .sm-px-mystery {
-          font-size: clamp(24px, 7vw, 36px);
+          font-size: clamp(34px, 9vw, 48px);
           color: #60a5fa;
           background: #0f3460;
           border: 2px dashed #3b82f6;
-          padding: 2px 12px;
+          padding: 4px 16px;
           animation: sm-px-mystery-blink 0.8s steps(1) infinite;
-          text-shadow: 2px 2px 0 #1e3a5f;
+          text-shadow: 3px 3px 0 #1e3a5f;
         }
 
         @keyframes sm-px-mystery-blink {
@@ -897,13 +914,13 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         /* Stars */
         .sm-px-stars {
           display: flex;
-          gap: 4px;
-          height: 14px;
+          gap: 8px;
+          height: 22px;
         }
 
         .sm-px-star {
-          width: 12px;
-          height: 12px;
+          width: 20px;
+          height: 20px;
           display: inline-block;
           clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
         }
@@ -917,48 +934,19 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           100% { transform: scale(1); }
         }
 
-        /* ── Hint ── */
-        .sm-px-hint {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          min-height: 20px;
-        }
-
-        .sm-px-hint-btn {
-          font-family: 'Press Start 2P', monospace;
-          font-size: 7px;
-          color: #fbbf24;
-          background: #1e293b;
-          border: 2px solid #fbbf24;
-          padding: 4px 8px;
-          cursor: pointer;
-          -webkit-tap-highlight-color: transparent;
-        }
-
-        .sm-px-hint-btn:disabled {
-          color: #475569;
-          border-color: #334155;
-          cursor: default;
-        }
-
-        .sm-px-hint-btn:active:not(:disabled) { background: #334155; }
-
-        .sm-px-hint-cd { font-size: 6px; color: #475569; }
-
         /* ── Choices ── */
         .sm-px-choices {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 8px;
-          padding: 8px 10px;
+          gap: 12px;
+          padding: 14px 16px;
           flex-shrink: 0;
         }
 
         .sm-px-btn {
           font-family: 'Press Start 2P', monospace;
-          font-size: clamp(14px, 4vw, 20px);
-          padding: 16px 6px;
+          font-size: clamp(20px, 5.8vw, 28px);
+          padding: 22px 10px;
           border: 3px solid #334155;
           background: #1e293b;
           color: #cbd5e1;
@@ -1008,13 +996,6 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           color: #4ade80 !important;
         }
 
-        .sm-px-btn.hint-x {
-          border-color: #991b1b !important;
-          color: #475569 !important;
-          background: #1a1a2e !important;
-          text-decoration: line-through;
-        }
-
         @keyframes sm-px-correct-anim {
           0% { transform: scale(1); }
           30% { transform: scale(1.06); }
@@ -1035,24 +1016,24 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 6px 10px 10px;
+          padding: 10px 16px 16px;
           flex-shrink: 0;
         }
 
         .sm-px-exit {
           font-family: 'Press Start 2P', monospace;
-          font-size: 7px;
+          font-size: 10px;
           color: #475569;
           background: transparent;
           border: 2px solid #334155;
-          padding: 4px 10px;
+          padding: 6px 12px;
           cursor: pointer;
           -webkit-tap-highlight-color: transparent;
         }
 
         .sm-px-exit:active { border-color: #475569; }
 
-        .sm-px-streak { font-size: 7px; color: #f59e0b; }
+        .sm-px-streak { font-size: 10px; color: #f59e0b; }
 
         /* ── Overlays ── */
         .sm-px-overlay {
@@ -1066,7 +1047,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         .sm-px-levelup-txt {
-          font-size: 20px;
+          font-size: 28px;
           color: #60a5fa;
           text-shadow: 3px 3px 0 #1e3a5f, -1px -1px 0 #93c5fd;
           animation: sm-px-levelup 2s steps(6) forwards;
@@ -1081,14 +1062,14 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         .sm-px-streak-txt {
-          font-size: 14px;
+          font-size: 20px;
           color: #f59e0b;
           text-shadow: 2px 2px 0 #78350f;
           animation: sm-px-levelup 1.5s steps(6) forwards;
         }
 
         .sm-px-perfect-txt {
-          font-size: 18px;
+          font-size: 24px;
           color: #fbbf24;
           text-shadow: 2px 2px 0 #92400e;
           animation: sm-px-perfect 0.8s steps(4) forwards;
@@ -1102,7 +1083,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         .sm-px-boss-txt {
-          font-size: 16px;
+          font-size: 22px;
           color: #f87171;
           text-shadow: 2px 2px 0 #7f1d1d;
           animation: sm-px-boss-flash 1.5s steps(3) forwards;
@@ -1119,7 +1100,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         .sm-px-powerup-get {
-          font-size: 12px;
+          font-size: 18px;
           text-shadow: 2px 2px 0 #0f172a;
           animation: sm-px-powerup-pop 1.2s steps(4) forwards;
           position: absolute;
@@ -1176,7 +1157,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       </div>
 
       {/* Time Bar */}
-      <div className={`sm-px-timebar ${timeBonusAnim ? 'flash' : ''}`}>
+      <div className="sm-px-timebar">
         <div
           className="sm-px-timebar-fill"
           style={{
@@ -1185,7 +1166,7 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           }}
         />
         <span className={`sm-px-time-text ${isCriticalTime ? 'danger' : isLowTime ? 'warn' : ''}`}>
-          {freezeActiveRef.current ? 'FROZEN' : `${timeSeconds}s`}
+          {isFreezeActive ? 'FROZEN' : `${timeSeconds}s`}
         </span>
       </div>
 
@@ -1230,8 +1211,6 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
       {/* Main Area */}
       <div className="sm-px-main">
-        {showHint && <span className="sm-px-pattern-tag">{problem.patternLabel}</span>}
-
         <div className={`sm-px-seq-box ${problem.isBoss ? 'boss-box' : isFever ? 'fever-box' : isLowTime ? 'low-time-box' : ''}`}>
           {problem.displayed.map((num, index) => (
             <span key={`n-${index}`}>
@@ -1249,21 +1228,6 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
             <span key={i} className={`sm-px-star ${i < pixelStars ? 'filled' : 'empty'}`} />
           ))}
         </div>
-
-        {/* Hint */}
-        <div className="sm-px-hint">
-          <button
-            className="sm-px-hint-btn"
-            onClick={useHint}
-            disabled={hintAvailableMs > 0 || showHint}
-            type="button"
-          >
-            HINT -{HINT_PENALTY}PT
-          </button>
-          {hintAvailableMs > 0 && (
-            <span className="sm-px-hint-cd">{Math.ceil(hintAvailableMs / 1000)}s</span>
-          )}
-        </div>
       </div>
 
       {/* Choices */}
@@ -1277,14 +1241,13 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
               fc = 'reveal-correct'
             }
           }
-          const isHintX = showHint && !feedback && choice !== problem.answer && index === problem.choices.findIndex(c => c !== problem.answer)
           return (
             <button
-              className={`sm-px-btn ${fc} ${isHintX ? 'hint-x' : ''}`}
+              className={`sm-px-btn ${fc}`}
               key={`c-${index}`}
               type="button"
               onClick={() => handleChoice(index)}
-              disabled={lockedRef.current || isHintX}
+              disabled={isLocked}
             >
               {choice}
             </button>

@@ -23,6 +23,8 @@ import shieldSfx from '../../../assets/sounds/math-blitz-shield.mp3'
 import speedSfx from '../../../assets/sounds/math-blitz-speed.mp3'
 import heartbeatSfx from '../../../assets/sounds/math-blitz-heartbeat.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import mathBlitzBgmLoop from '../../../assets/sounds/generated/math-blitz/math-blitz-bgm-loop.mp3'
+import { makeMathBlitzProblem, getMathBlitzTier, type MathBlitzProblem as MathProblem } from './logic'
 
 // --- Game constants ---
 const ROUND_DURATION_MS = 35000
@@ -49,8 +51,6 @@ const HP_LOSS_WRONG = 1
 const HP_HEAL_ON_STREAK = 1
 
 // Special problem types
-const BOMB_CHANCE = 0.08 // 8% chance of bomb problem
-const GOLD_CHANCE = 0.10 // 10% chance of gold problem
 const SPEED_ROUND_INTERVAL = 15 // every 15 problems, speed round
 const SPEED_ROUND_DURATION = 3 // 3 problems in speed round
 const GOLD_MULT = 3
@@ -58,111 +58,14 @@ const BOMB_TIME_PENALTY_MS = 3000
 
 // Shield: earned every 20 correct answers
 const SHIELD_INTERVAL = 20
+const MATH_BLITZ_BGM_VOLUME = 0.22
 
 const CHARACTERS = [
   parkSangminImage, kimYeonjaImage, parkWankyuImage,
   seoTaijiImage, songChangsikImage, taeJinaImage,
 ]
 
-type Operator = '+' | '-' | 'x' | '÷'
-type ProblemType = 'normal' | 'bomb' | 'gold' | 'speed'
-
-interface MathProblem {
-  readonly left: number
-  readonly right: number
-  readonly operator: Operator
-  readonly answer: number
-  readonly choices: readonly number[]
-  readonly type: ProblemType
-}
-
 function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)) }
-
-function shuffle<T>(arr: T[]): T[] {
-  const s = [...arr]
-  for (let i = s.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[s[i], s[j]] = [s[j], s[i]]
-  }
-  return s
-}
-
-function tier(score: number) {
-  if (score < 30) return 0
-  if (score < 80) return 1
-  if (score < 150) return 2
-  if (score < 250) return 3
-  return 4
-}
-
-function pickOp(t: number): Operator {
-  const r = Math.random()
-  if (t <= 0) return r < 0.5 ? '+' : '-'
-  if (t === 1) return r < 0.4 ? '+' : r < 0.75 ? '-' : 'x'
-  if (t === 2) return r < 0.25 ? '+' : r < 0.5 ? '-' : r < 0.8 ? 'x' : '÷'
-  return r < 0.2 ? '+' : r < 0.4 ? '-' : r < 0.7 ? 'x' : '÷'
-}
-
-function pickNums(op: Operator, t: number) {
-  const ranges: [number, number][] = [[1,10],[2,20],[5,50],[10,99],[20,150]]
-  const st = clamp(t, 0, 4)
-  if (op === 'x') {
-    const mr: [number, number][] = [[1,9],[2,9],[2,12],[3,15],[4,20]]
-    const [a, b] = mr[st]
-    return { left: Math.floor(Math.random() * (b - a + 1)) + a, right: Math.floor(Math.random() * (b - a + 1)) + a }
-  }
-  if (op === '÷') {
-    const dr: [number, number][] = [[1,5],[2,9],[2,12],[3,15],[4,20]]
-    const [a, b] = dr[st]
-    const right = Math.floor(Math.random() * (b - a + 1)) + a
-    const quot = Math.floor(Math.random() * (b - a + 1)) + a
-    return { left: right * quot, right }
-  }
-  const [lo, hi] = ranges[st]
-  let left = Math.floor(Math.random() * (hi - lo + 1)) + lo
-  let right = Math.floor(Math.random() * (hi - lo + 1)) + lo
-  if (op === '-' && left < right) [left, right] = [right, left]
-  return { left, right }
-}
-
-function solve(l: number, r: number, op: Operator) {
-  if (op === '+') return l + r
-  if (op === '-') return l - r
-  if (op === '÷') return Math.round(l / r)
-  return l * r
-}
-
-function wrongChoices(ans: number, count: number) {
-  const w = new Set<number>()
-  for (let i = 0; i < count * 20 && w.size < count; i++) {
-    const mag = Math.max(1, Math.floor(Math.abs(ans) * 0.3))
-    const off = Math.floor(Math.random() * mag * 2 + 1) - mag
-    const c = ans + (off === 0 ? (Math.random() < 0.5 ? 1 : -1) : off)
-    if (c !== ans) w.add(c)
-  }
-  while (w.size < count) w.add(ans + w.size + 1)
-  return [...w]
-}
-
-function makeProblem(score: number, solvedCount: number, speedRoundLeft: number): MathProblem {
-  const t = tier(score)
-  const op = pickOp(t)
-  const { left, right } = pickNums(op, t)
-  const answer = solve(left, right, op)
-  const numChoices = t >= 3 ? 6 : 4
-  const choices = shuffle([answer, ...wrongChoices(answer, numChoices - 1)])
-
-  let type: ProblemType = 'normal'
-  if (speedRoundLeft > 0) {
-    type = 'speed'
-  } else if (solvedCount > 5) {
-    const r = Math.random()
-    if (r < BOMB_CHANCE) type = 'bomb'
-    else if (r < BOMB_CHANCE + GOLD_CHANCE) type = 'gold'
-  }
-
-  return { left, right, operator: op, answer, choices, type }
-}
 
 function comboMult(c: number) {
   if (c < 3) return 1
@@ -777,7 +680,7 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [solvedCount, setSolvedCount] = useState(0)
   const [hp, setHp] = useState(MAX_HP)
   const [hasShield, setHasShield] = useState(false)
-  const [problem, setProblem] = useState<MathProblem>(() => makeProblem(0, 0, 0))
+  const [problem, setProblem] = useState<MathProblem>(() => makeMathBlitzProblem({ score: 0, solvedCount: 0, speedRoundLeft: 0 }))
   const [correctIdx, setCorrectIdx] = useState<number | null>(null)
   const [wrongIdx, setWrongIdx] = useState<number | null>(null)
   const [isFever, setIsFever] = useState(false)
@@ -815,6 +718,7 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const lastTierR = useRef(0)
   const timeSpeedR = useRef(1)
   const speedRoundR = useRef(0)
+  const bgmRef = useRef<HTMLAudioElement | null>(null)
 
   const audioPool = useRef<Map<string, HTMLAudioElement>>(new Map())
 
@@ -828,6 +732,19 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     const a = getAudio(src); a.currentTime = 0; a.volume = vol; a.playbackRate = rate
     void a.play().catch(() => {})
   }, [getAudio])
+
+  const startBgm = useCallback(() => {
+    const bgm = bgmRef.current
+    if (bgm === null || doneR.current || !bgm.paused) return
+    void bgm.play().catch(() => {})
+  }, [])
+
+  const stopBgm = useCallback(() => {
+    const bgm = bgmRef.current
+    if (bgm === null) return
+    bgm.pause()
+    bgm.currentTime = 0
+  }, [])
 
   const clrTimer = (r: { current: number | null }) => { if (r.current !== null) { clearTimeout(r.current); r.current = null } }
 
@@ -851,12 +768,12 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       addFloat('mb-shield-pop', 'SPEED ROUND!', PAL.blue)
     }
 
-    const p = makeProblem(nextScore, nextSolved, speedRoundR.current)
+    const p = makeMathBlitzProblem({ score: nextScore, solvedCount: nextSolved, speedRoundLeft: speedRoundR.current })
     probR.current = p
     setProblem(p)
     probStartR.current = performance.now()
 
-    const newTier = tier(nextScore)
+    const newTier = getMathBlitzTier(nextScore)
     if (newTier !== lastTierR.current) {
       lastTierR.current = newTier
       setCharImg(CHARACTERS[newTier % CHARACTERS.length])
@@ -872,14 +789,16 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     if (doneR.current) return
     doneR.current = true
     clrTimer(flashTimerR); clrTimer(shakeTimerR)
+    stopBgm()
     effects.cleanup()
     play(gameOverHitSfx, 0.6, 0.95)
     const elapsed = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainR.current))
     onFinish({ score: scoreR.current, durationMs: elapsed })
-  }, [onFinish, effects, play])
+  }, [onFinish, effects, play, stopBgm])
 
   const handleTap = useCallback((val: number, idx: number) => {
     if (doneR.current) return
+    startBgm()
     const prob = probR.current
     const now = performance.now()
 
@@ -1018,9 +937,9 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       effects.triggerShake(6)
       effects.triggerFlash('rgba(239,68,68,0.3)')
     }
-  }, [advance, play, effects, finish, addFloat])
+  }, [advance, play, effects, finish, addFloat, startBgm])
 
-  const handleExit = useCallback(() => { play(wrongSfx, 0.3); onExit() }, [onExit, play])
+  const handleExit = useCallback(() => { stopBgm(); play(wrongSfx, 0.3); onExit() }, [onExit, play, stopBgm])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); handleExit() } }
@@ -1029,9 +948,27 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   }, [handleExit])
 
   useEffect(() => {
-    [correctSfx, wrongSfx, comboSfx, feverSfx, timeWarningSfx, levelUpSfx, fastBonusSfx, streakSfx, bombSfx, goldSfx, shieldSfx, speedSfx, heartbeatSfx, gameOverHitSfx].forEach(s => getAudio(s))
-    return () => { clrTimer(flashTimerR); clrTimer(shakeTimerR); effects.cleanup(); audioPool.current.clear() }
-  }, [])
+    const pool = audioPool.current
+    const preloadSources = [correctSfx, wrongSfx, comboSfx, feverSfx, timeWarningSfx, levelUpSfx, fastBonusSfx, streakSfx, bombSfx, goldSfx, shieldSfx, speedSfx, heartbeatSfx, gameOverHitSfx]
+    preloadSources.forEach(s => getAudio(s))
+    const bgm = new Audio(mathBlitzBgmLoop)
+    bgm.preload = 'auto'
+    bgm.loop = true
+    bgm.volume = MATH_BLITZ_BGM_VOLUME
+    bgmRef.current = bgm
+    void bgm.play().catch(() => {})
+    return () => {
+      clrTimer(flashTimerR)
+      clrTimer(shakeTimerR)
+      if (bgmRef.current !== null) {
+        bgmRef.current.pause()
+        bgmRef.current.currentTime = 0
+        bgmRef.current = null
+      }
+      effects.cleanup()
+      pool.clear()
+    }
+  }, [effects, getAudio])
 
   useEffect(() => {
     probStartR.current = performance.now()
@@ -1074,7 +1011,7 @@ function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const isLow = remainingMs <= LOW_TIME_MS
   const cMult = comboMult(combo)
   const bestDisp = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const t = tier(score)
+  const t = getMathBlitzTier(score)
   const tLabel = TIER_LABELS[clamp(t, 0, 4)]
   const tColor = TIER_COLORS[clamp(t, 0, 4)]
   const cLabel = getComboLabel(combo)

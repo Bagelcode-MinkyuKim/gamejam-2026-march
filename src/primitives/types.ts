@@ -75,6 +75,7 @@ export interface MiniGameManifest {
 export interface MiniGameResult {
   readonly score: number
   readonly durationMs: number
+  readonly endReason?: string
 }
 
 export interface PlayerProgress {

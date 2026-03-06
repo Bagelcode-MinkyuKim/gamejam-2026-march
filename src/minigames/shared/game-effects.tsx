@@ -59,6 +59,8 @@ export function useGameEffects(options?: GameEffectsOptions) {
   const popupsRef = useRef<ScorePopup[]>([])
   const shakeTimerRef = useRef<number | null>(null)
   const flashTimerRef = useRef<number | null>(null)
+  const shakeEndsAtRef = useRef(0)
+  const flashEndsAtRef = useRef(0)
 
   const clearTimer = (ref: { current: number | null }) => {
     if (ref.current !== null) {
@@ -102,11 +104,13 @@ export function useGameEffects(options?: GameEffectsOptions) {
 
   // Trigger screen shake
   const triggerShake = useCallback((intensity = 5, durationMs = 120) => {
+    shakeEndsAtRef.current = performance.now() + durationMs
     setIsShaking(true)
     setShakeIntensity(intensity)
     clearTimer(shakeTimerRef)
     shakeTimerRef.current = window.setTimeout(() => {
       shakeTimerRef.current = null
+      shakeEndsAtRef.current = 0
       setIsShaking(false)
       setShakeIntensity(0)
     }, durationMs)
@@ -114,11 +118,13 @@ export function useGameEffects(options?: GameEffectsOptions) {
 
   // Trigger screen flash
   const triggerFlash = useCallback((color = 'rgba(255,255,255,0.6)', durationMs = 80) => {
+    flashEndsAtRef.current = performance.now() + durationMs
     setIsFlashing(true)
     setFlashColor(color)
     clearTimer(flashTimerRef)
     flashTimerRef.current = window.setTimeout(() => {
       flashTimerRef.current = null
+      flashEndsAtRef.current = 0
       setIsFlashing(false)
     }, durationMs)
   }, [])
@@ -177,12 +183,28 @@ export function useGameEffects(options?: GameEffectsOptions) {
       popupsRef.current = alivePopups
       setScorePopups(alivePopups)
     }
+    if (shakeEndsAtRef.current > 0 && now >= shakeEndsAtRef.current) {
+      shakeEndsAtRef.current = 0
+      clearTimer(shakeTimerRef)
+      setIsShaking(false)
+      setShakeIntensity(0)
+    }
+    if (flashEndsAtRef.current > 0 && now >= flashEndsAtRef.current) {
+      flashEndsAtRef.current = 0
+      clearTimer(flashTimerRef)
+      setIsFlashing(false)
+    }
   }, [lifetimeMs])
 
   // Cleanup
   const cleanup = useCallback(() => {
     clearTimer(shakeTimerRef)
     clearTimer(flashTimerRef)
+    shakeEndsAtRef.current = 0
+    flashEndsAtRef.current = 0
+    setIsShaking(false)
+    setShakeIntensity(0)
+    setIsFlashing(false)
   }, [])
 
   // Get shake transform style
@@ -219,6 +241,7 @@ export function ParticleRenderer({ particles, lifetimeMs = PARTICLE_LIFETIME_MS 
   particles: Particle[]
   lifetimeMs?: number
 }) {
+  // eslint-disable-next-line react-hooks/purity
   const now = performance.now()
   return (
     <>
@@ -269,6 +292,7 @@ export function ParticleRenderer({ particles, lifetimeMs = PARTICLE_LIFETIME_MS 
 }
 
 export function ScorePopupRenderer({ popups }: { popups: ScorePopup[] }) {
+  // eslint-disable-next-line react-hooks/purity
   const now = performance.now()
   return (
     <>

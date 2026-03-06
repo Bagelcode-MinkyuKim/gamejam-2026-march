@@ -5,6 +5,19 @@ import parkSangminSprite from '../../../assets/images/same-character/park-sangmi
 import kimYeonjaSprite from '../../../assets/images/same-character/kim-yeonja.png'
 import seoTaijiSprite from '../../../assets/images/same-character/seo-taiji.png'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
+import {
+  DIFFICULTY_STAGES,
+  TORNADO_RUN_CHARACTER_BOTTOM,
+  TORNADO_RUN_CHARACTER_SIZE,
+  TORNADO_RUN_LANE_COUNT,
+  pickHazardSpawnLanes,
+  getDifficultyStage,
+  getDifficultyStageIndex,
+  getLaneCueStates,
+  type TornadoRunDifficultyStage,
+  type TornadoRunObstaclePreview,
+  type TornadoRunObstacleType,
+} from './gameplay'
 
 import laneChangeSfx from '../../../assets/sounds/tornado-lane-change.mp3'
 import coinCollectSfx from '../../../assets/sounds/tornado-coin-collect.mp3'
@@ -23,17 +36,17 @@ import levelupSfx from '../../../assets/sounds/tornado-levelup.mp3'
 import bgmSrc from '../../../assets/sounds/tornado-bgm.mp3'
 
 // --- Layout ---
-const LANE_COUNT = 3
+const LANE_COUNT = TORNADO_RUN_LANE_COUNT
 const BOARD_WIDTH = 432
 const LANE_WIDTH = BOARD_WIDTH / LANE_COUNT
-const CHARACTER_SIZE = 80
-const CHARACTER_BOTTOM = 110
+const CHARACTER_SIZE = TORNADO_RUN_CHARACTER_SIZE
+const CHARACTER_BOTTOM = TORNADO_RUN_CHARACTER_BOTTOM
 // Visual sizes (for rendering)
 const OBSTACLE_VIS = 48
-const COIN_VIS = 36
-const ITEM_VIS = 40
+const COIN_VIS = 40
+const ITEM_VIS = 44
 // Hitbox sizes (much smaller than visual for fair collision)
-const OBSTACLE_HIT = 24   // obstacles hitbox is HALF of visual
+const OBSTACLE_HIT = 20
 const COIN_HIT = 36       // coins generous
 const ITEM_HIT = 40       // items generous
 
@@ -47,12 +60,15 @@ const SPAWN_INTERVAL_BASE_MS = 1400
 const SPAWN_INTERVAL_MIN_MS = 450
 const SPAWN_INTERVAL_DECAY = 0.94
 
-const COIN_SPAWN_CHANCE = 0.6
-const TORNADO_SPAWN_CHANCE = 0.6
-
-const PLAYER_HITBOX_SHRINK = 14
-const ITEM_COLLECT_PADDING = 14
+const PLAYER_HITBOX_SHRINK = 16
+const ITEM_COLLECT_SIDE_PADDING = 16
+const ITEM_COLLECT_TOP_PADDING = 12
+const ITEM_COLLECT_BOTTOM_PADDING = 44
+const ITEM_COLLECT_FOOT_GRACE_HEIGHT = 28
+const ITEM_COLLECT_FOOT_GRACE_WIDTH = 12
 const GAME_TIMEOUT_MS = 120000
+const LIGHTNING_WARN_DURATION_MS = 850
+const LIGHTNING_TOTAL_DURATION_MS = 1120
 
 const SHIELD_SPAWN_CHANCE = 0.09
 const SHIELD_DURATION_MS = 5000
@@ -78,27 +94,13 @@ const DASH_COOLDOWN_MS = 2000
 const DASH_DURATION_MS = 350
 const DASH_INVINCIBLE = true
 
-const DIFFICULTY_TIERS = [
-  { score: 0, speedMult: 1.0, spawnMult: 1.0, multiChance: 0 },
-  { score: 300, speedMult: 1.1, spawnMult: 0.95, multiChance: 0.1 },
-  { score: 700, speedMult: 1.2, spawnMult: 0.88, multiChance: 0.15 },
-  { score: 1500, speedMult: 1.35, spawnMult: 0.78, multiChance: 0.25 },
-  { score: 2500, speedMult: 1.5, spawnMult: 0.68, multiChance: 0.35 },
-  { score: 4000, speedMult: 1.7, spawnMult: 0.58, multiChance: 0.45 },
-  { score: 6000, speedMult: 1.9, spawnMult: 0.5, multiChance: 0.55 },
-]
-function getDifficultyTier(s: number) { let t = DIFFICULTY_TIERS[0]; for (const d of DIFFICULTY_TIERS) { if (s >= d.score) t = d; else break }; return t }
-
 const LEVEL_DISTANCE = 50
-const MULTI_TORNADO_LEVEL = 3
-const DARK_CLOUD_LEVEL = 4
-const LIGHTNING_LEVEL = 5
 const COMBO_DECAY_MS = 3000
 const COMBO_TIERS = [1, 1.2, 1.5, 2.0, 3.0]
 function getComboMult(c: number) { return COMBO_TIERS[Math.min(c, COMBO_TIERS.length - 1)] }
 
-type ObsType = 'whirlwind' | 'gust' | 'dark_cloud' | 'lightning_warn' | 'lightning' | 'coin' | 'shield' | 'score_zone' | 'magnet' | 'slowmo'
-interface Obs { readonly id: number; readonly lane: number; y: number; readonly type: ObsType; readonly spawnTime: number }
+type ObsType = TornadoRunObstacleType
+interface Obs extends TornadoRunObstaclePreview { readonly id: number; readonly dodgeAwarded?: boolean }
 const CHARACTER_SPRITES = [parkSangminSprite, kimYeonjaSprite, seoTaijiSprite]
 const COLLECTIBLES: ObsType[] = ['coin', 'shield', 'score_zone', 'magnet', 'slowmo']
 function isItem(t: ObsType) { return COLLECTIBLES.includes(t) }
@@ -117,7 +119,10 @@ function visSize(t: ObsType) {
 }
 // Hitbox size (for collision)
 function hitSize(t: ObsType) {
-  if (t === 'whirlwind' || t === 'gust' || t === 'dark_cloud' || t === 'lightning') return OBSTACLE_HIT
+  if (t === 'gust') return 14
+  if (t === 'dark_cloud') return 18
+  if (t === 'lightning') return 18
+  if (t === 'whirlwind') return OBSTACLE_HIT
   if (t === 'coin') return COIN_HIT
   return ITEM_HIT
 }
@@ -234,6 +239,72 @@ function PixelSprite({ type, size }: { type: ObsType; size: number }) {
   )
 }
 
+type ObstacleTone = 'danger' | 'reward' | 'item' | 'warning'
+
+function createHazardObstacle(
+  id: number,
+  lane: number,
+  boardHeight: number,
+  spawnTime: number,
+  difficulty: TornadoRunDifficultyStage,
+): Obs {
+  const roll = Math.random()
+
+  if (roll < difficulty.lightningChance) {
+    return {
+      id,
+      lane,
+      y: boardHeight - CHARACTER_BOTTOM - 44,
+      type: 'lightning_warn',
+      spawnTime,
+    }
+  }
+
+  if (roll < difficulty.lightningChance + difficulty.darkCloudChance) {
+    return {
+      id,
+      lane,
+      y: -visSize('dark_cloud'),
+      type: 'dark_cloud',
+      spawnTime,
+    }
+  }
+
+  if (roll < difficulty.lightningChance + difficulty.darkCloudChance + difficulty.gustChance) {
+    return {
+      id,
+      lane,
+      y: -visSize('gust'),
+      type: 'gust',
+      spawnTime,
+    }
+  }
+
+  return {
+    id,
+    lane,
+    y: -OBSTACLE_VIS,
+    type: 'whirlwind',
+    spawnTime,
+  }
+}
+
+function getObstacleTone(type: ObsType): ObstacleTone {
+  if (type === 'lightning_warn') return 'warning'
+  if (type === 'coin') return 'reward'
+  if (isItem(type)) return 'item'
+  return 'danger'
+}
+
+function getDeathReason(type: ObsType | null): string | null {
+  if (type === null) return null
+  if (type === 'lightning') return 'Missed the lightning'
+  if (type === 'dark_cloud') return 'Hit the storm cloud'
+  if (type === 'gust') return 'Caught by a gust'
+  if (type === 'whirlwind') return 'Clipped the tornado'
+  return 'Hit a hazard'
+}
+
 function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const effects = useGameEffects({ maxParticles: 60 })
   const { triggerShake, triggerFlash, comboHitBurst, updateParticles, cleanup } = effects
@@ -266,6 +337,8 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [characterIdx, setCharacterIdx] = useState(0)
   const [screenShakeClass, setScreenShakeClass] = useState('')
   const [coinCombo, setCoinCombo] = useState(0)
+  const [stageAnnouncement, setStageAnnouncement] = useState<string | null>(null)
+  const [deathReason, setDeathReason] = useState<string | null>(null)
 
   const laneRef = useRef(1)
   const obstaclesRef = useRef<Obs[]>([])
@@ -297,6 +370,8 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const windChainRef = useRef(0)
   const coinComboRef = useRef(0)
   const lastCoinTimeRef = useRef(0)
+  const difficultyStageIndexRef = useRef(0)
+  const stageAnnouncementTimeoutRef = useRef<number | null>(null)
   const sfxRefs = useRef<Record<string, HTMLAudioElement | null>>({})
   const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null)
   const lastTapRef = useRef(0)
@@ -306,9 +381,13 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     a.currentTime = 0; a.volume = Math.min(1, vol); a.playbackRate = rate
     void a.play().catch(() => {})
   }, [])
-  const finishRound = useCallback(() => {
+  const finishRound = useCallback((endReason?: string) => {
     if (finishedRef.current) return; finishedRef.current = true; setGameOver(true)
-    onFinish({ score: scoreRef.current + Math.floor(distanceRef.current * DISTANCE_SCORE_RATE), durationMs: Math.max(1, Math.round(elapsedMsRef.current)) })
+    onFinish({
+      score: scoreRef.current + Math.floor(distanceRef.current * DISTANCE_SCORE_RATE),
+      durationMs: Math.max(1, Math.round(elapsedMsRef.current)),
+      endReason,
+    })
   }, [onFinish])
   const triggerDash = useCallback(() => {
     if (finishedRef.current || isDashingRef.current || dashCooldownRef.current > 0) return
@@ -330,8 +409,15 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   }, [playSfx])
 
   useEffect(() => {
-    const measure = () => { if (containerRef.current) setBoardHeight(Math.max(400, containerRef.current.clientHeight - 200)) }
+    const measure = () => { if (containerRef.current) setBoardHeight(Math.max(360, containerRef.current.clientHeight - 240)) }
     measure(); window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure)
+  }, [])
+
+  useEffect(() => () => {
+    if (stageAnnouncementTimeoutRef.current !== null) {
+      window.clearTimeout(stageAnnouncementTimeoutRef.current)
+      stageAnnouncementTimeoutRef.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -379,10 +465,18 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (dashCooldownRef.current > 0) { dashCooldownRef.current = Math.max(0, dashCooldownRef.current - dt); setDashCooldown(dashCooldownRef.current) }
       if (coinComboRef.current > 0 && (elapsedMsRef.current - lastCoinTimeRef.current) > COMBO_DECAY_MS) { coinComboRef.current = 0; setCoinCombo(0) }
 
-      const total = scoreRef.current + Math.floor(distanceRef.current * DISTANCE_SCORE_RATE)
-      const tier = getDifficultyTier(total)
       const sec = elapsedMsRef.current / 1000
-      const spd = Math.min(MAX_SPEED, START_SPEED + sec * ACCEL_PER_SECOND) * tier.speedMult
+      let obs = [...obstaclesRef.current]
+      const bh = boardHeight
+      const ms = elapsedMsRef.current
+
+      const totalBeforeMove = scoreRef.current + Math.floor(distanceRef.current * DISTANCE_SCORE_RATE)
+      const difficultyBeforeMove = getDifficultyStage({
+        score: totalBeforeMove,
+        elapsedMs: ms,
+        level: levelRef.current,
+      })
+      const spd = Math.min(MAX_SPEED, START_SPEED + sec * ACCEL_PER_SECOND) * difficultyBeforeMove.speedMult
       setSpeed(spd)
       const moved = spd * (gd / 1000)
       distanceRef.current += moved / 100; setDistance(distanceRef.current)
@@ -393,34 +487,53 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         triggerFlash('rgba(250,204,21,0.3)'); setCharacterIdx(p => (p + 1) % CHARACTER_SPRITES.length)
       }
 
+      const total = scoreRef.current + Math.floor(distanceRef.current * DISTANCE_SCORE_RATE)
+      const difficulty = getDifficultyStage({
+        score: total,
+        elapsedMs: ms,
+        level: levelRef.current,
+      })
+      const difficultyIndex = getDifficultyStageIndex(difficulty)
+      if (difficultyIndex > difficultyStageIndexRef.current) {
+        difficultyStageIndexRef.current = difficultyIndex
+        playSfx('speedUp', 0.45, 1 + difficultyIndex * 0.04)
+        triggerFlash('rgba(56,189,248,0.28)')
+        setStageAnnouncement(difficulty.label)
+        if (stageAnnouncementTimeoutRef.current !== null) {
+          window.clearTimeout(stageAnnouncementTimeoutRef.current)
+        }
+        stageAnnouncementTimeoutRef.current = window.setTimeout(() => {
+          setStageAnnouncement(null)
+        }, 1100)
+      }
+
       spawnTimerRef.current += gd
-      const si = spawnIntervalRef.current * tier.spawnMult
-      let obs = [...obstaclesRef.current]
-      const bh = boardHeight, ms = elapsedMsRef.current, lv = levelRef.current
+      const si = spawnIntervalRef.current * difficulty.spawnMult
 
       if (spawnTimerRef.current >= si) {
         spawnTimerRef.current = 0
         spawnIntervalRef.current = Math.max(SPAWN_INTERVAL_MIN_MS, spawnIntervalRef.current * SPAWN_INTERVAL_DECAY)
-        if (Math.random() < TORNADO_SPAWN_CHANCE) {
-          const ln = Math.floor(Math.random() * LANE_COUNT), r = Math.random()
-          if (lv >= LIGHTNING_LEVEL && r < 0.12) obs.push({ id: nextIdRef.current++, lane: ln, y: bh - CHARACTER_BOTTOM - 40, type: 'lightning_warn', spawnTime: ms })
-          else if (lv >= DARK_CLOUD_LEVEL && r < 0.25) obs.push({ id: nextIdRef.current++, lane: ln, y: -visSize('dark_cloud'), type: 'dark_cloud', spawnTime: ms })
-          else if (r < 0.4) obs.push({ id: nextIdRef.current++, lane: ln, y: -visSize('gust'), type: 'gust', spawnTime: ms })
-          else obs.push({ id: nextIdRef.current++, lane: ln, y: -OBSTACLE_VIS, type: 'whirlwind', spawnTime: ms })
-          if ((lv >= MULTI_TORNADO_LEVEL || tier.multiChance > 0) && Math.random() < Math.max(tier.multiChance, lv >= MULTI_TORNADO_LEVEL ? 0.2 : 0)) {
-            let l2 = Math.floor(Math.random() * LANE_COUNT); if (l2 === ln) l2 = (ln + 1) % LANE_COUNT
-            obs.push({ id: nextIdRef.current++, lane: l2, y: -OBSTACLE_VIS - 30, type: 'whirlwind', spawnTime: ms })
+        if (Math.random() < difficulty.tornadoChance) {
+          const desiredHazardCount = Math.random() < difficulty.multiChance ? 2 : 1
+          const hazardLanes = pickHazardSpawnLanes(obs, bh, desiredHazardCount)
+          for (const lane of hazardLanes) {
+            obs.push(createHazardObstacle(nextIdRef.current++, lane, bh, ms, difficulty))
           }
         }
         if (isFeverRef.current && Math.random() < 0.8) { for (let l = 0; l < LANE_COUNT; l++) obs.push({ id: nextIdRef.current++, lane: l, y: -COIN_VIS - l * 20, type: 'coin', spawnTime: ms }) }
-        else if (Math.random() < COIN_SPAWN_CHANCE) { const cl = Math.floor(Math.random() * LANE_COUNT); if (!obs.some(o => !isItem(o.type) && o.lane === cl && o.y < OBSTACLE_VIS * 2)) obs.push({ id: nextIdRef.current++, lane: cl, y: -COIN_VIS, type: 'coin', spawnTime: ms }) }
-        if (Math.random() < SHIELD_SPAWN_CHANCE && !hasShieldRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'shield', spawnTime: ms })
-        if (Math.random() < SCORE_ZONE_SPAWN_CHANCE && !hasScoreZoneRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'score_zone', spawnTime: ms })
-        if (Math.random() < MAGNET_SPAWN_CHANCE && !hasMagnetRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'magnet', spawnTime: ms })
-        if (Math.random() < SLOWMO_SPAWN_CHANCE && !hasSlowmoRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'slowmo', spawnTime: ms })
+        else if (Math.random() < difficulty.coinChance) {
+          const coinLane = Math.floor(Math.random() * LANE_COUNT)
+          if (!obs.some(o => !isItem(o.type) && o.type !== 'coin' && o.lane === coinLane && o.y < OBSTACLE_VIS * 2)) {
+            obs.push({ id: nextIdRef.current++, lane: coinLane, y: -COIN_VIS, type: 'coin', spawnTime: ms })
+          }
+        }
+        if (Math.random() < SHIELD_SPAWN_CHANCE * difficulty.itemSpawnMult && !hasShieldRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'shield', spawnTime: ms })
+        if (Math.random() < SCORE_ZONE_SPAWN_CHANCE * difficulty.itemSpawnMult && !hasScoreZoneRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'score_zone', spawnTime: ms })
+        if (Math.random() < MAGNET_SPAWN_CHANCE * difficulty.itemSpawnMult && !hasMagnetRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'magnet', spawnTime: ms })
+        if (Math.random() < SLOWMO_SPAWN_CHANCE * difficulty.itemSpawnMult && !hasSlowmoRef.current) obs.push({ id: nextIdRef.current++, lane: Math.floor(Math.random() * LANE_COUNT), y: -ITEM_VIS, type: 'slowmo', spawnTime: ms })
       }
 
-      obs = obs.map(o => { if (o.type === 'lightning_warn' && (ms - o.spawnTime) >= 600) return { ...o, type: 'lightning' as ObsType }; return o })
+      obs = obs.map(o => { if (o.type === 'lightning_warn' && (ms - o.spawnTime) >= LIGHTNING_WARN_DURATION_MS) return { ...o, type: 'lightning' as ObsType }; return o })
       const pcx = laneX(laneRef.current)
       obs = obs.map(o => {
         if (o.type === 'lightning_warn' || o.type === 'lightning') return o
@@ -449,8 +562,27 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         const hoff = (vs - hs) / 2
         const ox = laneX(o.lane) - vs / 2 + hoff
         const oy = o.y + hoff
-        const col = overlap(px - ITEM_COLLECT_PADDING, py - ITEM_COLLECT_PADDING, pw + ITEM_COLLECT_PADDING * 2, ph + ITEM_COLLECT_PADDING * 2, ox, oy, hs, hs)
-        if (!col) continue
+        const bodyCollect = overlap(
+          px - ITEM_COLLECT_SIDE_PADDING,
+          py - ITEM_COLLECT_TOP_PADDING,
+          pw + ITEM_COLLECT_SIDE_PADDING * 2,
+          ph + ITEM_COLLECT_TOP_PADDING + ITEM_COLLECT_BOTTOM_PADDING,
+          ox,
+          oy,
+          hs,
+          hs,
+        )
+        const footCollect = overlap(
+          px - ITEM_COLLECT_SIDE_PADDING - ITEM_COLLECT_FOOT_GRACE_WIDTH,
+          py + ph - 4,
+          pw + (ITEM_COLLECT_SIDE_PADDING + ITEM_COLLECT_FOOT_GRACE_WIDTH) * 2,
+          ITEM_COLLECT_FOOT_GRACE_HEIGHT,
+          ox,
+          oy,
+          hs,
+          hs,
+        )
+        if (!bodyCollect && !footCollect) continue
         collectedIds.add(o.id)
         if (o.type === 'coin') {
           coinComboRef.current = Math.min(coinComboRef.current + 1, COMBO_TIERS.length - 1)
@@ -467,12 +599,15 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
       // PASS 2: Check damaging obstacles (tight hitbox)
       let hit = false
+      let hitType: ObsType | null = null
       const surv: Obs[] = []
-      let dodged = false
+      let dodgedCount = 0
 
       for (const o of obs) {
         if (collectedIds.has(o.id)) continue // already collected
-        if ((o.type === 'lightning_warn' || o.type === 'lightning') && (ms - o.spawnTime) > 1100) continue
+        if ((o.type === 'lightning_warn' || o.type === 'lightning') && (ms - o.spawnTime) > LIGHTNING_TOTAL_DURATION_MS) continue
+
+        let nextObstacle = o
 
         if (!isItem(o.type) && o.type !== 'lightning_warn') {
           const vs = visSize(o.type)
@@ -485,24 +620,32 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           if (col) {
             if (isDashingRef.current && DASH_INVINCIBLE) { scoreRef.current += 25; setScore(scoreRef.current); comboHitBurst(laneX(o.lane), o.y, 1, 25); playSfx('shieldBreak', 0.4, 1.2); continue }
             if (hasShieldRef.current) { hasShieldRef.current = false; shieldMsRef.current = 0; setHasShield(false); setShieldRemainingMs(0); playSfx('shieldBreak', 0.5, 0.9); triggerFlash('rgba(34,211,238,0.4)'); continue }
-            hit = true; break
+            hit = true; hitType = o.type; break
           }
 
           // Near-miss dodge detection
-          if (o.y > py && o.y < py + DODGE_COMBO_DISTANCE) {
-            const olx = laneX(o.lane); if (Math.abs(olx - pcx) < LANE_WIDTH * 1.2 && Math.abs(olx - pcx) > PLAYER_HITBOX_SHRINK) dodged = true
+          if (!o.dodgeAwarded && o.y > py && o.y < py + DODGE_COMBO_DISTANCE) {
+            const olx = laneX(o.lane)
+            if (Math.abs(olx - pcx) < LANE_WIDTH * 1.2 && Math.abs(olx - pcx) > PLAYER_HITBOX_SHRINK) {
+              dodgedCount += 1
+              nextObstacle = { ...o, dodgeAwarded: true }
+            }
           }
         }
-        if (o.y < bh + 60) surv.push(o)
+        if (nextObstacle.y < bh + 60) surv.push(nextObstacle)
       }
 
-      if (dodged) {
-        dodgeComboRef.current += 1; windChainRef.current += 1; setDodgeCombo(dodgeComboRef.current)
+      if (dodgedCount > 0) {
+        dodgeComboRef.current += dodgedCount; windChainRef.current += dodgedCount; setDodgeCombo(dodgeComboRef.current)
         playSfx('dodge', 0.25, 1 + dodgeComboRef.current * 0.04)
         if (dodgeComboRef.current % 3 === 0) { const b = DODGE_COMBO_BONUS * dodgeComboRef.current; scoreRef.current += b; setScore(scoreRef.current); comboHitBurst(pcx, py - 20, dodgeComboRef.current, b) }
         if (windChainRef.current >= WIND_CHAIN_THRESHOLD) { windChainRef.current = 0; triggerWindStorm() }
       }
-      if (hit) { playSfx('crash', 0.7, 0.85); triggerShake(12); triggerFlash('rgba(239,68,68,0.6)'); setScreenShakeClass('tr-death-shake'); setTimeout(() => setScreenShakeClass(''), 500); obstaclesRef.current = obs; setObstacles(obs); finishRound(); return }
+      if (hit) {
+        const endReason = getDeathReason(hitType)
+        setDeathReason(endReason)
+        playSfx('crash', 0.7, 0.85); triggerShake(12); triggerFlash('rgba(239,68,68,0.6)'); setScreenShakeClass('tr-death-shake'); setTimeout(() => setScreenShakeClass(''), 500); obstaclesRef.current = obs; setObstacles(obs); finishRound(endReason ?? undefined); return
+      }
       obstaclesRef.current = surv; setObstacles(surv); updateParticles()
       animFrameRef.current = window.requestAnimationFrame(step)
     }
@@ -523,7 +666,10 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const total = score + Math.floor(distance * DISTANCE_SCORE_RATE)
   const best = Math.max(bestScore, total)
   const tl = Math.max(0, Math.ceil((GAME_TIMEOUT_MS - elapsedMs) / 1000))
-  const ti = DIFFICULTY_TIERS.indexOf(getDifficultyTier(total))
+  const difficulty = getDifficultyStage({ score: total, elapsedMs, level })
+  const difficultyIndex = getDifficultyStageIndex(difficulty)
+  const difficultyMeterWidth = `${((difficultyIndex + 1) / DIFFICULTY_STAGES.length) * 100}%`
+  const laneCues = getLaneCueStates(obstacles, boardHeight)
 
   return (
     <section ref={containerRef} className={`mini-game-panel tornado-run-panel ${screenShakeClass} ${hasSlowmo ? 'tr-slowmo' : ''}`}
@@ -538,9 +684,18 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <div className="tr-hud">
           <div className="tr-score">{total}</div>
           <div className="tr-sub"><span className="tr-best">BEST {best}</span><span className="tr-lv">Lv.{level}</span><span className="tr-time">{tl}s</span></div>
+          <div className="tr-stage-row">
+            <span className="tr-stage-name">{difficulty.label}</span>
+            <div className="tr-stage-meter" aria-hidden="true"><span style={{ width: difficultyMeterWidth }} /></div>
+          </div>
           <div className="tr-combo-row">
             {coinCombo > 0 && <span className="tr-combo">COMBO x{getComboMult(coinCombo).toFixed(1)}</span>}
-            {ti > 0 && <span className="tr-danger">DANGER{'!'.repeat(Math.min(ti, 3))}</span>}
+            {difficultyIndex > 0 && <span className="tr-danger">DANGER{'!'.repeat(Math.min(difficultyIndex, 3))}</span>}
+          </div>
+          <div className="tr-guide" aria-label="tornado-run-guide">
+            <span className="tr-guide-chip danger">RED = AVOID</span>
+            <span className="tr-guide-chip reward">YELLOW = COINS</span>
+            <span className="tr-guide-chip item">CYAN = ITEMS</span>
           </div>
           <div className="tr-pws">
             {hasShield && <span className="pw s">SHIELD {(shieldRemainingMs/1000).toFixed(1)}</span>}
@@ -558,6 +713,20 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <div className="tr-field" style={{ width: BOARD_WIDTH, height: boardHeight }}>
           <div className="tr-sky" />
           <div className="tr-ground" style={{ backgroundPositionY: `${(elapsedMs * speed) / 3000 % 48}px` }} />
+          {stageAnnouncement && <div className="tr-stage-pop">{stageAnnouncement}</div>}
+          {laneCues.map((cue) => (
+            cue.kind === 'neutral'
+              ? null
+              : (
+                <div
+                  key={`cue-${cue.lane}`}
+                  className={`tr-lane-cue ${cue.kind}`}
+                  style={{ left: cue.lane * LANE_WIDTH, width: LANE_WIDTH, opacity: 0.14 + cue.intensity * 0.42 }}
+                >
+                  <span className="tr-lane-cue-label">{cue.label}</span>
+                </div>
+              )
+          ))}
           {Array.from({ length: LANE_COUNT - 1 }, (_, i) => <div key={i} className="tr-lane" style={{ left: (i + 1) * LANE_WIDTH }} />)}
           {speed > 350 && <div className="tr-spd" style={{ opacity: Math.min(1, (speed - 350) / 200) }} />}
           {isFever && <div className="tr-fever-ov" />}
@@ -566,8 +735,9 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             const vs = visSize(o.type)
             const cx = laneX(o.lane)
             const cls = o.type === 'whirlwind' ? 'spin' : o.type === 'gust' ? 'wobble' : o.type === 'coin' ? 'bounce' : isItem(o.type) ? 'float' : o.type === 'lightning_warn' ? 'warn' : o.type === 'lightning' ? 'zap' : ''
+            const tone = getObstacleTone(o.type)
             return (
-              <div key={o.id} className={`tr-o ${cls}`} style={{ left: cx - vs / 2, top: o.y, width: vs, height: vs }}>
+              <div key={o.id} className={`tr-o ${cls} ${tone}`} style={{ left: cx - vs / 2, top: o.y, width: vs, height: vs }}>
                 <PixelSprite type={o.type} size={vs} />
               </div>
             )
@@ -581,6 +751,7 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
           {gameOver && (
             <div className="tr-go"><div className="tr-go-t">GAME OVER</div><div className="tr-go-s">{total}</div>
+              {deathReason && <div className="tr-go-r">{deathReason}</div>}
               <div className="tr-go-d">{coinCount} coins | {distance.toFixed(0)}m | Lv.{level}</div></div>
           )}
         </div>
@@ -599,41 +770,79 @@ const CSS = `
 .tornado-run-panel{display:flex;flex-direction:column;width:100%;height:100%;background:#1a1a2e;color:#e2e8f0;font-family:'Press Start 2P','Courier New',monospace;overflow:hidden;user-select:none;touch-action:none;image-rendering:pixelated}
 .tr-slowmo{filter:saturate(.7) brightness(1.1)}
 .tr-board{display:flex;flex-direction:column;width:100%;height:100%;position:relative}
-.tr-hud{padding:12px 14px 6px;z-index:10;flex-shrink:0;background:rgba(0,0,0,.45);text-align:center}
+.tr-hud{padding:12px 14px 8px;z-index:10;flex-shrink:0;background:linear-gradient(180deg,rgba(2,6,23,.94),rgba(15,23,42,.78));text-align:center;border-bottom:1px solid rgba(148,163,184,.12)}
 .tr-score{font-size:clamp(3rem,11vw,4.2rem);font-weight:900;color:#fbbf24;text-shadow:3px 3px 0 #92400e,0 0 20px rgba(251,191,36,.7);line-height:1}
 .tr-sub{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:6px}
-.tr-best{font-size:11px;color:#94a3b8}.tr-lv{background:#4ade80;color:#0f172a;font-size:11px;font-weight:900;padding:2px 8px;border-radius:4px}
+.tr-best{font-size:11px;color:#94a3b8}
+.tr-lv{background:#4ade80;color:#0f172a;font-size:11px;font-weight:900;padding:2px 8px;border-radius:4px}
 .tr-time{font-size:14px;font-weight:700;color:#e2e8f0;background:rgba(71,85,105,.5);padding:2px 10px;border-radius:4px}
-.tr-combo-row{display:flex;justify-content:center;gap:8px;margin-top:4px;min-height:16px}
+.tr-stage-row{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:7px}
+.tr-stage-name{font-size:10px;font-weight:900;color:#7dd3fc;letter-spacing:1px}
+.tr-stage-meter{width:min(160px,48vw);height:10px;border-radius:999px;background:rgba(15,23,42,.95);border:2px solid rgba(56,189,248,.24);overflow:hidden;box-shadow:inset 0 1px 4px rgba(0,0,0,.35)}
+.tr-stage-meter span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#38bdf8 0%,#60a5fa 45%,#fb7185 100%);box-shadow:0 0 12px rgba(96,165,250,.45)}
+.tr-combo-row{display:flex;justify-content:center;gap:8px;margin-top:6px;min-height:16px}
 .tr-combo{font-size:11px;font-weight:900;color:#fbbf24;background:rgba(251,191,36,.15);border:2px solid rgba(251,191,36,.4);padding:2px 8px;border-radius:4px}
-.tr-danger{font-size:10px;font-weight:900;color:#ef4444;background:rgba(239,68,68,.15);border:2px solid rgba(239,68,68,.4);padding:2px 8px;border-radius:4px}
-.tr-dash{position:absolute;right:14px;top:50%;transform:translateY(-50%);width:60px;height:60px;border-radius:8px;background:linear-gradient(135deg,#22d3ee,#3b82f6);border:3px solid #1e3a5f;color:#fff;font-size:10px;font-weight:900;font-family:inherit;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:12;box-shadow:0 4px 0 #0f172a}
-.tr-dash.cd{background:#475569;color:#94a3b8;font-size:12px}.tr-dash.act{background:#fbbf24;color:#0f172a;transform:translateY(-50%) scale(1.1)}
-.tr-pws{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-top:4px}
+.tr-danger{font-size:10px;font-weight:900;color:#f87171;background:rgba(239,68,68,.15);border:2px solid rgba(239,68,68,.4);padding:2px 8px;border-radius:4px}
+.tr-guide{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin-top:6px}
+.tr-guide-chip{font-size:9px;font-weight:700;padding:3px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(15,23,42,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.tr-guide-chip.danger{color:#fca5a5;border-color:rgba(248,113,113,.45)}
+.tr-guide-chip.reward{color:#fde68a;border-color:rgba(251,191,36,.45)}
+.tr-guide-chip.item{color:#99f6e4;border-color:rgba(45,212,191,.4)}
+.tr-dash{position:absolute;right:14px;top:52%;transform:translateY(-50%);width:60px;height:60px;border-radius:8px;background:linear-gradient(135deg,#22d3ee,#3b82f6);border:3px solid #1e3a5f;color:#fff;font-size:10px;font-weight:900;font-family:inherit;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:12;box-shadow:0 4px 0 #0f172a}
+.tr-dash.cd{background:#475569;color:#94a3b8;font-size:12px}
+.tr-dash.act{background:#fbbf24;color:#0f172a;transform:translateY(-50%) scale(1.1)}
+.tr-pws{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-top:6px}
 .pw{font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;border:2px solid}
-.pw.s{color:#22d3ee;border-color:#22d3ee;background:rgba(34,211,238,.15)}.pw.z{color:#fbbf24;border-color:#fbbf24;background:rgba(251,191,36,.15)}
-.pw.f{color:#f97316;border-color:#f97316;background:rgba(249,115,22,.15)}.pw.m{color:#f472b6;border-color:#f472b6;background:rgba(244,114,182,.15)}
-.pw.w{color:#a78bfa;border-color:#a78bfa;background:rgba(167,139,250,.15)}.pw.d{color:#4ade80;border-color:#4ade80;background:rgba(74,222,128,.15)}
-.tr-field{position:relative;overflow:hidden;flex:1;margin:0 auto;border-left:3px solid #2d2d4e;border-right:3px solid #2d2d4e}
-.tr-sky{position:absolute;inset:0;background:linear-gradient(180deg,#0a0a23,#16213e 25%,#1a1a3e 50%,#2a2a4e 75%,#3a3a5e);pointer-events:none}
-.tr-ground{position:absolute;inset:0;background:repeating-linear-gradient(to bottom,transparent 0px,transparent 40px,rgba(100,116,139,.06) 40px,rgba(100,116,139,.06) 48px);pointer-events:none}
-.tr-lane{position:absolute;top:0;bottom:0;width:2px;background:repeating-linear-gradient(to bottom,transparent 0,transparent 16px,rgba(148,163,184,.1) 16px,rgba(148,163,184,.1) 32px);pointer-events:none}
-.tr-spd{position:absolute;inset:0;background:repeating-linear-gradient(to bottom,transparent 0,transparent 40px,rgba(200,220,255,.04) 40px,rgba(200,220,255,.04) 42px);animation:trSpd .15s linear infinite;pointer-events:none}
+.pw.s{color:#22d3ee;border-color:#22d3ee;background:rgba(34,211,238,.15)}
+.pw.z{color:#fbbf24;border-color:#fbbf24;background:rgba(251,191,36,.15)}
+.pw.f{color:#f97316;border-color:#f97316;background:rgba(249,115,22,.15)}
+.pw.m{color:#f472b6;border-color:#f472b6;background:rgba(244,114,182,.15)}
+.pw.w{color:#a78bfa;border-color:#a78bfa;background:rgba(167,139,250,.15)}
+.pw.d{color:#4ade80;border-color:#4ade80;background:rgba(74,222,128,.15)}
+.tr-field{position:relative;overflow:hidden;flex:1;margin:0 auto;border-left:3px solid #2d2d4e;border-right:3px solid #2d2d4e;background:#0b1224}
+.tr-sky{position:absolute;inset:0;background:linear-gradient(180deg,#050816,#0f1b38 25%,#182848 58%,#24446d 100%);pointer-events:none}
+.tr-ground{position:absolute;inset:0;background:repeating-linear-gradient(to bottom,transparent 0px,transparent 40px,rgba(148,163,184,.06) 40px,rgba(148,163,184,.06) 48px);pointer-events:none}
+.tr-stage-pop{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:8;padding:6px 12px;border-radius:999px;background:rgba(8,15,30,.78);border:2px solid rgba(56,189,248,.45);color:#e0f2fe;font-size:11px;font-weight:900;letter-spacing:1px;box-shadow:0 0 18px rgba(56,189,248,.28);animation:trStagePop 1.1s ease-out forwards;pointer-events:none}
+@keyframes trStagePop{0%{opacity:0;transform:translate(-50%,-10px) scale(.8)}20%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,6px) scale(1.04)}}
+.tr-lane-cue{position:absolute;top:0;bottom:0;z-index:1;pointer-events:none;box-shadow:inset 0 0 0 1px transparent}
+.tr-lane-cue-label{position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:900;padding:3px 6px;border-radius:999px;background:rgba(15,23,42,.82);backdrop-filter:blur(2px);white-space:nowrap}
+.tr-lane-cue.danger{background:linear-gradient(180deg,rgba(248,113,113,.2),transparent 45%,rgba(248,113,113,.12) 100%);box-shadow:inset 0 0 0 1px rgba(248,113,113,.18)}
+.tr-lane-cue.danger .tr-lane-cue-label{color:#fecaca;border:1px solid rgba(248,113,113,.42)}
+.tr-lane-cue.warning{background:linear-gradient(180deg,rgba(248,113,113,.24),rgba(253,224,71,.16) 40%,rgba(248,113,113,.18) 100%);box-shadow:inset 0 0 0 2px rgba(250,204,21,.2)}
+.tr-lane-cue.warning .tr-lane-cue-label{color:#fef08a;border:1px solid rgba(250,204,21,.52)}
+.tr-lane-cue.reward{background:linear-gradient(180deg,rgba(251,191,36,.18),transparent 45%,rgba(251,191,36,.1) 100%);box-shadow:inset 0 0 0 1px rgba(251,191,36,.15)}
+.tr-lane-cue.reward .tr-lane-cue-label{color:#fde68a;border:1px solid rgba(251,191,36,.45)}
+.tr-lane-cue.item{background:linear-gradient(180deg,rgba(45,212,191,.18),transparent 45%,rgba(34,211,238,.1) 100%);box-shadow:inset 0 0 0 1px rgba(45,212,191,.15)}
+.tr-lane-cue.item .tr-lane-cue-label{color:#99f6e4;border:1px solid rgba(45,212,191,.42)}
+.tr-lane{position:absolute;top:0;bottom:0;width:2px;background:repeating-linear-gradient(to bottom,transparent 0,transparent 16px,rgba(148,163,184,.12) 16px,rgba(148,163,184,.12) 32px);pointer-events:none;z-index:2}
+.tr-spd{position:absolute;inset:0;background:repeating-linear-gradient(to bottom,transparent 0,transparent 40px,rgba(200,220,255,.04) 40px,rgba(200,220,255,.04) 42px);animation:trSpd .15s linear infinite;pointer-events:none;z-index:2}
 @keyframes trSpd{to{transform:translateY(42px)}}
-.tr-fever-ov{position:absolute;inset:0;background:radial-gradient(ellipse at center bottom,rgba(249,115,22,.1) 0%,transparent 70%);animation:trFev .5s ease-in-out infinite alternate;pointer-events:none}
+.tr-fever-ov{position:absolute;inset:0;background:radial-gradient(ellipse at center bottom,rgba(249,115,22,.12) 0%,transparent 70%);animation:trFev .5s ease-in-out infinite alternate;pointer-events:none;z-index:2}
 @keyframes trFev{from{opacity:.3}to{opacity:1}}
 .tr-storm-ov{position:absolute;inset:0;z-index:15;background:radial-gradient(circle at center,rgba(59,130,246,.3),rgba(34,211,238,.2) 40%,transparent 70%);animation:trStorm .8s ease-out forwards;pointer-events:none}
 @keyframes trStorm{0%{transform:scale(0);opacity:0}30%{transform:scale(1.2);opacity:1}100%{transform:scale(2);opacity:0}}
-.tr-o{position:absolute;z-index:3;image-rendering:pixelated}
-.spin{animation:trSpin .5s linear infinite}.wobble{animation:trWob .3s ease-in-out infinite alternate}
-.bounce{animation:trBounce .6s ease-in-out infinite alternate}.float{animation:trFloat .5s ease-in-out infinite alternate}
-.warn{animation:trWarn .12s linear infinite alternate}.zap{animation:trZap .06s linear infinite alternate}
-@keyframes trSpin{to{transform:rotate(360deg)}}@keyframes trWob{from{transform:translateX(-3px)}to{transform:translateX(3px)}}
-@keyframes trBounce{from{transform:translateY(0)}to{transform:translateY(-3px)}}@keyframes trFloat{from{transform:translateY(0)}to{transform:translateY(-4px)}}
-@keyframes trWarn{from{opacity:.3;transform:scale(.85)}to{opacity:1;transform:scale(1.15)}}@keyframes trZap{from{opacity:.6}to{opacity:1}}
-.tr-player{position:absolute;z-index:5;transition:left .1s ease-out;image-rendering:pixelated}
+.tr-o{position:absolute;z-index:4;display:flex;align-items:center;justify-content:center;image-rendering:pixelated}
+.tr-o::before{content:'';position:absolute;inset:-6px;border-radius:18px;border:2px solid transparent;background:transparent}
+.tr-o.danger::before{border-color:rgba(248,113,113,.48);background:radial-gradient(circle,rgba(127,29,29,.38) 0%,rgba(127,29,29,.12) 62%,transparent 100%);box-shadow:0 0 18px rgba(248,113,113,.18)}
+.tr-o.warning::before{border-color:rgba(250,204,21,.56);background:radial-gradient(circle,rgba(239,68,68,.34) 0%,rgba(250,204,21,.12) 62%,transparent 100%);box-shadow:0 0 20px rgba(250,204,21,.22)}
+.tr-o.reward::before{border-color:rgba(251,191,36,.52);background:radial-gradient(circle,rgba(245,158,11,.34) 0%,rgba(251,191,36,.12) 62%,transparent 100%);box-shadow:0 0 18px rgba(251,191,36,.2)}
+.tr-o.item::before{border-color:rgba(45,212,191,.48);background:radial-gradient(circle,rgba(13,148,136,.34) 0%,rgba(45,212,191,.12) 62%,transparent 100%);box-shadow:0 0 18px rgba(45,212,191,.18)}
+.spin{animation:trSpin .5s linear infinite}
+.wobble{animation:trWob .3s ease-in-out infinite alternate}
+.bounce{animation:trBounce .6s ease-in-out infinite alternate}
+.float{animation:trFloat .5s ease-in-out infinite alternate}
+.warn{animation:trWarn .12s linear infinite alternate}
+.zap{animation:trZap .06s linear infinite alternate}
+@keyframes trSpin{to{transform:rotate(360deg)}}
+@keyframes trWob{from{transform:translateX(-3px)}to{transform:translateX(3px)}}
+@keyframes trBounce{from{transform:translateY(0)}to{transform:translateY(-3px)}}
+@keyframes trFloat{from{transform:translateY(0)}to{transform:translateY(-4px)}}
+@keyframes trWarn{from{opacity:.3;transform:scale(.85)}to{opacity:1;transform:scale(1.15)}}
+@keyframes trZap{from{opacity:.6}to{opacity:1}}
+.tr-player{position:absolute;z-index:6;transition:left .1s ease-out;image-rendering:pixelated}
 .tr-pimg{width:100%;height:100%;object-fit:contain;pointer-events:none;image-rendering:pixelated;filter:drop-shadow(0 4px 8px rgba(0,0,0,.7))}
-.tr-player.sh{filter:drop-shadow(0 0 14px rgba(34,211,238,.8))}.tr-player.sh::after{content:'';position:absolute;inset:-10px;border-radius:50%;border:3px solid rgba(34,211,238,.5);animation:trShP .5s ease-in-out infinite alternate}
+.tr-player.sh{filter:drop-shadow(0 0 14px rgba(34,211,238,.8))}
+.tr-player.sh::after{content:'';position:absolute;inset:-10px;border-radius:50%;border:3px solid rgba(34,211,238,.5);animation:trShP .5s ease-in-out infinite alternate}
 .tr-player.da{animation:trDZ .3s ease-out;filter:drop-shadow(0 0 18px rgba(34,211,238,.9)) brightness(1.3)}
 @keyframes trDZ{0%{transform:translateY(10px) scale(.9)}50%{transform:translateY(-15px) scale(1.15)}100%{transform:translateY(0) scale(1)}}
 @keyframes trShP{from{opacity:.3;transform:scale(1)}to{opacity:.7;transform:scale(1.06)}}
@@ -642,11 +851,13 @@ const CSS = `
 .tr-go{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,10,30,.88);backdrop-filter:blur(4px);animation:trGoF .3s ease-out}
 .tr-go-t{font-size:2.8rem;font-weight:900;color:#ef4444;text-shadow:3px 3px 0 #7f1d1d,0 0 20px rgba(239,68,68,.6);animation:trGoZ .4s ease-out}
 .tr-go-s{font-size:3.5rem;font-weight:900;color:#fbbf24;text-shadow:3px 3px 0 #92400e;margin-top:12px}
+.tr-go-r{margin-top:12px;font-size:12px;color:#fecaca;background:rgba(127,29,29,.45);border:1px solid rgba(248,113,113,.35);padding:6px 10px;border-radius:999px}
 .tr-go-d{font-size:13px;color:#94a3b8;margin-top:12px}
-@keyframes trGoF{from{opacity:0}to{opacity:1}}@keyframes trGoZ{from{transform:scale(2.5);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes trGoF{from{opacity:0}to{opacity:1}}
+@keyframes trGoZ{from{transform:scale(2.5);opacity:0}to{transform:scale(1);opacity:1}}
 .tr-death-shake{animation:trDS .4s ease-out}
 @keyframes trDS{0%,100%{transform:translateX(0)}10%{transform:translateX(-8px) rotate(-1deg)}20%{transform:translateX(8px) rotate(1deg)}30%{transform:translateX(-6px)}40%{transform:translateX(6px)}}
-.tr-ctrls{display:flex;gap:10px;padding:8px 12px 14px;z-index:10;flex-shrink:0}
+.tr-ctrls{display:flex;gap:10px;padding:8px 12px 16px;z-index:10;flex-shrink:0;background:linear-gradient(180deg,rgba(9,14,28,.85),rgba(12,22,42,.96))}
 .tr-btn{flex:1;height:80px;border:3px solid #3a3a5e;border-radius:10px;background:linear-gradient(180deg,#2d2d4e,#1a1a2e);color:#e2e8f0;font-size:16px;font-weight:800;letter-spacing:2px;cursor:pointer;box-shadow:0 5px 0 #0a0a1e,inset 0 1px 0 rgba(255,255,255,.1);transition:transform .06s;display:flex;align-items:center;justify-content:center;gap:6px;font-family:'Press Start 2P','Courier New',monospace}
 .tr-btn:active{transform:translateY(4px);box-shadow:0 1px 0 #0a0a1e}
 `

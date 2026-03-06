@@ -886,7 +886,7 @@ function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           image-rendering: auto;
         }
         .lf-avatar { width: 64px; height: 64px; border: 3px solid #f97316; image-rendering: pixelated; flex-shrink: 0; }
-        .lf-score-num { font-size: clamp(48px, 14vw, 72px); font-weight: 900; color: #f97316; margin: 0; line-height: 1; text-shadow: 4px 4px 0 #7c2d12, 0 0 20px rgba(249,115,22,0.5); }
+        .lf-score-num { font-size: clamp(48px, 14vw, 72px); font-weight: 900; color: #f97316; margin: 0; line-height: 1; text-shadow: 4px 4px 0 #7c2d12, 0 0 20px rgba(249,115,22,0.5); transform: translateY(4px); }
         .lf-best-txt { font-size: 16px; color: #9ca3af; margin: 0; letter-spacing: 1px; }
         .lf-time-txt { font-size: 28px; font-weight: 700; color: #e5e7eb; margin: 0; }
         .lf-stats { display: flex; justify-content: center; align-items: center; gap: 14px; font-size: 18px; color: #d4d4d8; padding: 8px 0; flex-shrink: 0; letter-spacing: 0.5px; background: rgba(0,0,0,0.2); }

@@ -12,7 +12,6 @@ import levelUpSfx from '../../../assets/sounds/odd-one-out-level-up.mp3'
 import timeBonusSfx from '../../../assets/sounds/odd-one-out-time-bonus.mp3'
 import streakSfx from '../../../assets/sounds/odd-one-out-streak.mp3'
 import perfectSfx from '../../../assets/sounds/odd-one-out-perfect.mp3'
-import revealSfx from '../../../assets/sounds/odd-one-out-reveal.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
 // ═══════════════════════════════════════════
@@ -37,13 +36,6 @@ const FEVER_DURATION_MS = 8000
 const FEVER_SCORE_MULTIPLIER = 3
 const STREAK_BONUS_STEP = 3
 
-const HINT_COOLDOWN_MS = 12_000
-const HINT_DURATION_MS = 2000
-const TIME_FREEZE_COOLDOWN_MS = 20_000
-const TIME_FREEZE_DURATION_MS = 3000
-const DOUBLE_POINTS_COOLDOWN_MS = 15_000
-const DOUBLE_POINTS_DURATION_MS = 6000
-
 // Pixel art dot patterns for rendering inside cells
 const DOT_PATTERNS = ['solid', 'cross', 'ring', 'checker', 'diamond-fill', 'stripe'] as const
 type DotPattern = (typeof DOT_PATTERNS)[number]
@@ -67,6 +59,14 @@ interface PixelStar {
   cellIndex: number
   collected: boolean
   spawnTime: number
+}
+
+interface RoundSetup {
+  readonly gridSize: number
+  readonly cells: CellData[]
+  readonly currentStar: PixelStar | null
+  readonly floorHue: number
+  readonly startedAt: number
 }
 
 // ═══════════════════════════════════════════
@@ -117,11 +117,12 @@ function generateRound(gridSize: number, round: number): { cells: CellData[]; od
         case 'lightness':
           l = Math.max(25, Math.min(75, baseLight + (Math.random() > 0.5 ? 16 : -16)))
           break
-        case 'pattern-mix':
+        case 'pattern-mix': {
           h = (baseHue + hueShift * dir + 360) % 360
           const others = DOT_PATTERNS.filter(pp => pp !== pattern)
           p = others[Math.floor(Math.random() * others.length)]
           break
+        }
         case 'size-mix':
           h = (baseHue + hueShift * 0.5 * dir + 360) % 360
           sc = Math.random() > 0.5 ? 0.72 : 1.28
@@ -141,11 +142,26 @@ function toGridSize(round: number): number {
   return GRID_PROGRESSION[idx]
 }
 
+function createRoundSetup(round: number, previousFloorHue: number): RoundSetup {
+  const gridSize = toGridSize(round)
+  const { cells, starIndex } = generateRound(gridSize, round)
+  const startedAt = performance.now()
+  const floorHue = (previousFloorHue + 30 + Math.floor(Math.random() * 20)) % 360
+
+  return {
+    gridSize,
+    cells,
+    currentStar: starIndex === null ? null : { cellIndex: starIndex, collected: false, spawnTime: startedAt },
+    floorHue,
+    startedAt,
+  }
+}
+
 // ═══════════════════════════════════════════
 // PIXEL DOT CELL - Canvas-rendered pixel art
 // ═══════════════════════════════════════════
-function PixelDotCell({ cell, size, onClick, isHinted, isFever, hasStar, starCollected }: {
-  cell: CellData; size: number; onClick: () => void; isHinted: boolean; isFever: boolean
+function PixelDotCell({ cell, size, onClick, isFever, hasStar, starCollected }: {
+  cell: CellData; size: number; onClick: () => void; isFever: boolean
   hasStar: boolean; starCollected: boolean
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -229,15 +245,6 @@ function PixelDotCell({ cell, size, onClick, isHinted, isFever, hasStar, starCol
     ctx.fillRect(offset, offset, 1, dotSize)
     ctx.globalAlpha = 1
 
-    // Hint glow
-    if (isHinted && cell.isOdd) {
-      ctx.fillStyle = 'rgba(250,204,21,0.6)'
-      ctx.fillRect(0, 0, px, 1)
-      ctx.fillRect(0, px - 1, px, 1)
-      ctx.fillRect(0, 0, 1, px)
-      ctx.fillRect(px - 1, 0, 1, px)
-    }
-
     // Star overlay
     if (hasStar && !starCollected) {
       ctx.fillStyle = '#facc15'
@@ -250,11 +257,9 @@ function PixelDotCell({ cell, size, onClick, isHinted, isFever, hasStar, starCol
       ctx.fillRect(sx + 1, sy - 1, 1, 1)
       ctx.fillRect(sx + 1, sy + sc, 1, 1)
     }
-  }, [cell, isFever, isHinted, hasStar, starCollected, size])
+  }, [cell, color, darkColor, lightColor, isFever, hasStar, starCollected, size])
 
-  const borderColor = isHinted && cell.isOdd
-    ? '#facc15'
-    : isFever ? `hsl(${cell.hue}, 40%, 70%)` : '#c8c4b8'
+  const borderColor = isFever ? `hsl(${cell.hue}, 40%, 70%)` : '#c8c4b8'
 
   return (
     <button
@@ -317,30 +322,36 @@ interface PixelSparkle {
 // MAIN GAME COMPONENT
 // ═══════════════════════════════════════════
 function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+  const initialRoundSetup = useMemo(() => createRoundSetup(0, 0), [])
   const [score, setScore] = useState(0)
   const [round, setRound] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
-  const [cells, setCells] = useState<CellData[]>([])
-  const [gridSize, setGridSize] = useState<number>(GRID_PROGRESSION[0])
+  const [cells, setCells] = useState<CellData[]>(initialRoundSetup.cells)
+  const [gridSize, setGridSize] = useState<number>(initialRoundSetup.gridSize)
   const [flashState, setFlashState] = useState<'none' | 'correct' | 'wrong'>('none')
   const [streak, setStreak] = useState(0)
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
-  const [isHinting, setIsHinting] = useState(false)
-  const [hintCooldownMs, setHintCooldownMs] = useState(0)
-  const [isTimeFrozen, setIsTimeFrozen] = useState(false)
-  const [freezeCooldownMs, setFreezeCooldownMs] = useState(0)
-  const [isDoublePoints, setIsDoublePoints] = useState(false)
-  const [doubleCooldownMs, setDoubleCooldownMs] = useState(0)
   const [roundAnim, setRoundAnim] = useState(false)
   const [perfectRounds, setPerfectRounds] = useState(0)
   const [starsCollected, setStarsCollected] = useState(0)
-  const [currentStar, setCurrentStar] = useState<PixelStar | null>(null)
+  const [currentStar, setCurrentStar] = useState<PixelStar | null>(initialRoundSetup.currentStar)
   const [pixelSparkles, setPixelSparkles] = useState<PixelSparkle[]>([])
   const [showFeverBanner, setShowFeverBanner] = useState(false)
-  const [floorHue, setFloorHue] = useState(0)
+  const [floorHue, setFloorHue] = useState(initialRoundSetup.floorHue)
 
-  const effects = useGameEffects()
+  const {
+    particles,
+    scorePopups,
+    isFlashing,
+    flashColor,
+    comboHitBurst,
+    triggerFlash,
+    triggerShake,
+    updateParticles,
+    cleanup,
+    getShakeStyle,
+  } = useGameEffects()
 
   // Refs for animation loop
   const scoreRef = useRef(0)
@@ -350,25 +361,18 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const animFrameRef = useRef<number | null>(null)
   const lastFrameRef = useRef<number | null>(null)
   const flashTimerRef = useRef<number | null>(null)
-  const roundStartRef = useRef(0)
+  const roundStartRef = useRef(initialRoundSetup.startedAt)
   const interactableRef = useRef(true)
   const streakRef = useRef(0)
   const feverRef = useRef(false)
   const feverMsRef = useRef(0)
-  const frozenRef = useRef(false)
-  const freezeCdRef = useRef(0)
-  const freezeMsRef = useRef(0)
-  const hintCdRef = useRef(0)
-  const doubleRef = useRef(false)
-  const doubleCdRef = useRef(0)
-  const doubleMsRef = useRef(0)
   const warningRef = useRef(false)
   const perfectRef = useRef(0)
   const wrongRef = useRef(false)
-  const lastGridRef = useRef<number>(GRID_PROGRESSION[0])
+  const lastGridRef = useRef<number>(initialRoundSetup.gridSize)
   const starsRef = useRef(0)
   const sparkleIdRef = useRef(0)
-  const floorHueRef = useRef(0)
+  const floorHueRef = useRef(initialRoundSetup.floorHue)
 
   const audioCache = useRef<Record<string, HTMLAudioElement>>({})
 
@@ -416,40 +420,33 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
   const startNewRound = useCallback(
     (nextRound: number) => {
-      const nextGrid = toGridSize(nextRound)
-      const { cells: nextCells, starIndex } = generateRound(nextGrid, nextRound)
+      const roundSetup = createRoundSetup(nextRound, floorHueRef.current)
 
       roundRef.current = nextRound
       setRound(nextRound)
-      setGridSize(nextGrid)
-      setCells(nextCells)
+      setGridSize(roundSetup.gridSize)
+      setCells(roundSetup.cells)
       interactableRef.current = true
       wrongRef.current = false
 
-      // Star
-      if (starIndex !== null) {
-        setCurrentStar({ cellIndex: starIndex, collected: false, spawnTime: performance.now() })
-      } else {
-        setCurrentStar(null)
-      }
+      setCurrentStar(roundSetup.currentStar)
 
       // Floor tile hue changes each round
-      const newFloorHue = (floorHueRef.current + 30 + Math.floor(Math.random() * 20)) % 360
-      floorHueRef.current = newFloorHue
-      setFloorHue(newFloorHue)
+      floorHueRef.current = roundSetup.floorHue
+      setFloorHue(roundSetup.floorHue)
 
       // Grid size level up
-      if (nextGrid !== lastGridRef.current && nextRound > 0) {
+      if (roundSetup.gridSize !== lastGridRef.current && nextRound > 0) {
         playAudio(levelUpSfx, 0.5)
-        effects.triggerFlash('rgba(132,204,22,0.4)')
+        triggerFlash('rgba(132,204,22,0.4)')
       }
-      lastGridRef.current = nextGrid
+      lastGridRef.current = roundSetup.gridSize
 
       setRoundAnim(true)
       setTimeout(() => setRoundAnim(false), 300)
-      roundStartRef.current = performance.now()
+      roundStartRef.current = roundSetup.startedAt
     },
-    [playAudio, effects],
+    [playAudio, triggerFlash],
   )
 
   const finishGame = useCallback(() => {
@@ -460,38 +457,6 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     playAudio(gameOverHitSfx, 0.64, 0.95)
     onFinish({ score: scoreRef.current, durationMs: elapsed })
   }, [onFinish, playAudio])
-
-  // ── Powerups ──
-  const activateHint = useCallback(() => {
-    if (hintCdRef.current > 0 || finishedRef.current) return
-    setIsHinting(true)
-    hintCdRef.current = HINT_COOLDOWN_MS
-    setHintCooldownMs(HINT_COOLDOWN_MS)
-    playAudio(revealSfx, 0.4, 1.2)
-    setTimeout(() => setIsHinting(false), HINT_DURATION_MS)
-  }, [playAudio])
-
-  const activateFreeze = useCallback(() => {
-    if (freezeCdRef.current > 0 || finishedRef.current) return
-    frozenRef.current = true
-    setIsTimeFrozen(true)
-    freezeMsRef.current = TIME_FREEZE_DURATION_MS
-    freezeCdRef.current = TIME_FREEZE_COOLDOWN_MS
-    setFreezeCooldownMs(TIME_FREEZE_COOLDOWN_MS)
-    playAudio(timeBonusSfx, 0.4, 0.8)
-    effects.triggerFlash('rgba(59,130,246,0.3)')
-  }, [playAudio, effects])
-
-  const activateDouble = useCallback(() => {
-    if (doubleCdRef.current > 0 || finishedRef.current) return
-    doubleRef.current = true
-    setIsDoublePoints(true)
-    doubleMsRef.current = DOUBLE_POINTS_DURATION_MS
-    doubleCdRef.current = DOUBLE_POINTS_COOLDOWN_MS
-    setDoubleCooldownMs(DOUBLE_POINTS_COOLDOWN_MS)
-    playAudio(comboSfx, 0.4, 1.5)
-    effects.triggerFlash('rgba(168,85,247,0.3)')
-  }, [playAudio, effects])
 
   // ── Cell tap ──
   const handleCellTap = useCallback(
@@ -523,9 +488,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         // Score
         const streakMult = 1 + Math.floor(nextStreak / STREAK_BONUS_STEP)
         const feverMult = feverRef.current ? FEVER_SCORE_MULTIPLIER : 1
-        const doubleMult = doubleRef.current ? 2 : 1
         const speedBonus = solveMs < 1000 ? 3 : solveMs < 2000 ? 1 : 0
-        const earned = (1 + speedBonus) * streakMult * feverMult * doubleMult
+        const earned = (1 + speedBonus) * streakMult * feverMult
         const nextScore = scoreRef.current + earned
         scoreRef.current = nextScore
         setScore(nextScore)
@@ -553,7 +517,7 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           feverMsRef.current = FEVER_DURATION_MS
           setIsFever(true)
           setFeverRemainingMs(FEVER_DURATION_MS)
-          effects.triggerFlash('rgba(250,204,21,0.5)')
+          triggerFlash('rgba(250,204,21,0.5)')
           playAudio(feverSfx, 0.5)
           setShowFeverBanner(true)
           setTimeout(() => setShowFeverBanner(false), 800)
@@ -569,8 +533,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
 
         setFlashState('correct')
-        effects.comboHitBurst(200, 350, nextStreak, earned)
-        effects.triggerFlash('rgba(34,197,94,0.25)')
+        comboHitBurst(200, 350, nextStreak, earned)
+        triggerFlash('rgba(34,197,94,0.25)')
         spawnSparkles(200, 350, 6, tappedCell.hue)
 
         clearTimer(flashTimerRef)
@@ -596,8 +560,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         setFlashState('wrong')
         playAudio(wrongSfx, 0.5, 0.8)
-        effects.triggerShake(8)
-        effects.triggerFlash('rgba(239,68,68,0.35)')
+        triggerShake(8)
+        triggerFlash('rgba(239,68,68,0.35)')
 
         clearTimer(flashTimerRef)
         flashTimerRef.current = window.setTimeout(() => {
@@ -609,7 +573,7 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         if (remainingMsRef.current <= 0) finishGame()
       }
     },
-    [cells, currentStar, finishGame, playAudio, startNewRound, effects, spawnSparkles],
+    [cells, comboHitBurst, currentStar, finishGame, playAudio, spawnSparkles, startNewRound, triggerFlash, triggerShake],
   )
 
   // ── Keyboard ──
@@ -619,11 +583,9 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     return () => window.removeEventListener('keydown', h)
   }, [onExit])
 
-  // ── Init ──
   useEffect(() => {
-    startNewRound(0)
-    return () => { clearTimer(flashTimerRef); effects.cleanup() }
-  }, [startNewRound])
+    return () => { clearTimer(flashTimerRef); cleanup() }
+  }, [cleanup])
 
   // ── Game loop ──
   useEffect(() => {
@@ -633,10 +595,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS)
       lastFrameRef.current = now
 
-      if (!frozenRef.current) {
-        remainingMsRef.current = Math.max(0, remainingMsRef.current - dt)
-        setRemainingMs(remainingMsRef.current)
-      }
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - dt)
+      setRemainingMs(remainingMsRef.current)
 
       if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && !warningRef.current) {
         warningRef.current = true
@@ -649,21 +609,7 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         if (feverMsRef.current <= 0) { feverRef.current = false; setIsFever(false) }
       }
 
-      if (frozenRef.current) {
-        freezeMsRef.current = Math.max(0, freezeMsRef.current - dt)
-        if (freezeMsRef.current <= 0) { frozenRef.current = false; setIsTimeFrozen(false) }
-      }
-
-      if (doubleRef.current) {
-        doubleMsRef.current = Math.max(0, doubleMsRef.current - dt)
-        if (doubleMsRef.current <= 0) { doubleRef.current = false; setIsDoublePoints(false) }
-      }
-
-      if (hintCdRef.current > 0) { hintCdRef.current = Math.max(0, hintCdRef.current - dt); setHintCooldownMs(hintCdRef.current) }
-      if (freezeCdRef.current > 0) { freezeCdRef.current = Math.max(0, freezeCdRef.current - dt); setFreezeCooldownMs(freezeCdRef.current) }
-      if (doubleCdRef.current > 0) { doubleCdRef.current = Math.max(0, doubleCdRef.current - dt); setDoubleCooldownMs(doubleCdRef.current) }
-
-      effects.updateParticles()
+      updateParticles()
 
       if (remainingMsRef.current <= 0) { finishGame(); animFrameRef.current = null; return }
       animFrameRef.current = window.requestAnimationFrame(step)
@@ -673,7 +619,7 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       if (animFrameRef.current !== null) { window.cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null }
       lastFrameRef.current = null
     }
-  }, [finishGame, playAudio, effects])
+  }, [finishGame, playAudio, updateParticles])
 
   // ── Derived ──
   const displayBest = useMemo(() => Math.max(bestScore, score), [bestScore, score])
@@ -682,13 +628,13 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const comboLabel = getComboLabel(streak)
   const comboColor = getComboColor(streak)
 
-  const gap = 2
-  const gridPad = 8
-  const maxW = 400
+  const gap = gridSize >= 6 ? 2 : 4
+  const gridPad = 6
+  const maxW = 420
   const cellSize = Math.floor((maxW - gridPad * 2 - gap * (gridSize - 1)) / gridSize)
 
   const timerPct = (remainingMs / ROUND_DURATION_MS) * 100
-  const timerColor = isLow ? '#e74c3c' : isTimeFrozen ? '#4a90d9' : '#6abf4b'
+  const timerColor = isLow ? '#e74c3c' : '#6abf4b'
 
   // Floor tile pattern color
   const floorLight = `hsl(${floorHue}, 12%, 90%)`
@@ -703,7 +649,7 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         overflow: 'hidden', position: 'relative',
         fontFamily: '"Press Start 2P", "Courier New", monospace',
         imageRendering: 'pixelated' as React.CSSProperties['imageRendering'],
-        ...effects.getShakeStyle(),
+        ...getShakeStyle(),
       }}
     >
       <style>{GAME_EFFECTS_CSS}{`
@@ -724,56 +670,67 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         .dot-hud {
           background: #2c2137;
-          padding: 10px 12px 8px;
+          padding: 14px 16px 12px;
           display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
           gap: 8px;
           box-shadow: 0 4px 0 #1a1425;
           position: relative;
           z-index: 2;
+          text-align: center;
         }
 
-        .dot-score-block { display: flex; flex-direction: column; gap: 1px; }
+        .dot-score-block {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+        }
+        .dot-score-label {
+          font-size: 8px;
+          color: #a89cc8;
+          margin: 0;
+          letter-spacing: 2px;
+        }
         .dot-score {
-          font-size: clamp(16px, 5vw, 22px);
+          font-size: clamp(34px, 11vw, 52px);
           font-weight: 900;
           color: #ffd700;
           margin: 0;
-          text-shadow: 2px 2px 0 #8b6914;
-          letter-spacing: 2px;
+          text-shadow: 4px 4px 0 #8b6914;
+          letter-spacing: 3px;
+          line-height: 1;
         }
-        .dot-best {
-          font-size: 7px;
-          color: #a89cc8;
-          margin: 0;
+        .dot-meta-row {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          width: 100%;
         }
-
-        .dot-hud-right {
-          display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+        .dot-meta-chip {
+          background: #3d2f50;
+          color: #e9e2f6;
+          font-size: 8px;
+          padding: 4px 8px;
+          box-shadow: 2px 2px 0 #1a1425;
         }
-        .dot-round-tag {
-          background: #6abf4b;
-          color: #fff;
-          font-size: 7px;
-          padding: 3px 6px;
-          box-shadow: 2px 2px 0 #3d7a2e;
-        }
-        .dot-stars-tag {
-          font-size: 7px;
-          color: #facc15;
-          text-shadow: 1px 1px 0 #8b6914;
+        .dot-meta-chip strong {
+          color: #ffd700;
         }
 
         .dot-timer-wrap {
           background: #2c2137;
-          padding: 0 12px 6px;
+          padding: 0 16px 10px;
           box-shadow: 0 4px 0 #1a1425;
           position: relative;
           z-index: 2;
         }
         .dot-timer-bar {
-          height: 8px;
+          height: 10px;
           background: #1a1425;
           border: 2px solid #4a3f5c;
           overflow: hidden;
@@ -786,13 +743,12 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
         .dot-timer-text {
           text-align: center;
-          font-size: 9px;
+          font-size: 12px;
           color: #a89cc8;
-          margin: 3px 0 0;
+          margin: 6px 0 0;
           font-variant-numeric: tabular-nums;
         }
         .dot-timer-text.low { color: #e74c3c; animation: dot-blink 0.4s step-end infinite; }
-        .dot-timer-text.frozen { color: #4a90d9; }
 
         @keyframes dot-blink {
           0%, 49% { opacity: 1; }
@@ -803,9 +759,9 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          padding: 4px 8px;
-          min-height: 22px;
+          gap: 8px;
+          padding: 6px 10px;
+          min-height: 28px;
           flex-wrap: wrap;
           background: #2c2137;
           box-shadow: 0 4px 0 #1a1425;
@@ -813,8 +769,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           z-index: 2;
         }
         .dot-tag {
-          font-size: 7px;
-          padding: 2px 6px;
+          font-size: 8px;
+          padding: 4px 8px;
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
@@ -829,7 +785,7 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           min-height: 0;
           /* Pixel floor tile pattern */
           background:
-            repeating-conic-gradient(${floorLight} 0% 25%, ${floorDark} 0% 50%) 0 0 / 16px 16px;
+            repeating-conic-gradient(${floorLight} 0% 25%, ${floorDark} 0% 50%) 0 0 / 20px 20px;
         }
 
         .dot-grid {
@@ -847,58 +803,23 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         .dot-cell:active { transform: scale(0.88) !important; }
 
-        .dot-powerups {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 6px 12px;
-          background: #2c2137;
-          box-shadow: 0 -4px 0 #1a1425;
-          position: relative;
-          z-index: 2;
-        }
-        .dot-pw-btn {
-          flex: 1;
-          max-width: 110px;
-          padding: 6px 4px;
-          border: 2px solid #4a3f5c;
-          background: #3d2f50;
-          font-family: inherit;
-          font-size: 7px;
-          color: #d4c8e8;
-          cursor: pointer;
-          transition: all 0.1s step-end;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 2px;
-          -webkit-tap-highlight-color: transparent;
-          image-rendering: pixelated;
-        }
-        .dot-pw-btn:disabled { opacity: 0.3; cursor: default; }
-        .dot-pw-btn:not(:disabled):active { background: #5a4a70; border-color: #8a7aa0; }
-        .dot-pw-btn.active { border-color: #ffd700; background: #4a3f5c; }
-        .dot-pw-icon { font-size: 16px; line-height: 1; }
-        .dot-pw-cd { font-size: 6px; color: #7a6e94; }
-
         .dot-feedback {
-          min-height: 28px;
+          min-height: 40px;
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 4px 12px;
+          padding: 8px 12px;
           background: #2c2137;
         }
         .dot-fb-text {
-          font-size: 10px;
+          font-size: 12px;
           margin: 0;
           text-align: center;
           letter-spacing: 1px;
         }
         .dot-fb-text.correct { color: #6abf4b; animation: dot-fb-pop 0.25s step-end; }
         .dot-fb-text.wrong { color: #e74c3c; animation: dot-fb-shake 0.25s step-end; }
-        .dot-fb-text.neutral { color: #7a6e94; font-size: 8px; }
+        .dot-fb-text.neutral { color: #7a6e94; font-size: 9px; }
 
         @keyframes dot-fb-pop {
           0% { transform: scale(0.5); } 50% { transform: scale(1.4); } 100% { transform: scale(1); }
@@ -912,8 +833,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           align-items: center;
           justify-content: center;
           gap: 10px;
-          padding: 2px 12px;
-          font-size: 6px;
+          padding: 6px 12px;
+          font-size: 7px;
           color: #7a6e94;
           background: #2c2137;
         }
@@ -939,17 +860,6 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           100% { transform: translate(-50%, -50%) scale(1.0); opacity: 0; }
         }
 
-        .dot-freeze-border {
-          position: absolute; inset: 0;
-          border: 4px solid rgba(74,144,217,0.4);
-          pointer-events: none; z-index: 5;
-          animation: dot-freeze-blink 0.5s step-end infinite;
-        }
-        @keyframes dot-freeze-blink {
-          0%, 49% { border-color: rgba(74,144,217,0.4); }
-          50%, 100% { border-color: rgba(74,144,217,0.15); }
-        }
-
         /* Pixel sparkles */
         .dot-sparkle {
           position: absolute;
@@ -967,9 +877,9 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       `}</style>
 
       <ScanlineOverlay />
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={isFlashing} flashColor={flashColor} />
+      <ParticleRenderer particles={particles} />
+      <ScorePopupRenderer popups={scorePopups} />
 
       {/* Pixel sparkles */}
       {pixelSparkles.map(s => (
@@ -982,12 +892,14 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       {/* HUD */}
       <div className="dot-hud">
         <div className="dot-score-block">
+          <p className="dot-score-label">SCORE</p>
           <p className="dot-score">{score.toLocaleString()}</p>
-          <p className="dot-best">BEST {displayBest.toLocaleString()}</p>
         </div>
-        <div className="dot-hud-right">
-          <span className="dot-round-tag">R{round + 1} {gridSize}x{gridSize}</span>
-          {starsCollected > 0 && <span className="dot-stars-tag">* x{starsCollected}</span>}
+        <div className="dot-meta-row">
+          <span className="dot-meta-chip">BEST <strong>{displayBest.toLocaleString()}</strong></span>
+          <span className="dot-meta-chip">ROUND <strong>{round + 1}</strong></span>
+          <span className="dot-meta-chip">{gridSize}x{gridSize}</span>
+          {starsCollected > 0 && <span className="dot-meta-chip">STAR <strong>{starsCollected}</strong></span>}
         </div>
       </div>
 
@@ -996,8 +908,8 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         <div className="dot-timer-bar">
           <div className="dot-timer-fill" style={{ width: `${timerPct}%`, backgroundColor: timerColor }} />
         </div>
-        <p className={`dot-timer-text ${isLow ? 'low' : ''} ${isTimeFrozen ? 'frozen' : ''}`}>
-          {isTimeFrozen ? 'FROZEN ' : ''}{(remainingMs / 1000).toFixed(1)}
+        <p className={`dot-timer-text ${isLow ? 'low' : ''}`}>
+          {(remainingMs / 1000).toFixed(1)}
         </p>
       </div>
 
@@ -1013,9 +925,6 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             FEVER x{FEVER_SCORE_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}
           </span>
         )}
-        {isDoublePoints && (
-          <span className="dot-tag" style={{ color: '#c084fc', background: 'rgba(192,132,252,0.15)' }}>x2 PTS</span>
-        )}
         {streak >= 3 && !comboLabel && (
           <span className="dot-tag" style={{ color: '#6abf4b', background: 'rgba(106,191,75,0.15)' }}>
             STREAK {streak}
@@ -1030,7 +939,6 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
       {/* Arena */}
       <div className="dot-arena">
-        {isTimeFrozen && <div className="dot-freeze-border" />}
         <div
           className={`dot-grid ${roundAnim ? 'anim-enter' : ''}`}
           style={{
@@ -1045,7 +953,6 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
               cell={cell}
               size={cellSize}
               onClick={() => handleCellTap(i)}
-              isHinted={isHinting}
               isFever={isFever}
               hasStar={currentStar?.cellIndex === i}
               starCollected={currentStar?.collected ?? false}
@@ -1059,25 +966,6 @@ function OddOneOutGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         <span>PERFECT <strong>{perfectRounds}</strong></span>
         <span>ROUND <strong>{round + 1}</strong></span>
         <span>MODE <strong>{diffMode.toUpperCase()}</strong></span>
-      </div>
-
-      {/* Powerups */}
-      <div className="dot-powerups">
-        <button className={`dot-pw-btn ${isHinting ? 'active' : ''}`} type="button" onClick={activateHint} disabled={hintCooldownMs > 0}>
-          <span className="dot-pw-icon">?</span>
-          <span>HINT</span>
-          {hintCooldownMs > 0 && <span className="dot-pw-cd">{(hintCooldownMs / 1000).toFixed(0)}s</span>}
-        </button>
-        <button className={`dot-pw-btn ${isTimeFrozen ? 'active' : ''}`} type="button" onClick={activateFreeze} disabled={freezeCooldownMs > 0}>
-          <span className="dot-pw-icon">#</span>
-          <span>FREEZE</span>
-          {freezeCooldownMs > 0 && <span className="dot-pw-cd">{(freezeCooldownMs / 1000).toFixed(0)}s</span>}
-        </button>
-        <button className={`dot-pw-btn ${isDoublePoints ? 'active' : ''}`} type="button" onClick={activateDouble} disabled={doubleCooldownMs > 0}>
-          <span className="dot-pw-icon">x2</span>
-          <span>DOUBLE</span>
-          {doubleCooldownMs > 0 && <span className="dot-pw-cd">{(doubleCooldownMs / 1000).toFixed(0)}s</span>}
-        </button>
       </div>
 
       {/* Feedback */}

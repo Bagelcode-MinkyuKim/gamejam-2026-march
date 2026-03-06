@@ -70,6 +70,8 @@ const MILESTONE_BONUS = 100
 
 const SCORE_DISTANCE_MULTIPLIER = 0.14
 const GAME_TIMEOUT_MS = 120000
+const TIME_WARNING_MS = 30000
+const TIME_CRITICAL_MS = 10000
 
 // ─── Difficulty Phases ───
 interface DifficultyPhase {
@@ -185,8 +187,8 @@ function createInitialModel(): GameModel {
     currentPhase: 0,
     flipCount: 0,
     nearMissCount: 0,
-    statusText: 'Tap to flip gravity!',
-    statusTimer: 3000,
+    statusText: '',
+    statusTimer: 0,
   }
 }
 
@@ -246,7 +248,19 @@ function createSfxPool(url: string, poolSize = 3): { play: (vol: number, rate?: 
 }
 
 function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const effects = useGameEffects({ maxParticles: 50 })
+  const {
+    particles,
+    scorePopups,
+    isFlashing,
+    flashColor,
+    spawnParticles,
+    triggerShake,
+    triggerFlash,
+    showScorePopup,
+    updateParticles,
+    cleanup,
+    getShakeStyle,
+  } = useGameEffects({ maxParticles: 50 })
   const [renderModel, setRenderModel] = useState<GameModel>(() => createInitialModel())
 
   const modelRef = useRef<GameModel>(renderModel)
@@ -274,12 +288,12 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     model.statusTimer = 99999
     sfxRef.current?.crash.play(0.7, 0.95)
 
-    effects.triggerShake(6)
-    effects.triggerFlash('rgba(239,68,68,0.5)')
+    triggerShake(6)
+    triggerFlash('rgba(239,68,68,0.5)')
 
     const finalDurationMs = model.elapsedMs > 0 ? Math.round(model.elapsedMs) : Math.round(DEFAULT_FRAME_MS)
     onFinish({ score: model.score, durationMs: finalDurationMs })
-  }, [onFinish, effects])
+  }, [onFinish, triggerFlash, triggerShake])
 
   const handleFlip = useCallback(() => {
     if (finishedRef.current) return
@@ -298,8 +312,8 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       shield: createSfxPool(shieldSfxUrl),
       fever: createSfxPool(feverSfxUrl),
     }
-    return () => { effects.cleanup() }
-  }, [])
+    return () => { cleanup() }
+  }, [cleanup])
 
   // Input handlers
   useEffect(() => {
@@ -347,7 +361,7 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         m.statusText = `${DIFFICULTY_PHASES[newPhase].name} MODE!`
         m.statusTimer = 2000
         sfx?.milestone.play(0.5, 1.1)
-        effects.triggerFlash('rgba(139,92,246,0.3)')
+        triggerFlash('rgba(139,92,246,0.3)')
       }
       const phase = DIFFICULTY_PHASES[m.currentPhase]
 
@@ -365,7 +379,7 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         m.playerVy = -m.gravityDirection * FLIP_IMPULSE
         m.flipCount++
         sfx?.flip.play(0.4, 1 + Math.random() * 0.15)
-        effects.spawnParticles(3, 50, 50)
+        spawnParticles(3, 50, 50)
       }
 
       // Physics (percentage-based Y)
@@ -476,7 +490,7 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           m.speedBoostActiveMs = SPEED_ZONE_DURATION_MS
           m.statusText = 'SPEED BOOST!'
           m.statusTimer = 1500
-          effects.triggerFlash('rgba(34,197,94,0.3)')
+          triggerFlash('rgba(34,197,94,0.3)')
         }
       }
 
@@ -518,8 +532,8 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           m.statusText = 'SHIELD BROKEN!'
           m.statusTimer = 1500
           sfx?.shield.play(0.5, 0.8)
-          effects.triggerShake(3)
-          effects.triggerFlash('rgba(59,130,246,0.3)')
+          triggerShake(3)
+          triggerFlash('rgba(59,130,246,0.3)')
           // Remove the obstacle that was hit
           m.obstacles = m.obstacles.filter(ob => {
             const obY = ob.fromTop ? PLAY_TOP_PCT : PLAY_BOTTOM_PCT - ob.heightPct
@@ -527,8 +541,8 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           })
         } else {
           m.score = computeScore(m)
-          effects.triggerShake(6)
-          effects.triggerFlash('rgba(239,68,68,0.5)')
+          triggerShake(6)
+          triggerFlash('rgba(239,68,68,0.5)')
           setRenderModel({ ...m })
           finishRound()
           return
@@ -537,8 +551,8 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       if (nearMiss) {
         m.nearMissCount++
-        effects.showScorePopup(25, 200, 300, '#a78bfa')
-        effects.spawnParticles(2, 100, 200)
+        showScorePopup(25, 200, 300, '#a78bfa')
+        spawnParticles(2, 100, 200)
       }
 
       // Coin collection
@@ -561,11 +575,11 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       if (didCollectCoin) {
         sfx?.coin.play(0.5, 1.1 + m.coinCombo * 0.06)
-        effects.triggerFlash('rgba(251,191,36,0.15)')
-        effects.spawnParticles(4, 80, 150)
+        triggerFlash('rgba(251,191,36,0.15)')
+        spawnParticles(4, 80, 150)
         if (m.coinCombo >= 3) {
           sfx?.combo.play(0.4, 1 + m.coinCombo * 0.05)
-          effects.showScorePopup(m.coinCombo, 200, 250, getComboColor(m.coinCombo))
+          showScorePopup(m.coinCombo, 200, 250, getComboColor(m.coinCombo))
         }
       }
 
@@ -576,8 +590,8 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         m.statusText = 'FEVER MODE!'
         m.statusTimer = 2000
         sfx?.fever.play(0.6)
-        effects.triggerFlash('rgba(234,179,8,0.4)')
-        effects.spawnParticles(12, 200, 300)
+        triggerFlash('rgba(234,179,8,0.4)')
+        spawnParticles(12, 200, 300)
       }
 
       // Powerup collection
@@ -595,13 +609,13 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
             m.statusText = 'SHIELD ON!'
             m.statusTimer = 1500
             sfx?.shield.play(0.5)
-            effects.triggerFlash('rgba(59,130,246,0.3)')
+            triggerFlash('rgba(59,130,246,0.3)')
           } else if (p.type === 'double-coin') {
             m.doubleCoinActiveMs = DOUBLE_COIN_DURATION_MS
             m.statusText = 'DOUBLE COINS!'
             m.statusTimer = 1500
             sfx?.coin.play(0.5, 1.4)
-            effects.triggerFlash('rgba(234,179,8,0.3)')
+            triggerFlash('rgba(234,179,8,0.3)')
           }
         }
       }
@@ -614,13 +628,13 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         m.statusText = `MILESTONE ${currentMilestone}! +${MILESTONE_BONUS}`
         m.statusTimer = 2000
         sfx?.milestone.play(0.5)
-        effects.spawnParticles(6, 200, 100)
-        effects.triggerFlash('rgba(168,85,247,0.25)')
+        spawnParticles(6, 200, 100)
+        triggerFlash('rgba(168,85,247,0.25)')
       }
 
       m.score = computeScore(m)
       setRenderModel({ ...m })
-      effects.updateParticles()
+      updateParticles()
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
 
@@ -632,18 +646,23 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       }
       lastFrameAtRef.current = null
     }
-  }, [finishRound, effects])
+  }, [finishRound, showScorePopup, spawnParticles, triggerFlash, triggerShake, updateParticles])
 
   const displayedBestScore = useMemo(() => Math.max(bestScore, renderModel.score), [bestScore, renderModel.score])
   const isGravityUp = renderModel.gravityDirection === -1
   const isFever = renderModel.feverActiveMs > 0
   const comboLabel = renderModel.coinCombo >= 3 ? getComboLabel(renderModel.coinCombo) : null
+  const remainingMs = Math.max(0, GAME_TIMEOUT_MS - renderModel.elapsedMs)
+  const remainingSeconds = Math.ceil(remainingMs / 1000)
+  const timeRatio = clamp(remainingMs / GAME_TIMEOUT_MS, 0, 1)
+  const isTimeWarning = remainingMs <= TIME_WARNING_MS
+  const isTimeCritical = remainingMs <= TIME_CRITICAL_MS
 
   return (
     <section
       className={`mini-game-panel gravity-flip-panel ${isFever ? 'gf-fever' : ''}`}
       aria-label="gravity-flip-game"
-      style={{ position: 'relative', maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}
+      style={{ position: 'relative', maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', ...getShakeStyle() }}
     >
       <div
         className="gf-stage"
@@ -724,34 +743,50 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
         {/* Player */}
         <div className={`gf-player-wrap ${renderModel.shieldActiveMs > 0 ? 'shielded' : ''}`} style={{
-          left: `${PLAYER_X_PCT - PLAYER_SIZE_PCT / 2}%`,
-          top: `${renderModel.playerY - PLAYER_SIZE_PCT / 2}%`,
-          width: `${PLAYER_SIZE_PCT}%`,
+          left: `${PLAYER_X_PCT}%`,
+          top: `${renderModel.playerY}%`,
           height: `${PLAYER_SIZE_PCT}%`,
+          aspectRatio: '1 / 1',
+          transform: 'translate(-50%, -50%)',
         }}>
           <img
             className="gf-player"
             src={parkWankyuSprite}
             alt="player"
-            style={{ transform: isGravityUp ? 'scaleY(-1)' : 'none' }}
+            style={{ transform: isGravityUp ? 'scaleY(-1)' : 'scaleY(1)' }}
           />
           {renderModel.shieldActiveMs > 0 && <div className="gf-shield-bubble" />}
         </div>
 
-        {/* HUD */}
-        <div className="gf-hud">
-          <p className="gf-score">{renderModel.score}</p>
-          <p className="gf-best">BEST {displayedBestScore}</p>
-          <div className="gf-meta-row">
-            <span className="gf-coins-label">{renderModel.coinsCollected} coins</span>
-            {renderModel.coinCombo > 0 && <span className="gf-combo">x{(1 + renderModel.coinCombo * 0.25).toFixed(1)}</span>}
-          </div>
-          <p className="gf-time">{(renderModel.elapsedMs / 1000).toFixed(1)}s</p>
+        <div className="gf-timer-track" aria-hidden>
+          <div
+            className={`gf-timer-fill ${isTimeWarning ? 'warning' : ''} ${isTimeCritical ? 'critical' : ''}`}
+            style={{ width: `${timeRatio * 100}%` }}
+          />
         </div>
 
-        {/* Phase indicator */}
-        <div className="gf-phase-badge">
-          {DIFFICULTY_PHASES[renderModel.currentPhase].name}
+        {/* HUD */}
+        <div className="gf-hud">
+          <div className="gf-score-block">
+            <p className="gf-score-label">SCORE</p>
+            <p className="gf-score">{renderModel.score.toLocaleString()}</p>
+            <p className="gf-best">BEST {displayedBestScore.toLocaleString()}</p>
+            <div className="gf-meta-row">
+              <span className="gf-coins-label">COINS {renderModel.coinsCollected}</span>
+              {renderModel.coinCombo > 0 && <span className="gf-combo">MULTI x{(1 + renderModel.coinCombo * 0.25).toFixed(1)}</span>}
+            </div>
+          </div>
+
+          <div className="gf-hud-side">
+            <div className={`gf-timer-card ${isTimeWarning ? 'warning' : ''} ${isTimeCritical ? 'critical' : ''}`}>
+              <span className="gf-timer-label">TIME LEFT</span>
+              <strong className="gf-timer-value">{remainingSeconds}s</strong>
+            </div>
+
+            <div className="gf-phase-badge">
+              {DIFFICULTY_PHASES[renderModel.currentPhase].name}
+            </div>
+          </div>
         </div>
 
         {/* Active powerup indicators */}
@@ -785,42 +820,13 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           <p className="gf-status">{renderModel.statusText}</p>
         )}
 
-        <p className="gf-tap-hint">Tap to flip gravity</p>
-
         {/* Fever overlay */}
         {isFever && <div className="gf-fever-overlay" />}
-
-        {/* Action buttons */}
-        <div className="gf-actions">
-          <button
-            className="gf-btn"
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              if (!finishedRef.current) {
-                finishedRef.current = true
-                const m = modelRef.current
-                m.score = computeScore(m)
-                onFinish({ score: m.score, durationMs: Math.max(Math.round(m.elapsedMs), Math.round(DEFAULT_FRAME_MS)) })
-              }
-            }}
-          >
-            FINISH
-          </button>
-          <button
-            className="gf-btn ghost"
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onExit}
-          >
-            EXIT
-          </button>
-        </div>
       </div>
       <style>{GAME_EFFECTS_CSS}</style>
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={isFlashing} flashColor={flashColor} />
+      <ParticleRenderer particles={particles} />
+      <ScorePopupRenderer popups={scorePopups} />
     </section>
   )
 }
@@ -829,7 +835,7 @@ export const gravityFlipModule: MiniGameModule = {
   manifest: {
     id: 'gravity-flip',
     title: 'Gravity Flip',
-    description: 'Flip gravity to dodge obstacles! Collect coins & powerups!',
+    description: 'Flip gravity, dodge the red walls, and survive for 120 seconds. Collect coins and power-ups to boost your score.',
     unlockCost: 45,
     baseReward: 15,
     scoreRewardMultiplier: 1.2,

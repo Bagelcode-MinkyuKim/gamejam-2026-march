@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
-import characterImage from '../../../assets/images/same-character/park-sangmin.png'
 import dcPerfectSfx from '../../../assets/sounds/drum-circle-perfect.mp3'
 import dcGoodSfx from '../../../assets/sounds/drum-circle-good.mp3'
 import dcMissSfx from '../../../assets/sounds/drum-circle-miss.mp3'
@@ -11,52 +10,45 @@ import dcComboSfx from '../../../assets/sounds/drum-circle-combo.mp3'
 import dcGoldenSfx from '../../../assets/sounds/drum-circle-golden.mp3'
 import dcDrumrollSfx from '../../../assets/sounds/drum-circle-drumroll.mp3'
 import dcSpeedRushSfx from '../../../assets/sounds/drum-circle-speedrush.mp3'
+import drumCircleBgmLoop from '../../../assets/sounds/generated/drum-circle/drum-circle-bgm-loop.mp3'
 import dsTimeWarnSfx from '../../../assets/sounds/dance-step-time-warning.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import { getActiveBgmTrack, playBackgroundAudio as playSharedBgm, stopBackgroundAudio as stopSharedBgm } from '../../gui/sound-manager'
+import {
+  computeBpm,
+  computeDifficultyLevel,
+  computeJudgmentWindows,
+  FEVER_COMBO_THRESHOLD,
+  FEVER_DURATION_MS,
+  FEVER_MULTIPLIER,
+  GOLDEN_NOTE_MULTIPLIER,
+  GOOD_SCORE,
+  HIT_LINE_Y,
+  HOLD_NOTE_BONUS,
+  LANE_COUNT,
+  LOW_TIME_THRESHOLD_MS,
+  NOTE_SPAWN_Y,
+  noteYPosition,
+  PERFECT_SCORE,
+  ROUND_DURATION_MS,
+  schedulePattern,
+  SPEED_RUSH_BPM_BOOST,
+  SPEED_RUSH_CHANCE,
+  SPEED_RUSH_DURATION_MS,
+  SPEED_RUSH_ELAPSED_MS,
+  type DrumCircleNote as Note,
+  generatePattern,
+} from './logic'
 
-const ROUND_DURATION_MS = 30000
-const LANE_COUNT = 4
-const PERFECT_WINDOW_MS = 50
-const GOOD_WINDOW_MS = 120
-const PERFECT_SCORE = 3
-const GOOD_SCORE = 1
-const FEVER_COMBO_THRESHOLD = 20
-const FEVER_DURATION_MS = 8000
-const FEVER_MULTIPLIER = 3
-const GOLDEN_NOTE_CHANCE = 0.08
-const GOLDEN_NOTE_MULTIPLIER = 3
-const HOLD_NOTE_ELAPSED_MS = 12000
-const HOLD_NOTE_CHANCE = 0.18
-const HOLD_NOTE_BONUS = 5
-const HIT_LINE_Y = 0.85
-const NOTE_SPAWN_Y = -0.05
-const INITIAL_BPM = 100
-const MAX_BPM = 200
-const BPM_INCREASE_PER_SECOND = 3.2
-const NOTE_TRAVEL_DURATION_MS = 1800
-const LOW_TIME_THRESHOLD_MS = 5000
 const FLASH_DURATION_MS = 200
 const JUDGMENT_DISPLAY_MS = 400
-const SPEED_RUSH_ELAPSED_MS = 15000
-const SPEED_RUSH_CHANCE = 0.02
-const SPEED_RUSH_DURATION_MS = 4000
-const SPEED_RUSH_BPM_BOOST = 40
 const DRUMROLL_WINDOW_MS = 800
 const DRUMROLL_MIN_TAPS = 4
 const DRUMROLL_BONUS_PER_TAP = 2
+const DRUM_CIRCLE_BGM_VOLUME = 0.24
 
 const LANE_COLORS = ['#ff2222', '#22ff44', '#2266ff', '#ffaa00'] as const
 const LANE_LABELS = ['A', 'S', 'D', 'F'] as const
-
-interface Note {
-  readonly id: number
-  readonly lane: number
-  readonly targetTimeMs: number
-  readonly isGolden: boolean
-  readonly isHold: boolean
-  alive: boolean
-  judged: boolean
-}
 
 type JudgmentKind = 'perfect' | 'good' | 'miss'
 
@@ -64,31 +56,6 @@ interface JudgmentDisplay {
   readonly kind: JudgmentKind
   readonly lane: number
   readonly expiresAt: number
-}
-
-function computeBpm(elapsedMs: number, rushBoost: number): number {
-  return Math.min(MAX_BPM, INITIAL_BPM + (elapsedMs / 1000) * BPM_INCREASE_PER_SECOND + rushBoost)
-}
-
-function generatePattern(bpm: number, elapsedMs: number): number[] {
-  const pattern: number[] = []
-  for (let beat = 0; beat < 4; beat += 1) {
-    const laneCount = beat === 0 || beat === 2 ? 1 : Math.random() < 0.3 ? 2 : 1
-    const used = new Set<number>()
-    for (let n = 0; n < laneCount; n += 1) {
-      let lane: number
-      do { lane = Math.floor(Math.random() * LANE_COUNT) } while (used.has(lane))
-      used.add(lane)
-      pattern.push(elapsedMs > HOLD_NOTE_ELAPSED_MS && Math.random() < HOLD_NOTE_CHANCE ? lane + 100 : lane)
-    }
-    if (beat < 3 && bpm > 130 && Math.random() < 0.25) pattern.push(Math.floor(Math.random() * LANE_COUNT) + LANE_COUNT)
-  }
-  return pattern
-}
-
-function noteYPosition(currentMs: number, targetMs: number): number {
-  const progress = 1 - (targetMs - currentMs) / NOTE_TRAVEL_DURATION_MS
-  return NOTE_SPAWN_Y + progress * (HIT_LINE_Y - NOTE_SPAWN_Y)
 }
 
 function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
@@ -101,7 +68,7 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [missCount, setMissCount] = useState(0)
   const [judgmentDisplays, setJudgmentDisplays] = useState<JudgmentDisplay[]>([])
   const [notes, setNotes] = useState<Note[]>([])
-  const [currentBpm, setCurrentBpm] = useState(INITIAL_BPM)
+  const [currentBpm, setCurrentBpm] = useState(() => computeBpm(0, 0))
   const [laneFlash, setLaneFlash] = useState<(number | null)[]>(() => Array(LANE_COUNT).fill(null))
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
@@ -134,12 +101,17 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const drumrollCountRef = useRef(0)
 
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
+  const stageRef = useRef<HTMLDivElement | null>(null)
 
   const playAudio = useCallback((key: string, vol: number, rate = 1) => {
     const a = audioRefs.current[key]
     if (!a) return
     a.currentTime = 0; a.volume = vol; a.playbackRate = rate
     void a.play().catch(() => {})
+  }, [])
+
+  const ensureBgm = useCallback(() => {
+    playSharedBgm(drumCircleBgmLoop, DRUM_CIRCLE_BGM_VOLUME)
   }, [])
 
   const showJudgment = useCallback((kind: JudgmentKind, lane: number) => {
@@ -152,6 +124,19 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     setTimeout(() => {
       setLaneFlash((prev) => { const n = [...prev]; if (n[lane] !== null && performance.now() - n[lane]! > FLASH_DURATION_MS * 0.8) n[lane] = null; return n })
     }, FLASH_DURATION_MS)
+  }, [])
+
+  const getLaneEffectPosition = useCallback((lane: number) => {
+    const stage = stageRef.current
+    if (stage === null) {
+      return { x: 52 + lane * 84, y: 380 }
+    }
+
+    const laneWidth = stage.clientWidth / LANE_COUNT
+    return {
+      x: stage.offsetLeft + laneWidth * (lane + 0.5),
+      y: stage.offsetTop + stage.clientHeight * (HIT_LINE_Y - 0.05),
+    }
   }, [])
 
   const finishGame = useCallback(() => {
@@ -178,7 +163,9 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       } else { drumrollCountRef.current = 0; setDrumrollCount(0) }
 
       const currentElapsed = elapsedMsRef.current
+      const { perfectMs, goodMs } = computeJudgmentWindows(currentElapsed)
       const activeNotes = notesRef.current.filter((n) => n.alive && !n.judged && n.lane === lane)
+      const { x: laneX, y: laneY } = getLaneEffectPosition(lane)
 
       if (activeNotes.length === 0) {
         comboRef.current = 0; setCombo(0)
@@ -194,7 +181,7 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         if (diff < closestDiff) { closestDiff = diff; closest = note }
       }
 
-      if (!closest || closestDiff > GOOD_WINDOW_MS) {
+      if (!closest || closestDiff > goodMs) {
         comboRef.current = 0; setCombo(0)
         missCountRef.current += 1; setMissCount(missCountRef.current)
         showJudgment('miss', lane); playAudio('miss', 0.35); effects.triggerShake(3)
@@ -202,9 +189,8 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       }
 
       closest.judged = true; closest.alive = false
-      const laneX = 30 + lane * 95
 
-      if (closestDiff <= PERFECT_WINDOW_MS) {
+      if (closestDiff <= perfectMs) {
         const nc = comboRef.current + 1; comboRef.current = nc; setCombo(nc)
         if (nc > maxComboRef.current) { maxComboRef.current = nc; setMaxCombo(nc) }
         const cb = Math.floor(nc / 10)
@@ -216,7 +202,7 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         perfectCountRef.current += 1; setPerfectCount(perfectCountRef.current)
         showJudgment('perfect', lane)
         if (closest.isGolden) {
-          playAudio('golden', 0.6); effects.triggerFlash('rgba(255,170,0,0.4)'); effects.spawnParticles(6, laneX, 300)
+          playAudio('golden', 0.6); effects.triggerFlash('rgba(255,170,0,0.4)'); effects.spawnParticles(6, laneX, laneY)
         } else { playAudio('perfect', 0.55, 1.0 + nc * 0.005) }
         if (nc >= FEVER_COMBO_THRESHOLD && !feverRef.current) {
           feverRef.current = true; feverRemainingMsRef.current = FEVER_DURATION_MS
@@ -226,7 +212,7 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         if (nc >= 10 && nc % 10 === 0 && nc > comboMilestoneRef.current) {
           comboMilestoneRef.current = nc; playAudio('combo', 0.5, 1 + (nc / 50) * 0.3)
         }
-        effects.comboHitBurst(laneX, 300, nc, earned)
+        effects.comboHitBurst(laneX, laneY, nc, earned)
       } else {
         const nc = comboRef.current + 1; comboRef.current = nc; setCombo(nc)
         if (nc > maxComboRef.current) { maxComboRef.current = nc; setMaxCombo(nc) }
@@ -236,10 +222,10 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         scoreRef.current += earned; setScore(scoreRef.current)
         goodCountRef.current += 1; setGoodCount(goodCountRef.current)
         showJudgment('good', lane); playAudio('good', 0.45)
-        effects.spawnParticles(3, laneX, 300); effects.showScorePopup(earned, laneX, 280)
+        effects.spawnParticles(3, laneX, laneY); effects.showScorePopup(earned, laneX, laneY - 28)
       }
     },
-    [flashLane, playAudio, showJudgment],
+    [flashLane, getLaneEffectPosition, playAudio, showJudgment],
   )
 
   useEffect(() => {
@@ -255,6 +241,15 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   }, [handleLaneHit, onExit])
 
   useEffect(() => {
+    ensureBgm()
+    return () => {
+      if (getActiveBgmTrack() === drumCircleBgmLoop) {
+        stopSharedBgm()
+      }
+    }
+  }, [ensureBgm])
+
+  useEffect(() => {
     const srcs: Record<string, string> = {
       perfect: dcPerfectSfx, good: dcGoodSfx, miss: dcMissSfx,
       fever: dcFeverSfx, combo: dcComboSfx, golden: dcGoldenSfx,
@@ -262,11 +257,18 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       timewarn: dsTimeWarnSfx, gameover: gameOverHitSfx,
     }
     for (const [k, s] of Object.entries(srcs)) { const a = new Audio(s); a.preload = 'auto'; audioRefs.current[k] = a }
-    return () => { audioRefs.current = {}; effects.cleanup() }
+    return () => {
+      for (const audio of Object.values(audioRefs.current)) {
+        audio?.pause()
+        if (audio) audio.currentTime = 0
+      }
+      audioRefs.current = {}
+      effects.cleanup()
+    }
   }, [])
 
   useEffect(() => {
-    nextPatternTimeRef.current = NOTE_TRAVEL_DURATION_MS
+    nextPatternTimeRef.current = 0
     const step = (now: number) => {
       if (finishedRef.current) { animationFrameRef.current = null; return }
       if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
@@ -298,23 +300,21 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       } else lowTimeSecondRef.current = null
 
       // Spawn
-      if (elapsed >= nextPatternTimeRef.current) {
-        const beatMs = 60000 / bpm
-        const pattern = generatePattern(bpm, elapsed)
-        const start = nextPatternTimeRef.current
-        let bi = 0
-        for (const entry of pattern) {
-          const isHold = entry >= 100; const isOff = !isHold && entry >= LANE_COUNT
-          const lane = isHold ? entry - 100 : isOff ? entry - LANE_COUNT : entry
-          const offset = isOff ? bi * beatMs - beatMs * 0.5 : bi * beatMs
-          notesRef.current.push({
-            id: nextNoteIdRef.current++, lane, targetTimeMs: start + offset,
-            isGolden: !isHold && Math.random() < GOLDEN_NOTE_CHANCE, isHold,
-            alive: true, judged: false,
-          })
-          if (!isOff && !isHold) bi += 1
-        }
-        nextPatternTimeRef.current = start + 4 * beatMs
+      while (elapsed >= nextPatternTimeRef.current) {
+        const patternElapsed = nextPatternTimeRef.current
+        const patternBpm = computeBpm(patternElapsed, rushBoost)
+        const pattern = generatePattern(patternBpm, patternElapsed)
+        const scheduled = schedulePattern({
+          pattern,
+          bpm: patternBpm,
+          elapsedMs: patternElapsed,
+          spawnTimeMs: nextPatternTimeRef.current,
+          nextNoteId: nextNoteIdRef.current,
+        })
+        notesRef.current = [...notesRef.current, ...scheduled.notes]
+          .sort((left, right) => left.targetTimeMs - right.targetTimeMs || left.lane - right.lane)
+        nextNoteIdRef.current = scheduled.nextNoteId
+        nextPatternTimeRef.current = scheduled.nextPatternSpawnTimeMs
       }
 
       // Fever
@@ -325,7 +325,8 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       }
 
       // Miss expired
-      const missW = GOOD_WINDOW_MS + 80
+      const { goodMs } = computeJudgmentWindows(elapsed)
+      const missW = goodMs + 80
       for (const note of notesRef.current) {
         if (note.alive && !note.judged && elapsed > note.targetTimeMs + missW) {
           note.alive = false; note.judged = true
@@ -348,23 +349,43 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const elapsedMs = ROUND_DURATION_MS - remainingMs
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
+  const difficultyLevel = computeDifficultyLevel(elapsedMs)
   const activeJudgments = useMemo(() => {
     const now = performance.now()
     return judgmentDisplays.filter((j) => j.expiresAt > now)
   }, [judgmentDisplays, notes])
-  const bpmLevel = currentBpm < 120 ? 1 : currentBpm < 150 ? 2 : currentBpm < 180 ? 3 : 4
 
   return (
-    <section className={`mini-game-panel dc-panel ${isFever ? 'dc-fever' : ''} ${isSpeedRush ? 'dc-rush' : ''}`} aria-label="drum-circle-game" style={{ ...effects.getShakeStyle() }}>
+    <section
+      className={`mini-game-panel drum-circle-panel dc-panel ${isFever ? 'dc-fever' : ''} ${isSpeedRush ? 'dc-rush' : ''}`}
+      aria-label="drum-circle-game"
+      style={{
+        width: '100%',
+        maxWidth: '432px',
+        height: '100%',
+        minHeight: 0,
+        margin: '0 auto',
+        padding: 0,
+        overflow: 'hidden',
+        position: 'relative',
+        ...effects.getShakeStyle(),
+      }}
+    >
       <style>{GAME_EFFECTS_CSS}{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
         .dc-panel {
-          display: flex; flex-direction: column; height: 100%;
-          background: #0a0a0a;
+          --dc-accent: #ff7b27;
+          --dc-accent-soft: #ffd278;
+          --dc-panel-line: rgba(255, 123, 39, 0.2);
+          display: flex; flex-direction: column; align-items: stretch; width: 100%; height: 100%;
+          background:
+            radial-gradient(circle at 50% -10%, rgba(255, 123, 39, 0.24), transparent 42%),
+            linear-gradient(180deg, #180b08 0%, #090909 100%);
           font-family: 'Press Start 2P', monospace;
           user-select: none; -webkit-user-select: none;
           touch-action: manipulation;
           position: relative; overflow: hidden; image-rendering: pixelated;
+          padding: 0 !important;
         }
         .dc-panel::before {
           content: ''; position: absolute; inset: 0; z-index: 50; pointer-events: none;
@@ -375,43 +396,87 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .dc-panel.dc-rush { border: 3px solid #ff6600; animation: dc-rush-fx 0.3s steps(2) infinite; }
         @keyframes dc-fever-fx { 0% { background: #1a0a00; } 50% { background: #0a0a0a; } }
         @keyframes dc-rush-fx { 0% { border-color: #ff6600; } 50% { border-color: #ff0000; } }
-        .dc-hdr { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 3px solid #333; flex-shrink: 0; background: #111; }
-        .dc-hdr-left { display: flex; align-items: center; gap: 6px; }
-        .dc-avatar { width: 32px; height: 32px; border: 2px solid #ff6600; image-rendering: pixelated; object-fit: cover; }
-        .dc-score { font-size: 16px; color: #ff6600; margin: 0; line-height: 1.2; }
-        .dc-best { font-size: 6px; color: #886644; margin: 0; }
-        .dc-hdr-right { text-align: right; }
-        .dc-time { font-size: 14px; color: #eee; margin: 0; font-variant-numeric: tabular-nums; }
+        .dc-hdr {
+          display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px;
+          padding: 18px 18px 14px; border-bottom: 3px solid var(--dc-panel-line); flex-shrink: 0;
+          width: 100%; align-self: stretch;
+          background: linear-gradient(180deg, rgba(26, 13, 9, 0.95), rgba(11, 11, 11, 0.92));
+        }
+        .dc-hdr-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+        .dc-hdr-side.right { align-items: flex-end; }
+        .dc-hdr-caption { font-size: 11px; color: #d2a37c; margin: 0; }
+        .dc-time { font-size: 30px; color: #f7f5ef; margin: 0; font-variant-numeric: tabular-nums; line-height: 1; }
         .dc-time.low { color: #ff3333; animation: dc-blink 0.5s steps(2) infinite; }
         @keyframes dc-blink { 50% { opacity: 0; } }
-        .dc-bpm { font-size: 7px; color: #ff6600; padding: 1px 4px; border: 1px solid #ff6600; margin-top: 2px; display: inline-block; }
-        .dc-status { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 3px 8px; font-size: 7px; color: #aaa; flex-shrink: 0; border-bottom: 2px solid #222; }
-        .dc-status p { margin: 0; } .dc-status strong { color: #fff; }
+        .dc-score-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
+        .dc-score-label { margin: 0; font-size: 11px; color: #ffddb7; }
+        .dc-score { font-size: 40px; color: #fff2c6; margin: 0; line-height: 1; text-shadow: 0 0 12px rgba(255, 123, 39, 0.32); }
+        .dc-best { font-size: 11px; color: #ffb77a; margin: 0; }
+        .dc-chip {
+          display: inline-flex; align-items: center; justify-content: center;
+          min-height: 38px; padding: 8px 12px; border: 2px solid rgba(255, 123, 39, 0.5);
+          border-radius: 999px; color: #fff5e3; background: rgba(255, 123, 39, 0.12); font-size: 11px;
+        }
+        .dc-chip.level { color: #ffd278; }
+        .dc-status {
+          display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px;
+          padding: 12px 10px; font-size: 12px; color: #e5d7c6; flex-shrink: 0; border-bottom: 2px solid #1c1c1c;
+          width: 100%; align-self: stretch;
+        }
+        .dc-pill { margin: 0; padding: 9px 12px; border-radius: 999px; background: rgba(255,255,255,0.05); border: 2px solid rgba(255,255,255,0.08); }
+        .dc-pill strong { color: #fff; }
         .dc-fever-tag { color: #ffcc00; animation: dc-blink 0.3s steps(2) infinite; }
-        .dc-rush-tag { color: #ff6600; animation: dc-blink 0.25s steps(2) infinite; font-size: 7px; }
-        .dc-drumroll-tag { color: #ffaa00; font-size: 7px; animation: dc-blink 0.2s steps(2) infinite; }
-        .dc-stats { display: flex; justify-content: center; gap: 10px; padding: 0 8px 2px; font-size: 7px; flex-shrink: 0; }
-        .dc-stat { font-weight: 700; } .dc-stat.p { color: #ffcc00; } .dc-stat.g { color: #22ff44; } .dc-stat.m { color: #ff2222; }
+        .dc-rush-tag { color: #ff6600; animation: dc-blink 0.25s steps(2) infinite; }
+        .dc-drumroll-tag { color: #ffaa00; animation: dc-blink 0.2s steps(2) infinite; }
+        .dc-stats {
+          display: flex; justify-content: center; gap: 8px; padding: 0 10px 12px;
+          font-size: 12px; flex-shrink: 0;
+          width: 100%; align-self: stretch;
+        }
+        .dc-stat {
+          min-width: 82px; text-align: center; padding: 10px 12px; border-radius: 16px;
+          background: rgba(255,255,255,0.05); border: 2px solid rgba(255,255,255,0.08); font-weight: 700;
+        }
+        .dc-stat.p { color: #ffcc00; } .dc-stat.g { color: #22ff44; } .dc-stat.m { color: #ff6666; }
         .dc-stage {
           position: relative; flex: 1; margin: 0 4px;
-          background: repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 25%), repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 20px), #0a0a0a;
-          border: 3px solid #333; overflow: hidden; min-height: 0;
+          background:
+            linear-gradient(180deg, rgba(255, 123, 39, 0.08), transparent 18%),
+            repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 28px),
+            repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 24px), #0a0a0a;
+          width: auto; align-self: stretch; border: 3px solid rgba(255, 123, 39, 0.22); border-radius: 18px; overflow: hidden; min-height: 0;
+          box-shadow: inset 0 0 0 2px rgba(255,255,255,0.04), 0 0 24px rgba(255, 123, 39, 0.1);
         }
         .dc-lanes { display: flex; height: 100%; }
-        .dc-lane { flex: 1; position: relative; border-right: 2px solid rgba(255,255,255,0.04); transition: none; }
+        .dc-lane { flex: 1; position: relative; border-right: 1px solid rgba(255,255,255,0.05); transition: none; }
         .dc-lane.flash { background: rgba(255,255,255,0.12); }
-        .dc-note { position: absolute; left: 50%; transform: translateX(-50%); width: 36px; height: 12px; box-shadow: 2px 2px 0 rgba(0,0,0,0.6); }
-        .dc-note.golden { animation: dc-gold-fx 0.4s steps(2) infinite; box-shadow: 0 0 6px #ffaa00, 2px 2px 0 rgba(0,0,0,0.6); }
-        .dc-note.hold { height: 20px; width: 40px; border: 2px solid rgba(255,255,255,0.5); }
+        .dc-note {
+          position: absolute; left: 50%; transform: translateX(-50%);
+          width: min(84px, calc(100% - 8px)); height: 24px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.18);
+          box-shadow: 0 0 16px rgba(0,0,0,0.3), 2px 3px 0 rgba(0,0,0,0.6);
+        }
+        .dc-note.golden { animation: dc-gold-fx 0.4s steps(2) infinite; box-shadow: 0 0 10px #ffaa00, 2px 3px 0 rgba(0,0,0,0.6); }
+        .dc-note.hold { height: 42px; width: min(92px, calc(100% - 6px)); border: 2px solid rgba(255,255,255,0.5); }
         @keyframes dc-gold-fx { 50% { filter: brightness(1.8); } }
-        .dc-hitline { position: absolute; left: 0; right: 0; height: 4px; background: #ff6600; pointer-events: none; box-shadow: 0 0 8px #ff6600; }
-        .dc-jdg { position: absolute; top: 70%; left: 50%; transform: translateX(-50%); font-size: 8px; font-weight: 800; pointer-events: none; animation: dc-jdg-pop 0.4s steps(4) forwards; }
+        .dc-hitline {
+          position: absolute; left: 0; right: 0; height: 8px;
+          background: linear-gradient(90deg, transparent, #ff6600 12%, #ffd278 50%, #ff6600 88%, transparent);
+          pointer-events: none; box-shadow: 0 0 14px #ff6600;
+        }
+        .dc-jdg { position: absolute; top: 69%; left: 50%; transform: translateX(-50%); font-size: 16px; font-weight: 800; pointer-events: none; text-shadow: 2px 2px 0 rgba(0,0,0,0.65); animation: dc-jdg-pop 0.4s steps(4) forwards; }
         .dc-jdg.perfect { color: #ffcc00; } .dc-jdg.good { color: #22ff44; } .dc-jdg.miss { color: #ff2222; }
-        @keyframes dc-jdg-pop { 0% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.5); } 100% { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(0.8); } }
-        .dc-pads { display: flex; gap: 4px; padding: 6px 4px; flex-shrink: 0; }
-        .dc-pad { flex: 1; padding: 14px 0; border: 3px solid; color: #fff; font-size: 16px; font-weight: 900; cursor: pointer; transition: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; text-shadow: 2px 2px 0 rgba(0,0,0,0.5); font-family: 'Press Start 2P', monospace; background: #111; }
+        @keyframes dc-jdg-pop { 0% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.45); } 100% { opacity: 0; transform: translateX(-50%) translateY(-28px) scale(0.82); } }
+        .dc-pads { display: flex; gap: 6px; width: 100%; align-self: stretch; padding: 12px 4px calc(18px + env(safe-area-inset-bottom, 0px)); flex-shrink: 0; }
+        .dc-pad {
+          flex: 1; min-height: 118px; padding: 18px 0 14px; border: 4px solid; border-radius: 20px;
+          color: #fff; font-size: 32px; font-weight: 900; cursor: pointer; transition: none;
+          -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.5); font-family: 'Press Start 2P', monospace;
+          background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)), #111;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 18px rgba(0,0,0,0.22);
+        }
         .dc-pad:active, .dc-pad.active { filter: brightness(2); transform: scale(0.92); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.3); }
-        .dc-pad-sub { display: block; font-size: 6px; opacity: 0.5; margin-top: 2px; }
+        .dc-pad-sub { display: block; font-size: 12px; opacity: 0.55; margin-top: 10px; }
       `}</style>
 
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
@@ -419,25 +484,27 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       <ScorePopupRenderer popups={effects.scorePopups} />
 
       <div className="dc-hdr">
-        <div className="dc-hdr-left">
-          <img className="dc-avatar" src={characterImage} alt="" />
-          <div>
-            <p className="dc-score">{score.toLocaleString()}</p>
-            <p className="dc-best">BEST {displayedBestScore.toLocaleString()}</p>
-          </div>
-        </div>
-        <div className="dc-hdr-right">
+        <div className="dc-hdr-side">
+          <p className="dc-hdr-caption">TIME</p>
           <p className={`dc-time ${isLowTime ? 'low' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
-          <span className="dc-bpm">BPM{Math.round(currentBpm)} LV.{bpmLevel}</span>
+        </div>
+        <div className="dc-score-wrap">
+          <p className="dc-score-label">SCORE</p>
+          <p className="dc-score">{score.toLocaleString()}</p>
+          <p className="dc-best">BEST {displayedBestScore.toLocaleString()}</p>
+        </div>
+        <div className="dc-hdr-side right">
+          <span className="dc-chip">BPM {Math.round(currentBpm)}</span>
+          <span className="dc-chip level">LV {difficultyLevel}</span>
         </div>
       </div>
 
       <div className="dc-status">
-        <p>COMBO <strong>{combo}</strong>{comboLabel && <span style={{ color: comboColor, marginLeft: 4 }}>{comboLabel}</span>}</p>
-        <p>MAX <strong>{maxCombo}</strong></p>
-        {isFever && <span className="dc-fever-tag">FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s</span>}
-        {isSpeedRush && <span className="dc-rush-tag">SPEED RUSH!</span>}
-        {drumrollCount >= DRUMROLL_MIN_TAPS && <span className="dc-drumroll-tag">ROLL x{drumrollCount}!</span>}
+        <p className="dc-pill">COMBO <strong>{combo}</strong>{comboLabel && <span style={{ color: comboColor, marginLeft: 6 }}>{comboLabel}</span>}</p>
+        <p className="dc-pill">MAX <strong>{maxCombo}</strong></p>
+        {isFever && <span className="dc-pill dc-fever-tag">FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s</span>}
+        {isSpeedRush && <span className="dc-pill dc-rush-tag">SPEED RUSH!</span>}
+        {drumrollCount >= DRUMROLL_MIN_TAPS && <span className="dc-pill dc-drumroll-tag">ROLL x{drumrollCount}!</span>}
       </div>
 
       <div className="dc-stats">
@@ -446,13 +513,13 @@ function DrumCircleGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <span className="dc-stat m">M:{missCount}</span>
       </div>
 
-      <div className="dc-stage">
+      <div className="dc-stage" ref={stageRef}>
         <div className="dc-lanes">
           {Array.from({ length: LANE_COUNT }, (_, li) => (
             <div className={`dc-lane ${laneFlash[li] !== null ? 'flash' : ''}`} key={`lane-${li}`}>
               {notes.filter((n) => n.lane === li && n.alive).map((note) => {
-                const yPos = noteYPosition(elapsedMs, note.targetTimeMs)
-                if (yPos < NOTE_SPAWN_Y || yPos > 1.05) return null
+                const yPos = noteYPosition(elapsedMs, note.targetTimeMs, note.travelDurationMs)
+                if (yPos < NOTE_SPAWN_Y - 0.02 || yPos > 1.05) return null
                 return (
                   <div className={`dc-note ${note.isGolden ? 'golden' : ''} ${note.isHold ? 'hold' : ''}`} key={note.id}
                     style={{ top: `${yPos * 100}%`, backgroundColor: note.isGolden ? '#ffaa00' : LANE_COLORS[li] }}

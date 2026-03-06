@@ -14,6 +14,8 @@ import hoverSfxUrl from '../../../assets/sounds/connect-four-hover.mp3'
 import levelupSfxUrl from '../../../assets/sounds/connect-four-levelup.mp3'
 import tickSfxUrl from '../../../assets/sounds/connect-four-tick.mp3'
 import threatSfxUrl from '../../../assets/sounds/connect-four-threat.mp3'
+import connectFourBgmLoop from '../../../assets/sounds/connect-four-bgm-loop.mp3'
+import { getActiveBgmTrack, playBackgroundAudio as playSharedBgm, stopBackgroundAudio as stopSharedBgm } from '../../gui/sound-manager'
 
 // ─── Constants ───────────────────────────────────────────
 const COLS = 7
@@ -37,6 +39,10 @@ const POWER_UP_INTERVAL_WINS = 3
 const TIME_BONUS_PER_WIN_SEC = 5000
 const COMBO_THRESHOLD = 2
 const THREAT_CHECK_INTERVAL = 2
+const CONNECT_FOUR_BGM_VOLUME = 0.2
+const BOOST_COLUMN_SCORE = 12
+const BOOST_COLUMN_TIME_BONUS_MS = 2500
+const BOOST_MESSAGE_MS = 1400
 
 // ─── Types ───────────────────────────────────────────────
 type CellValue = 0 | 1 | 2
@@ -161,6 +167,13 @@ function getHintCol(b: Board): number {
   return best
 }
 
+function pickNextBoostColumn(previous: number | null): number {
+  if (COLS <= 1) return 0
+  const next = Math.floor(Math.random() * COLS)
+  if (previous === null || next !== previous) return next
+  return (next + 1 + Math.floor(Math.random() * (COLS - 1))) % COLS
+}
+
 // ─── Game Component ──────────────────────────────────────
 function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [board, setBoard] = useState<Board>(createEmptyBoard)
@@ -186,6 +199,9 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [lastScoreGain, setLastScoreGain] = useState(0)
   const [comboCount, setComboCount] = useState(0)
   const [showThreatWarning, setShowThreatWarning] = useState(false)
+  const [boostCol, setBoostCol] = useState(() => pickNextBoostColumn(null))
+  const [boostReady, setBoostReady] = useState(true)
+  const [boostMessage, setBoostMessage] = useState<string | null>(null)
 
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
@@ -203,6 +219,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const lastTickSfxRef = useRef(0)
   const perfectRef = useRef(true)
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const boostMessageTimerRef = useRef<number | null>(null)
 
   const fx = useGameEffects({ maxParticles: 50 })
   const fxRef = useRef(fx)
@@ -219,6 +236,10 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     void a.play().catch(() => {})
   }, [getAudio])
 
+  const ensureBgm = useCallback(() => {
+    playSharedBgm(connectFourBgmLoop, CONNECT_FOUR_BGM_VOLUME)
+  }, [])
+
   const onFinishRef = useRef(onFinish)
   onFinishRef.current = onFinish
   const onExitRef = useRef(onExit)
@@ -231,11 +252,25 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     onFinishRef.current({ score: scoreRef.current, durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)) })
   }, [])
 
+  const showBoostNotice = useCallback((message: string) => {
+    if (boostMessageTimerRef.current !== null) {
+      window.clearTimeout(boostMessageTimerRef.current)
+    }
+    setBoostMessage(message)
+    boostMessageTimerRef.current = window.setTimeout(() => {
+      boostMessageTimerRef.current = null
+      setBoostMessage(null)
+    }, BOOST_MESSAGE_MS)
+  }, [])
+
   const startNewRound = useCallback(() => {
     setBoard(createEmptyBoard())
     setPhase('player-turn')
     setWinLine(null); setDroppingCell(null); setLastDropCol(null); setHintCol(null)
     setPrevBoard(null); setDoubleTurnActive(false); setShowThreatWarning(false)
+    setBoostCol((current) => pickNextBoostColumn(current))
+    setBoostReady(true)
+    setBoostMessage(null)
     movesRef.current = 0; perfectRef.current = true
     setRoundNumber(p => p + 1)
 
@@ -307,6 +342,22 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       fxRef.current.spawnParticles(3, (rect.width - cw * COLS) / 2 + col * cw + cw / 2, rect.height * 0.22 + row * cw + cw / 2, undefined, 'circle')
     }
 
+    if (player === 1 && boostReady && col === boostCol) {
+      setBoostReady(false)
+      setDoubleTurnActive(true)
+      remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + BOOST_COLUMN_TIME_BONUS_MS)
+      setRemainingMs(remainingMsRef.current)
+      scoreRef.current += BOOST_COLUMN_SCORE
+      setScore(scoreRef.current)
+      showBoostNotice(`BOOST COL ${boostCol + 1}  +${BOOST_COLUMN_SCORE}  +2.5s`)
+      sfx(feverSfxUrl, 0.44, 1.06)
+      fxRef.current.triggerFlash('rgba(41,173,255,0.26)', 180)
+      fxRef.current.triggerShake(6, 180)
+      if (rect) {
+        fxRef.current.comboHitBurst(rect.width / 2, rect.height * 0.3, 2, BOOST_COLUMN_SCORE, ['+', 'T', '!'])
+      }
+    }
+
     if (player === 2 && movesRef.current % THREAT_CHECK_INTERVAL === 0 && hasThreeInRow(next, 2)) {
       setShowThreatWarning(true); sfx(threatSfxUrl, 0.35)
       setTimeout(() => setShowThreatWarning(false), 1500)
@@ -316,7 +367,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     if (win) { setWinLine(win); resolveRound(player === 1 ? 'win' : 'lose'); return next }
     if (isBoardFull(next)) { resolveRound('draw'); return next }
     return next
-  }, [sfx, resolveRound])
+  }, [boostCol, boostReady, resolveRound, sfx, showBoostNotice])
 
   const runAi = useCallback((cur: Board) => {
     if (finishedRef.current) return
@@ -340,14 +391,14 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     }
   }, [board, phase, placePiece, runAi, doubleTurnActive, sfx])
 
-  const useHint = useCallback(() => {
+  const triggerHint = useCallback(() => {
     if (hintsRemaining <= 0 || hintCooldown || phase !== 'player-turn') return
     setHintCol(getHintCol(board)); setHintsRemaining(p => p - 1); setHintCooldown(true); sfx(hintSfxUrl, 0.4)
     if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current)
     hintTimerRef.current = window.setTimeout(() => { hintTimerRef.current = null; setHintCol(null); setHintCooldown(false) }, HINT_COOLDOWN_MS)
   }, [board, hintsRemaining, hintCooldown, phase, sfx])
 
-  const usePower = useCallback(() => {
+  const activatePower = useCallback(() => {
     if (activePowerUp === null || phase !== 'player-turn') return
     if (activePowerUp === 'double-turn') { setDoubleTurnActive(true); sfx(feverSfxUrl, 0.4) }
     else if (activePowerUp === 'undo' && prevBoard) { setBoard(prevBoard); setPrevBoard(null); sfx(hintSfxUrl, 0.4) }
@@ -369,13 +420,27 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   useEffect(() => {
     const urls = [dropSfxUrl, winSfxUrl, loseSfxUrl, drawSfxUrl, comboSfxUrl, feverSfxUrl, hintSfxUrl, hoverSfxUrl, levelupSfxUrl, tickSfxUrl, threatSfxUrl]
     for (const u of urls) getAudio(u)
-    return () => { for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef]) if (ref.current !== null) window.clearTimeout(ref.current); fxRef.current.cleanup() }
+    return () => {
+      for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef, boostMessageTimerRef]) {
+        if (ref.current !== null) window.clearTimeout(ref.current)
+      }
+      fxRef.current.cleanup()
+    }
   }, [getAudio])
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExitRef.current() } else if (e.code === 'KeyH') useHint() }
+    ensureBgm()
+    return () => {
+      if (getActiveBgmTrack() === connectFourBgmLoop) {
+        stopSharedBgm()
+      }
+    }
+  }, [ensureBgm])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExitRef.current() } else if (e.code === 'KeyH') triggerHint() }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
-  }, [useHint])
+  }, [triggerHint])
 
   useEffect(() => {
     lastFrameRef.current = null
@@ -415,7 +480,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
   return (
     <section ref={panelRef} className="mini-game-panel cf-panel" aria-label="connect-four-game"
-      style={{ maxWidth: 432, aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...(shakeStyle ?? {}) }}>
+      style={{ maxWidth: 520, aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...(shakeStyle ?? {}) }}>
 
       <div className="cf-scanlines" />
 
@@ -427,15 +492,22 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       {/* Header */}
       <div className="cf-hdr">
-        <div>
-          <p className="cf-score-num">{score.toLocaleString()}</p>
+        <div className="cf-hdr-side cf-hdr-side-left">
+          <p className="cf-side-kicker">ROUND</p>
+          <p className="cf-side-value">R{roundNumber}</p>
           <p className="cf-best-txt">BEST {bestDisp.toLocaleString()}</p>
         </div>
-        <div className="cf-round-pill">R{roundNumber}</div>
-        <div className="cf-wdl">
-          <span className="cf-w">W{wins}</span>
-          <span className="cf-d">D{draws}</span>
-          <span className="cf-l">L{losses}</span>
+        <div className="cf-score-box">
+          <p className="cf-score-label">SCORE</p>
+          <p className="cf-score-num">{score.toLocaleString()}</p>
+        </div>
+        <div className="cf-hdr-side cf-hdr-side-right">
+          <p className="cf-side-kicker">RECORD</p>
+          <div className="cf-wdl">
+            <span className="cf-stat-pill cf-w">W {wins}</span>
+            <span className="cf-stat-pill cf-d">D {draws}</span>
+            <span className="cf-stat-pill cf-l">L {losses}</span>
+          </div>
         </div>
       </div>
 
@@ -447,6 +519,13 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         {doubleTurnActive && <p className="cf-dbl">DOUBLE TURN!</p>}
         {comboCount >= COMBO_THRESHOLD && phase === 'win' && <p className="cf-combo">COMBO x{comboCount}!</p>}
         {showThreatWarning && <p className="cf-threat">!! DANGER !!</p>}
+        {boostMessage ? (
+          <p className="cf-boost-msg">{boostMessage}</p>
+        ) : boostReady ? (
+          <p className="cf-boost-tip">BOOST COL {boostCol + 1} = DOUBLE TURN + TIME</p>
+        ) : (
+          <p className="cf-boost-tip used">BOOST USED // NEXT ROUND REFRESH</p>
+        )}
       </div>
 
       {/* Drop arrows */}
@@ -456,7 +535,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           const avail = getAvailableRow(board, c) !== -1
           return (
             <button key={c} type="button"
-              className={`cf-arr ${lastDropCol === c ? 'cf-arr-last' : ''} ${hinted ? 'cf-arr-hint' : ''} ${hoveredCol === c ? 'cf-arr-hov' : ''}`}
+              className={`cf-arr ${lastDropCol === c ? 'cf-arr-last' : ''} ${hinted ? 'cf-arr-hint' : ''} ${hoveredCol === c ? 'cf-arr-hov' : ''} ${boostReady && boostCol === c ? 'cf-arr-boost' : ''}`}
               onClick={() => handleClick(c)}
               onPointerEnter={() => { setHoveredCol(c); if (avail && phase === 'player-turn') sfx(hoverSfxUrl, 0.12, 0.9 + c * 0.08) }}
               onPointerLeave={() => setHoveredCol(null)}
@@ -477,7 +556,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
               const preview = hoveredCol === c && v === 0 && getAvailableRow(board, c) === r && phase === 'player-turn'
               return (
                 <div key={`${r}-${c}`}
-                  className={`cf-slot ${v === 1 ? 'cf-p1' : v === 2 ? 'cf-p2' : ''} ${wc ? 'cf-win' : ''} ${dr ? 'cf-dropping' : ''} ${preview ? 'cf-preview' : ''}`}
+                  className={`cf-slot ${v === 1 ? 'cf-p1' : v === 2 ? 'cf-p2' : ''} ${wc ? 'cf-win' : ''} ${dr ? 'cf-dropping' : ''} ${preview ? 'cf-preview' : ''} ${boostReady && boostCol === c ? 'cf-slot-boost' : ''}`}
                   onClick={() => handleClick(c)}>
                   {(v !== 0 || preview) && (
                     <div className="cf-disc" style={dr ? { '--cf-dr': r } as React.CSSProperties : undefined}>
@@ -495,15 +574,16 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       {/* Bottom bar */}
       <div className="cf-bottom">
         <button className={`cf-btn cf-btn-hint ${hintsRemaining <= 0 || hintCooldown ? 'cf-btn-off' : ''}`}
-          type="button" onClick={useHint} disabled={hintsRemaining <= 0 || hintCooldown || phase !== 'player-turn'}>
+          type="button" onClick={triggerHint} disabled={hintsRemaining <= 0 || hintCooldown || phase !== 'player-turn'}>
           HINT({hintsRemaining})
         </button>
         {pwInfo && (
-          <button className="cf-btn cf-btn-pw" type="button" onClick={usePower} disabled={phase !== 'player-turn'}>
+          <button className="cf-btn cf-btn-pw" type="button" onClick={activatePower} disabled={phase !== 'player-turn'}>
             [{pwInfo.icon}] {pwInfo.label}
           </button>
         )}
         <div className="cf-legend">
+          <span><strong>{boostReady ? `B${boostCol + 1}` : 'BOOST'}</strong></span>
           <span><span className="cf-ldot cf-ldot-p" />YOU</span>
           <span><span className="cf-ldot cf-ldot-a" />AI</span>
         </div>
@@ -517,8 +597,8 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
         .cf-panel {
-          display: flex; flex-direction: column; align-items: center; gap: 3px;
-          padding: 6px; width: 100%; max-width: 432px; margin: 0 auto;
+          display: flex; flex-direction: column; align-items: center; gap: 7px;
+          padding: 12px 10px 10px; width: 100%; max-width: 520px; margin: 0 auto;
           user-select: none; background: #1a1a2e;
           font-family: 'Press Start 2P', monospace; image-rendering: pixelated;
         }
@@ -527,37 +607,54 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
         }
 
-        .cf-timer-wrap { width: 100%; height: 16px; background: #0f0f23; border: 2px solid #29adff; position: relative; flex-shrink: 0; }
+        .cf-timer-wrap { width: 100%; height: 22px; background: #0f0f23; border: 3px solid #29adff; position: relative; flex-shrink: 0; }
         .cf-timer-fill { height: 100%; background: #00e436; transition: width 0.3s linear; }
         .cf-timer-low { background: #ffa300; }
         .cf-timer-crit { background: #ff004d; animation: cf-blink 0.3s infinite alternate; }
-        .cf-timer-txt { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 7px; color: #fff; text-shadow: 1px 1px 0 #000; }
+        .cf-timer-txt { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 9px; color: #fff; text-shadow: 2px 2px 0 #000; }
 
-        .cf-hdr { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 2px; flex-shrink: 0; }
-        .cf-score-num { font-size: clamp(14px, 4vw, 20px); color: #ffec27; margin: 0; text-shadow: 2px 2px 0 #a16207, 0 0 8px rgba(255,236,39,0.4); }
-        .cf-best-txt { font-size: 6px; color: #7e7e7e; margin: 0; }
-        .cf-round-pill { background: #29adff; color: #fff; padding: 2px 8px; font-size: 8px; border: 2px solid #1d6ca5; box-shadow: 2px 2px 0 #0f0f23; }
-        .cf-wdl { display: flex; gap: 6px; font-size: 8px; }
-        .cf-w { color: #00e436; } .cf-d { color: #ffec27; } .cf-l { color: #ff004d; }
+        .cf-hdr { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; width: 100%; padding: 2px 0 4px; gap: 8px; flex-shrink: 0; }
+        .cf-hdr-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .cf-hdr-side-right { align-items: flex-end; text-align: right; }
+        .cf-side-kicker { margin: 0; color: #7e7e7e; font-size: 7px; letter-spacing: 1px; }
+        .cf-side-value { margin: 0; color: #29adff; font-size: clamp(14px, 3vw, 18px); text-shadow: 2px 2px 0 #0f4a7a; }
+        .cf-score-box {
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          min-width: clamp(164px, 44vw, 230px); padding: 10px 12px 8px;
+          border: 3px solid #ffa300; background: linear-gradient(180deg, rgba(53,30,16,0.9), rgba(22,16,38,0.95));
+          box-shadow: 4px 4px 0 #0f0f23, inset 0 0 0 2px rgba(255,236,39,0.2);
+        }
+        .cf-score-label { margin: 0; color: #ffd36e; font-size: 8px; letter-spacing: 2px; }
+        .cf-score-num { font-size: clamp(28px, 8vw, 44px); color: #ffec27; margin: 6px 0 0; text-align: center; text-shadow: 3px 3px 0 #a16207, 0 0 16px rgba(255,236,39,0.5); line-height: 1; }
+        .cf-best-txt { font-size: 7px; color: #c7d2fe; margin: 0; }
+        .cf-wdl { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+        .cf-stat-pill { padding: 4px 7px; font-size: 8px; border: 2px solid; min-width: 42px; text-align: center; box-shadow: 2px 2px 0 rgba(0,0,0,0.3); }
+        .cf-w { color: #00e436; border-color: #008f2b; background: rgba(0,228,54,0.08); }
+        .cf-d { color: #ffec27; border-color: #a16207; background: rgba(255,236,39,0.08); }
+        .cf-l { color: #ff6b8e; border-color: #ab0033; background: rgba(255,0,77,0.08); }
 
-        .cf-phase-box { text-align: center; min-height: 28px; flex-shrink: 0; }
-        .cf-phase { font-size: clamp(10px, 3vw, 14px); margin: 0; letter-spacing: 2px; }
+        .cf-phase-box { text-align: center; min-height: 54px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+        .cf-phase { font-size: clamp(12px, 3.3vw, 18px); margin: 0; letter-spacing: 2px; }
         .cf-p-player-turn { color: #ff004d; }
         .cf-p-ai-turn { color: #ffec27; animation: cf-blink 0.6s infinite alternate; }
         .cf-p-win { color: #00e436; animation: cf-bounce 0.4s ease-out; }
         .cf-p-lose { color: #ff004d; animation: cf-shake 0.4s ease-out; }
         .cf-p-draw { color: #83769c; }
-        .cf-fever { margin: 0; color: #ffa300; font-size: 8px; animation: cf-glow 0.4s infinite alternate; text-shadow: 0 0 8px #ffa300; }
-        .cf-streak { margin: 0; color: #00e436; font-size: 6px; }
-        .cf-dbl { margin: 0; color: #29adff; font-size: 8px; animation: cf-bounce 0.3s ease-out; text-shadow: 0 0 6px #29adff; }
-        .cf-combo { margin: 0; color: #ff77a8; font-size: 9px; animation: cf-bounce 0.3s ease-out; text-shadow: 0 0 6px #ff77a8; }
-        .cf-threat { margin: 0; color: #ff004d; font-size: 9px; animation: cf-blink 0.2s infinite alternate; text-shadow: 0 0 10px #ff004d; }
+        .cf-fever { margin: 0; color: #ffa300; font-size: 9px; animation: cf-glow 0.4s infinite alternate; text-shadow: 0 0 8px #ffa300; }
+        .cf-streak { margin: 0; color: #00e436; font-size: 7px; }
+        .cf-dbl { margin: 0; color: #29adff; font-size: 9px; animation: cf-bounce 0.3s ease-out; text-shadow: 0 0 6px #29adff; }
+        .cf-combo { margin: 0; color: #ff77a8; font-size: 10px; animation: cf-bounce 0.3s ease-out; text-shadow: 0 0 6px #ff77a8; }
+        .cf-threat { margin: 0; color: #ff004d; font-size: 10px; animation: cf-blink 0.2s infinite alternate; text-shadow: 0 0 10px #ff004d; }
+        .cf-boost-tip, .cf-boost-msg { margin: 0; font-size: 8px; letter-spacing: 1px; }
+        .cf-boost-tip { color: #7dd3fc; }
+        .cf-boost-tip.used { color: #7e7e7e; }
+        .cf-boost-msg { color: #ffec27; animation: cf-bounce 0.35s ease-out; text-shadow: 0 0 10px rgba(255,236,39,0.5); }
 
         .cf-arrows { display: grid; grid-template-columns: repeat(${COLS}, 1fr); gap: 2px; width: 100%; padding: 0 2px; flex-shrink: 0; }
         .cf-arr {
           display: flex; align-items: center; justify-content: center;
-          height: clamp(22px, 4vw, 30px); background: #1d2b53; border: 2px solid #29adff; color: #29adff;
-          font-family: 'Press Start 2P', monospace; font-size: clamp(8px, 2vw, 11px); cursor: pointer; transition: all 0.1s;
+          height: clamp(30px, 5vw, 38px); background: #1d2b53; border: 2px solid #29adff; color: #29adff;
+          font-family: 'Press Start 2P', monospace; font-size: clamp(10px, 2.4vw, 13px); cursor: pointer; transition: all 0.1s;
         }
         .cf-arr:hover:not(:disabled) { background: #29adff; color: #fff; transform: translateY(-2px); box-shadow: 0 2px 0 #1d6ca5; }
         .cf-arr:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
@@ -565,10 +662,11 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         .cf-arr-last { background: #29366f; }
         .cf-arr-hint { background: #00e436 !important; color: #fff !important; border-color: #00e436 !important; animation: cf-blink 0.4s infinite alternate; }
         .cf-arr-hov { background: #29366f; border-color: #ff004d; }
+        .cf-arr-boost { border-color: #ffa300; color: #ffec27; background: linear-gradient(180deg, #362208, #1d2b53); box-shadow: inset 0 0 0 1px rgba(255,236,39,0.18); }
 
         .cf-board {
           display: flex; flex-direction: column; gap: 2px; background: #1d2b53;
-          border: 3px solid #29adff; padding: clamp(4px, 1vw, 8px);
+          border: 3px solid #29adff; padding: clamp(8px, 1.6vw, 12px);
           flex: 1; min-height: 0; width: 100%;
           box-shadow: 4px 4px 0 #0f0f23, inset 0 0 20px rgba(41,173,255,0.1);
         }
@@ -582,9 +680,10 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           position: relative; cursor: pointer; transition: border-color 0.15s;
         }
         .cf-slot:hover { border-color: #5f6f9f; }
+        .cf-slot-boost { background: radial-gradient(circle at 50% 35%, rgba(255,236,39,0.14), #0f0f23 72%); border-color: #7c5a11; }
 
         .cf-disc { width: 80%; height: 80%; display: flex; align-items: center; justify-content: center; }
-        .cf-disc-face { font-size: clamp(6px, 1.5vw, 10px); color: rgba(255,255,255,0.6); }
+        .cf-disc-face { font-size: clamp(8px, 1.8vw, 12px); color: rgba(255,255,255,0.6); }
 
         .cf-p1 .cf-disc { background: #ff004d; border: 2px solid #ab0033; box-shadow: inset -2px -2px 0 #ab0033, inset 2px 2px 0 #ff77a8, 2px 2px 0 rgba(0,0,0,0.4); }
         .cf-p2 .cf-disc { background: #ffec27; border: 2px solid #a16207; box-shadow: inset -2px -2px 0 #a16207, inset 2px 2px 0 #fff1a8, 2px 2px 0 rgba(0,0,0,0.4); }
@@ -594,16 +693,17 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         .cf-win::after { content: ''; position: absolute; inset: -2px; border: 2px solid #fff; animation: cf-win-border 0.6s infinite alternate; }
         .cf-dropping .cf-disc { animation: cf-drop ${DROP_ANIMATION_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1); }
 
-        .cf-bottom { display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px; flex-shrink: 0; }
-        .cf-btn { padding: 4px 8px; font-family: 'Press Start 2P', monospace; font-size: 7px; cursor: pointer; transition: all 0.1s; border: 2px solid; }
+        .cf-bottom { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 2px 2px; flex-shrink: 0; }
+        .cf-btn { padding: 7px 10px; font-family: 'Press Start 2P', monospace; font-size: 8px; cursor: pointer; transition: all 0.1s; border: 2px solid; }
         .cf-btn-hint { background: #00e436; border-color: #008f2b; color: #fff; box-shadow: 2px 2px 0 #005c1a; }
         .cf-btn-hint:hover:not(:disabled) { background: #00ff4d; transform: translateY(-1px); }
         .cf-btn-pw { background: #29adff; border-color: #1d6ca5; color: #fff; box-shadow: 2px 2px 0 #0f4a7a; animation: cf-bounce 0.5s ease-out; }
         .cf-btn-pw:hover:not(:disabled) { background: #5fc9ff; transform: translateY(-1px); }
         .cf-btn-off { opacity: 0.3; cursor: not-allowed; }
 
-        .cf-legend { display: flex; gap: 8px; font-size: 6px; color: #7e7e7e; margin-left: auto; align-items: center; }
+        .cf-legend { display: flex; gap: 8px; font-size: 7px; color: #7e7e7e; margin-left: auto; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
         .cf-legend span { display: flex; align-items: center; gap: 3px; }
+        .cf-legend strong { color: #7dd3fc; }
         .cf-ldot { display: inline-block; width: 8px; height: 8px; }
         .cf-ldot-p { background: #ff004d; border: 1px solid #ab0033; }
         .cf-ldot-a { background: #ffec27; border: 1px solid #a16207; }

@@ -13,12 +13,13 @@ import feverSfx from '../../../assets/sounds/spot-diff-fever.mp3'
 import comboSfx from '../../../assets/sounds/spot-diff-combo.mp3'
 import timeWarningSfx from '../../../assets/sounds/spot-diff-time-warning.mp3'
 import roundClearSfx from '../../../assets/sounds/spot-diff-round-clear.mp3'
-import hintSfx from '../../../assets/sounds/spot-diff-hint.mp3'
 import shuffleSfx from '../../../assets/sounds/spot-diff-shuffle.mp3'
 import freezeSfx from '../../../assets/sounds/spot-diff-freeze.mp3'
 import perfectSfx from '../../../assets/sounds/spot-diff-perfect.mp3'
 import streakSfx from '../../../assets/sounds/spot-diff-streak.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import spotDiffBgmLoop from '../../../assets/sounds/dance-step-bgm.mp3'
+import { getActiveBgmTrack, playBackgroundAudio as playSharedBgm, stopBackgroundAudio as stopSharedBgm } from '../../gui/sound-manager'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
 // === TIMING ===
@@ -43,10 +44,6 @@ const FEVER_STREAK = 5
 const FEVER_MULT = 3
 const FEVER_DURATION_MS = 8_000
 
-// === HINT ===
-const HINT_DELAY_MS = 6_000
-const HINT_PULSE_SPEED = 0.004
-
 // === GRID ===
 const GRID_SIZES: readonly number[] = [3, 4, 4, 5, 5, 6]
 const MAX_GRID = 6
@@ -66,6 +63,16 @@ const FREEZE_DURATION_MS = 3_000
 
 // === STREAK MILESTONE ===
 const STREAK_MILESTONE = 5
+
+// === HARD MODE FEATURES ===
+const GLITCH_START_ROUND = 2
+const GLITCH_PENALTY_MS = 4_500
+const BLACKOUT_START_ROUND = 4
+const BLACKOUT_DURATION_MS = 900
+const BLACKOUT_INTERVAL_MS = 5_400
+const BLACKOUT_MIN_INTERVAL_MS = 3_000
+const SHUFFLE_MIN_INTERVAL_MS = 2_200
+const SPOT_DIFF_BGM_VOLUME = 0.24
 
 interface CharacterEntry {
   readonly id: string
@@ -87,6 +94,7 @@ interface GridCell {
   readonly isDifferent: boolean
   readonly cellIndex: number
   readonly isFreeze?: boolean
+  readonly isJammer?: boolean
 }
 
 type BonusType = 'time' | 'double' | null
@@ -101,15 +109,30 @@ function pickTwo(excludeId?: string): [CharacterEntry, CharacterEntry] {
   return [a, rest[j]]
 }
 
-function buildGrid(gridSize: number, round: number, prevMainId?: string, addFreeze = false): GridCell[] {
+function pickUniqueIndexes(total: number, count: number, blocked: ReadonlySet<number>): number[] {
+  const indexes: number[] = []
+  while (indexes.length < count && blocked.size + indexes.length < total) {
+    const nextIndex = Math.floor(Math.random() * total)
+    if (blocked.has(nextIndex) || indexes.includes(nextIndex)) continue
+    indexes.push(nextIndex)
+  }
+  return indexes
+}
+
+function buildGrid(gridSize: number, round: number, prevMainId?: string, addFreeze = false, jammerCount = 0): GridCell[] {
   const total = gridSize * gridSize
   const [main, odd] = pickTwo(round > 0 ? prevMainId : undefined)
   const oddIdx = Math.floor(Math.random() * total)
 
   let freezeIdx = -1
   if (addFreeze) {
-    do { freezeIdx = Math.floor(Math.random() * total) } while (freezeIdx === oddIdx)
+    const [nextFreezeIdx] = pickUniqueIndexes(total, 1, new Set([oddIdx]))
+    freezeIdx = nextFreezeIdx ?? -1
   }
+
+  const blocked = new Set<number>([oddIdx])
+  if (freezeIdx >= 0) blocked.add(freezeIdx)
+  const jammerSet = new Set(pickUniqueIndexes(total, jammerCount, blocked))
 
   const cells: GridCell[] = []
   for (let i = 0; i < total; i++) {
@@ -118,6 +141,7 @@ function buildGrid(gridSize: number, round: number, prevMainId?: string, addFree
       isDifferent: i === oddIdx,
       cellIndex: i,
       isFreeze: i === freezeIdx,
+      isJammer: jammerSet.has(i),
     })
   }
   return cells
@@ -143,19 +167,47 @@ function getBonus(round: number): BonusType {
   return null
 }
 
+function getJammerCount(round: number): number {
+  if (round < GLITCH_START_ROUND) return 0
+  if (round < 4) return 1
+  if (round < 6) return 2
+  return 3
+}
+
+function getShuffleIntervalMs(round: number): number {
+  const roundPressure = Math.max(0, round - SHUFFLE_START_ROUND)
+  return Math.max(SHUFFLE_MIN_INTERVAL_MS, SHUFFLE_INTERVAL_MS - roundPressure * 350)
+}
+
+function getBlackoutIntervalMs(round: number): number {
+  const roundPressure = Math.max(0, round - BLACKOUT_START_ROUND)
+  return Math.max(BLACKOUT_MIN_INTERVAL_MS, BLACKOUT_INTERVAL_MS - roundPressure * 350)
+}
+
+function getFreezeChance(round: number): number {
+  if (round < 3) return FREEZE_CHANCE * 0.7
+  if (round < 5) return FREEZE_CHANCE * 0.55
+  return FREEZE_CHANCE * 0.45
+}
+
+function createPixelStars(count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    size: Math.random() < 0.3 ? 3 : 2,
+    delay: Math.random() * 3,
+    dur: 1.5 + Math.random() * 2,
+  }))
+}
+
 // === Pixel Stars Background Component ===
 function PixelStars({ count }: { count: number }) {
-  const stars = useMemo(() =>
-    Array.from({ length: count }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      size: Math.random() < 0.3 ? 3 : 2,
-      delay: Math.random() * 3,
-      dur: 1.5 + Math.random() * 2,
-    })),
-    [count],
-  )
+  const [stars, setStars] = useState(() => createPixelStars(count))
+
+  useEffect(() => {
+    setStars(createPixelStars(count))
+  }, [count])
 
   return (
     <div className="sd-pixel-stars" aria-hidden>
@@ -190,7 +242,6 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const [maxStreak, setMaxStreak] = useState(0)
   const [isFever, setIsFever] = useState(false)
   const [feverMs, setFeverMs] = useState(0)
-  const [hintOpacity, setHintOpacity] = useState(0)
   const [showTransition, setShowTransition] = useState(false)
   const [transitionText, setTransitionText] = useState('')
   const [transitionSub, setTransitionSub] = useState('')
@@ -201,8 +252,22 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const [showStreakMilestone, setShowStreakMilestone] = useState(0)
   const [shuffleFlash, setShuffleFlash] = useState(false)
   const [cellEntryKey, setCellEntryKey] = useState(0)
+  const [showGlitchTrap, setShowGlitchTrap] = useState(false)
+  const [isBlackout, setIsBlackout] = useState(false)
 
   const effects = useGameEffects()
+  const {
+    cleanup: cleanupEffects,
+    comboHitBurst,
+    flashColor,
+    getShakeStyle,
+    isFlashing,
+    particles,
+    scorePopups,
+    triggerFlash,
+    triggerShake,
+    updateParticles,
+  } = effects
 
   const scoreRef = useRef(0)
   const roundRef = useRef(0)
@@ -220,8 +285,6 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const maxStreakRef = useRef(0)
   const feverRef = useRef(false)
   const feverMsRef = useRef(0)
-  const hintTimerRef = useRef(0)
-  const hintPhaseRef = useRef(0)
   const transTimerRef = useRef<number | null>(null)
   const doubleRef = useRef(0)
   const timeWarnRef = useRef(false)
@@ -229,6 +292,9 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const frozenRef = useRef(false)
   const frozenMsRef = useRef(0)
   const shuffleTimerRef = useRef(0)
+  const glitchTimerRef = useRef<number | null>(null)
+  const blackoutTimerRef = useRef(0)
+  const blackoutMsRef = useRef(0)
 
   const audioRef = useRef<Record<string, HTMLAudioElement | null>>({})
 
@@ -243,6 +309,10 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     a.volume = vol
     a.playbackRate = rate
     void a.play().catch(() => {})
+  }, [])
+
+  const ensureBgm = useCallback(() => {
+    playSharedBgm(spotDiffBgmLoop, SPOT_DIFF_BGM_VOLUME)
   }, [])
 
   const finish = useCallback(() => {
@@ -266,21 +336,25 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     prevMainRef.current = mainId
 
     const bonus = getBonus(next)
+    const featureTags = [`${gs}x${gs} GRID`]
     if (bonus === 'time') {
       remainingRef.current = Math.min(ROUND_DURATION_MS, remainingRef.current + TIME_BONUS_MS)
       setRemainingMs(remainingRef.current)
       setTimeBonusPopup(true)
       setTimeout(() => setTimeBonusPopup(false), 1200)
+      featureTags.push('+5s TIME')
     } else if (bonus === 'double') {
       doubleRef.current = DOUBLE_SCORE_ROUNDS
       setDoubleLeft(DOUBLE_SCORE_ROUNDS)
+      featureTags.push('x2 SCORE')
     }
 
-    let trans = `ROUND ${next + 1}`
-    let sub = `${gs}x${gs} GRID`
-    if (bonus === 'time') { trans = `ROUND ${next + 1}`; sub = '+5s TIME BONUS!' }
-    else if (bonus === 'double') { sub = 'x2 SCORE!' }
-    if (next >= SHUFFLE_START_ROUND) sub += ' SHUFFLE!'
+    const jammerCount = getJammerCount(next)
+    if (jammerCount > 0) featureTags.push(`GLITCH x${jammerCount}`)
+    if (next >= SHUFFLE_START_ROUND) featureTags.push('SHUFFLE')
+    if (next >= BLACKOUT_START_ROUND) featureTags.push('BLACKOUT')
+    const trans = `ROUND ${next + 1}`
+    const sub = featureTags.join(' / ')
     setTransitionText(trans)
     setTransitionSub(sub)
     setShowTransition(true)
@@ -289,24 +363,25 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     clearTimer(transTimerRef)
     transTimerRef.current = window.setTimeout(() => { setShowTransition(false); transTimerRef.current = null }, ROUND_TRANSITION_MS)
 
-    const addFreeze = Math.random() < FREEZE_CHANCE
-    const g = buildGrid(gs, next, mainId, addFreeze)
+    const addFreeze = Math.random() < getFreezeChance(next)
+    const g = buildGrid(gs, next, mainId, addFreeze, jammerCount)
     gridRef.current = g
     setGrid(g)
     setCellEntryKey((k) => k + 1)
 
     roundStartRef.current = now
-    hintTimerRef.current = 0
-    hintPhaseRef.current = 0
-    setHintOpacity(0)
     timeWarnRef.current = false
     shuffleTimerRef.current = 0
+    blackoutTimerRef.current = 0
+    blackoutMsRef.current = 0
+    setIsBlackout(false)
 
     if (doubleRef.current > 0) { doubleRef.current--; setDoubleLeft(doubleRef.current) }
   }, [play])
 
   const handleTap = useCallback((cell: GridCell) => {
     if (finishedRef.current || showTransition) return
+    ensureBgm()
     const now = window.performance.now()
 
     // Freeze power-up tap
@@ -315,11 +390,43 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       frozenMsRef.current = FREEZE_DURATION_MS
       setIsFrozen(true)
       play('freeze', 0.6)
-      effects.triggerFlash('rgba(100,200,255,0.4)')
+      triggerFlash('rgba(100,200,255,0.4)')
       // Remove freeze cell
       const updated = gridRef.current.map((c) => c.cellIndex === cell.cellIndex ? { ...c, isFreeze: false } : c)
       gridRef.current = updated
       setGrid(updated)
+      return
+    }
+
+    if (cell.isJammer && !cell.isDifferent) {
+      remainingRef.current = Math.max(0, remainingRef.current - GLITCH_PENALTY_MS)
+      setRemainingMs(remainingRef.current)
+      streakRef.current = 0
+      setStreak(0)
+
+      setShowGlitchTrap(true)
+      clearTimer(glitchTimerRef)
+      glitchTimerRef.current = window.setTimeout(() => {
+        glitchTimerRef.current = null
+        setShowGlitchTrap(false)
+      }, 900)
+
+      const glitchedGrid = shuffleGrid(
+        gridRef.current.map((entry) =>
+          entry.cellIndex === cell.cellIndex ? { ...entry, isJammer: false } : entry,
+        ),
+      )
+      gridRef.current = glitchedGrid
+      setGrid(glitchedGrid)
+      setCellEntryKey((k) => k + 1)
+      setShuffleFlash(true)
+      setTimeout(() => setShuffleFlash(false), 300)
+
+      play('wrong', 0.55, 0.72)
+      triggerShake(10)
+      triggerFlash('rgba(239,68,68,0.55)')
+
+      if (remainingRef.current <= 0) finish()
       return
     }
 
@@ -361,7 +468,7 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         feverMsRef.current = FEVER_DURATION_MS
         setIsFever(true)
         setFeverMs(FEVER_DURATION_MS)
-        effects.triggerFlash('rgba(250,204,21,0.5)')
+        triggerFlash('rgba(250,204,21,0.5)')
         play('fever', 0.6)
       } else if (ns > 1) {
         play('combo', 0.4, 1 + ns * 0.04)
@@ -390,11 +497,11 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           const row = Math.floor(cell.cellIndex / gridSizeRef.current)
           const cw = ar.width / gridSizeRef.current
           const ch = ar.height / gridSizeRef.current
-          effects.comboHitBurst(ar.left - cr.left + col * cw + cw / 2, ar.top - cr.top + row * ch + ch / 2, ns, earned)
+          comboHitBurst(ar.left - cr.left + col * cw + cw / 2, ar.top - cr.top + row * ch + ch / 2, ns, earned)
         }
       }
 
-      effects.triggerFlash('rgba(34,197,94,0.3)')
+      triggerFlash('rgba(34,197,94,0.3)')
       advance(now)
     } else {
       remainingRef.current = Math.max(0, remainingRef.current - TIME_PENALTY_MS)
@@ -407,12 +514,12 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       wrongTimerRef.current = window.setTimeout(() => { wrongTimerRef.current = null; setWrongFlashIdx(null) }, WRONG_FLASH_MS)
 
       play('wrong', 0.5, 0.8)
-      effects.triggerShake(8)
-      effects.triggerFlash('rgba(239,68,68,0.4)')
+      triggerShake(8)
+      triggerFlash('rgba(239,68,68,0.4)')
 
       if (remainingRef.current <= 0) finish()
     }
-  }, [advance, finish, play, showTransition, effects])
+  }, [advance, comboHitBurst, ensureBgm, finish, play, showTransition, triggerFlash, triggerShake])
 
   useEffect(() => {
     const kd = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
@@ -421,23 +528,33 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   }, [onExit])
 
   useEffect(() => {
+    ensureBgm()
+    return () => {
+      if (getActiveBgmTrack() === spotDiffBgmLoop) {
+        stopSharedBgm()
+      }
+    }
+  }, [ensureBgm])
+
+  useEffect(() => {
+    const audioMap = audioRef.current
     for (const e of CHARACTER_POOL) {
       const img = new Image(); img.decoding = 'sync'; img.src = e.imageSrc; void img.decode?.().catch(() => {})
     }
     const sfx: Record<string, string> = {
       correct: correctSfx, wrong: wrongSfx, fever: feverSfx, combo: comboSfx,
-      timeWarning: timeWarningSfx, roundClear: roundClearSfx, hint: hintSfx,
+      timeWarning: timeWarningSfx, roundClear: roundClearSfx,
       shuffle: shuffleSfx, freeze: freezeSfx, perfect: perfectSfx, streak: streakSfx,
       gameOver: gameOverHitSfx,
     }
-    for (const [k, s] of Object.entries(sfx)) { const a = new Audio(s); a.preload = 'auto'; audioRef.current[k] = a }
+    for (const [k, s] of Object.entries(sfx)) { const a = new Audio(s); a.preload = 'auto'; audioMap[k] = a }
 
     return () => {
-      clearTimer(wrongTimerRef); clearTimer(correctTimerRef); clearTimer(transTimerRef)
-      for (const k of Object.keys(audioRef.current)) audioRef.current[k] = null
-      effects.cleanup()
+      clearTimer(wrongTimerRef); clearTimer(correctTimerRef); clearTimer(transTimerRef); clearTimer(glitchTimerRef)
+      for (const k of Object.keys(audioMap)) audioMap[k] = null
+      cleanupEffects()
     }
-  }, [])
+  }, [cleanupEffects])
 
   useEffect(() => {
     roundStartRef.current = window.performance.now()
@@ -464,15 +581,6 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         if (feverMsRef.current <= 0) { feverRef.current = false; setIsFever(false) }
       }
 
-      // Hint
-      hintTimerRef.current += dt
-      if (hintTimerRef.current > HINT_DELAY_MS) {
-        hintPhaseRef.current += dt * HINT_PULSE_SPEED
-        setHintOpacity(0.15 + ((Math.sin(hintPhaseRef.current) + 1) / 2) * 0.45)
-        // Play hint sound once
-        if (hintTimerRef.current - dt <= HINT_DELAY_MS) play('hint', 0.3)
-      }
-
       // Time warning
       if (remainingRef.current <= LOW_TIME_MS && remainingRef.current > 0 && !timeWarnRef.current) {
         timeWarnRef.current = true
@@ -482,7 +590,7 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       // Shuffle mechanic (high rounds)
       if (roundRef.current >= SHUFFLE_START_ROUND && !frozenRef.current) {
         shuffleTimerRef.current += dt
-        if (shuffleTimerRef.current >= SHUFFLE_INTERVAL_MS) {
+        if (shuffleTimerRef.current >= getShuffleIntervalMs(roundRef.current)) {
           shuffleTimerRef.current = 0
           const shuffled = shuffleGrid(gridRef.current)
           gridRef.current = shuffled
@@ -493,7 +601,25 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
       }
 
-      effects.updateParticles()
+      // Blackout mechanic (late rounds)
+      if (roundRef.current >= BLACKOUT_START_ROUND) {
+        if (blackoutMsRef.current > 0) {
+          blackoutMsRef.current = Math.max(0, blackoutMsRef.current - dt)
+          if (blackoutMsRef.current <= 0) {
+            setIsBlackout(false)
+          }
+        } else if (!frozenRef.current) {
+          blackoutTimerRef.current += dt
+          if (blackoutTimerRef.current >= getBlackoutIntervalMs(roundRef.current)) {
+            blackoutTimerRef.current = 0
+            blackoutMsRef.current = BLACKOUT_DURATION_MS
+            setIsBlackout(true)
+            triggerFlash('rgba(15,23,42,0.42)')
+          }
+        }
+      }
+
+      updateParticles()
 
       if (remainingRef.current <= 0) { finish(); rafRef.current = null; return }
       rafRef.current = window.requestAnimationFrame(step)
@@ -501,7 +627,7 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
     rafRef.current = window.requestAnimationFrame(step)
     return () => { if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }; lastFrameRef.current = null }
-  }, [finish, play])
+  }, [finish, play, triggerFlash, updateParticles])
 
   const bestDisp = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const isLow = remainingMs <= LOW_TIME_MS && remainingMs > 0
@@ -510,13 +636,14 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const comboCol = getComboColor(streak)
   const timePct = Math.max(0, Math.min(100, (remainingMs / ROUND_DURATION_MS) * 100))
   const feverPct = isFever ? Math.max(0, (feverMs / FEVER_DURATION_MS) * 100) : 0
+  const timeNote = isBlackout ? 'BLACKOUT' : isFrozen ? 'TIME STOP' : isFever ? 'FEVER RUSH' : doubleLeft > 0 ? 'DOUBLE SCORE' : 'CHAIN BONUS'
 
   return (
     <section
       ref={containerRef}
       className="mini-game-panel sd-panel"
       aria-label="spot-diff-game"
-      style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}
+      style={{ maxWidth: '468px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...getShakeStyle() }}
     >
       <style>{GAME_EFFECTS_CSS}{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -534,6 +661,26 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           font-family: 'Press Start 2P', monospace;
           position: relative;
           image-rendering: pixelated;
+        }
+
+        .sd-topbar {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 14px 14px 6px;
+          gap: 12px;
+          z-index: 3;
+          position: relative;
+        }
+
+        .sd-game-chip {
+          margin: 0;
+          font-size: 10px;
+          color: #f8fafc;
+          background: rgba(15,23,42,0.9);
+          border: 2px solid #60a5fa;
+          padding: 9px 12px;
+          box-shadow: 0 0 0 2px rgba(96,165,250,0.2);
         }
 
         /* CRT Scanlines */
@@ -573,31 +720,51 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         /* Top HUD */
         .sd-hud {
           display: flex;
-          align-items: flex-end;
+          align-items: stretch;
           justify-content: space-between;
-          padding: 10px 12px 6px;
-          gap: 6px;
+          padding: 6px 14px 10px;
+          gap: 10px;
           z-index: 2;
           position: relative;
+        }
+
+        .sd-hud-card {
+          background: linear-gradient(180deg, rgba(15,52,96,0.92) 0%, rgba(22,33,62,0.92) 100%);
+          border: 2px solid rgba(96,165,250,0.35);
+          box-shadow: inset 0 0 0 2px rgba(15,23,42,0.55);
+          padding: 10px 12px 9px;
         }
 
         .sd-score-box {
           display: flex;
           flex-direction: column;
           gap: 2px;
+          min-width: 0;
+          flex: 1.25;
         }
 
         .sd-score {
-          font-size: clamp(18px, 5vw, 24px);
+          font-size: clamp(26px, 7vw, 38px);
           color: #facc15;
           margin: 0;
           line-height: 1.2;
           text-shadow: 2px 2px 0 #92400e, 0 0 8px rgba(250,204,21,0.3);
         }
 
+        .sd-meta-label {
+          font-size: 10px;
+          color: #93c5fd;
+          margin: 0 0 4px;
+          text-shadow: 1px 1px 0 #082f49;
+        }
+
+        .sd-meta-label-right {
+          text-align: right;
+        }
+
         .sd-best {
-          font-size: 7px;
-          color: #a78bfa;
+          font-size: 9px;
+          color: #c4b5fd;
           margin: 0;
         }
 
@@ -605,37 +772,47 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 3px;
+          justify-content: center;
+          gap: 4px;
+          flex: 0.95;
         }
 
-        .sd-round-text {
-          font-size: 9px;
+        .sd-round-value {
+          font-size: clamp(22px, 6vw, 32px);
           color: #22d3ee;
           margin: 0;
-          text-shadow: 1px 1px 0 #0e7490;
+          line-height: 1;
+          text-shadow: 2px 2px 0 #0e7490;
         }
 
         .sd-grid-text {
-          font-size: 7px;
+          font-size: 9px;
           color: #67e8f9;
           margin: 0;
           background: rgba(6,182,212,0.2);
-          padding: 2px 6px;
+          padding: 4px 7px;
           border: 1px solid rgba(6,182,212,0.4);
         }
 
         .sd-time-box {
           text-align: right;
+          flex: 1;
         }
 
         .sd-time {
-          font-size: clamp(16px, 4.5vw, 22px);
+          font-size: clamp(23px, 6vw, 34px);
           color: #4ade80;
           margin: 0;
           font-variant-numeric: tabular-nums;
           line-height: 1.2;
           text-shadow: 2px 2px 0 #14532d;
           transition: color 0.2s;
+        }
+
+        .sd-time-note {
+          font-size: 9px;
+          color: #bfdbfe;
+          margin: 6px 0 0;
         }
 
         .sd-time.low {
@@ -655,9 +832,9 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
         /* Time Bar */
         .sd-time-bar-bg {
-          height: 8px;
+          height: 10px;
           background: #16213e;
-          margin: 0 12px 2px;
+          margin: 0 14px 4px;
           border: 2px solid #374151;
           z-index: 2;
           position: relative;
@@ -674,16 +851,16 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          padding: 2px 12px 4px;
-          min-height: 20px;
+          gap: 10px;
+          padding: 6px 14px 8px;
+          min-height: 36px;
           z-index: 2;
           position: relative;
           flex-wrap: wrap;
         }
 
         .sd-combo {
-          font-size: 9px;
+          font-size: 11px;
           margin: 0;
           animation: sd-combo-bounce 0.3s ease-out;
         }
@@ -694,10 +871,10 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .sd-fever-pill {
-          font-size: 7px;
+          font-size: 9px;
           color: #1a1a2e;
           background: #facc15;
-          padding: 2px 8px;
+          padding: 5px 10px;
           border: 2px solid #eab308;
           animation: sd-fever-flash 0.3s step-end infinite;
         }
@@ -707,24 +884,33 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .sd-double-pill {
-          font-size: 7px;
+          font-size: 9px;
           color: #fff;
           background: #7c3aed;
-          padding: 2px 8px;
+          padding: 5px 10px;
           border: 2px solid #a78bfa;
         }
 
         .sd-frozen-pill {
-          font-size: 7px;
+          font-size: 9px;
           color: #1a1a2e;
           background: #67e8f9;
-          padding: 2px 8px;
+          padding: 5px 10px;
           border: 2px solid #22d3ee;
           animation: sd-freeze-pulse 0.5s step-end infinite;
         }
 
         @keyframes sd-freeze-pulse {
           50% { opacity: 0.6; }
+        }
+
+        .sd-blackout-pill {
+          font-size: 9px;
+          color: #e2e8f0;
+          background: #0f172a;
+          padding: 5px 10px;
+          border: 2px solid #64748b;
+          animation: sd-blink 0.45s step-end infinite;
         }
 
         /* Fever Bar */
@@ -759,6 +945,28 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           opacity: 0.3;
           pointer-events: none;
           filter: grayscale(0.8);
+        }
+
+        .sd-blackout-mask {
+          position: absolute;
+          inset: 6px 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background:
+            radial-gradient(circle at center, rgba(15,23,42,0.12) 0%, rgba(15,23,42,0.76) 72%),
+            repeating-linear-gradient(0deg, rgba(2,6,23,0.14), rgba(2,6,23,0.14) 2px, rgba(2,6,23,0.28) 2px, rgba(2,6,23,0.28) 4px);
+          border: 2px solid rgba(148,163,184,0.4);
+          pointer-events: none;
+          z-index: 6;
+        }
+
+        .sd-blackout-text {
+          margin: 0;
+          font-size: clamp(16px, 5vw, 24px);
+          color: rgba(226,232,240,0.92);
+          text-shadow: 2px 2px 0 #020617;
+          opacity: 0.9;
         }
 
         .sd-grid {
@@ -805,11 +1013,6 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           box-shadow: 0 0 0 2px #22c55e, inset 0 0 8px rgba(34,197,94,0.5);
         }
 
-        .sd-cell.hint {
-          box-shadow: 0 0 0 2px rgba(250,204,21,var(--ho,0)), inset 0 0 12px rgba(250,204,21, calc(var(--ho,0) * 0.3));
-          border-color: rgba(250,204,21, calc(var(--ho,0) * 0.8 + 0.2));
-        }
-
         .sd-cell.freeze-cell {
           border-color: #22d3ee;
           animation: sd-freeze-glow 1s step-end infinite;
@@ -827,6 +1030,23 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
         @keyframes sd-freeze-glow {
           50% { border-color: #67e8f9; background: #0e4456; }
+        }
+
+        .sd-cell.jammer {
+          border-color: #fb7185;
+        }
+
+        .sd-cell[data-threat='jammer']::after {
+          content: '';
+          position: absolute;
+          left: 4px;
+          bottom: 4px;
+          width: 10px;
+          height: 10px;
+          background: #fb7185;
+          clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+          opacity: 0.95;
+          box-shadow: 0 0 10px rgba(251,113,133,0.55);
         }
 
         .sd-cell.shuffle-flash {
@@ -869,40 +1089,36 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .sd-bottom {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 4px 12px 10px;
-          gap: 8px;
+          justify-content: center;
+          padding: 10px 14px 14px;
+          gap: 10px;
           z-index: 2;
           position: relative;
+          flex-wrap: wrap;
         }
 
-        .sd-hint-text {
-          font-size: 7px;
-          color: #9ca3af;
-          margin: 0;
+        .sd-tip-pill {
+          font-size: 9px;
+          color: #dbeafe;
+          background: rgba(15,23,42,0.72);
+          border: 2px solid rgba(96,165,250,0.35);
+          padding: 6px 10px;
         }
 
-        .sd-penalty {
-          font-size: 6px;
-          color: #f87171;
-          margin: 2px 0 0;
+        .sd-tip-pill.warn {
+          color: #fecaca;
+          border-color: rgba(248,113,113,0.5);
         }
 
-        .sd-exit {
-          font-size: 7px;
-          color: #9ca3af;
-          background: transparent;
-          border: 2px solid #374151;
-          padding: 6px 12px;
-          cursor: pointer;
-          font-family: 'Press Start 2P', monospace;
-          transition: border-color 0.15s;
-          -webkit-tap-highlight-color: transparent;
+        .sd-tip-pill.danger {
+          color: #ffe4e6;
+          border-color: rgba(251,113,133,0.55);
+          background: rgba(76,5,25,0.72);
         }
 
-        .sd-exit:active {
-          border-color: #6b7280;
-          background: rgba(255,255,255,0.05);
+        .sd-tip-pill.cool {
+          color: #cffafe;
+          border-color: rgba(34,211,238,0.5);
         }
 
         /* Overlays */
@@ -1003,6 +1219,26 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           100% { transform: translate(-50%, -90%); opacity: 0; }
         }
 
+        .sd-glitch-popup {
+          position: absolute;
+          top: 46%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: clamp(14px, 4.5vw, 22px);
+          color: #fb7185;
+          text-shadow: 2px 2px 0 #881337, -2px 0 0 rgba(34,211,238,0.7);
+          z-index: 42;
+          animation: sd-glitch-fly 0.9s ease-out forwards;
+          pointer-events: none;
+        }
+
+        @keyframes sd-glitch-fly {
+          0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+          20% { transform: translate(-51%, -50%) scale(1.15); opacity: 1; }
+          40% { transform: translate(-49%, -50%) scale(0.96); }
+          100% { transform: translate(-50%, -78%) scale(0.86); opacity: 0; }
+        }
+
         /* Game Over */
         .sd-gameover {
           position: absolute;
@@ -1047,24 +1283,32 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       `}</style>
 
       <PixelStars count={30} />
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={isFlashing} flashColor={flashColor} />
+      <ParticleRenderer particles={particles} />
+      <ScorePopupRenderer popups={scorePopups} />
+
+      <div className="sd-topbar">
+        <p className="sd-game-chip">SPOT DIFF</p>
+      </div>
 
       {/* HUD */}
       <div className="sd-hud">
-        <div className="sd-score-box">
+        <div className="sd-score-box sd-hud-card">
+          <p className="sd-meta-label">SCORE</p>
           <p className="sd-score">{score.toLocaleString()}</p>
           <p className="sd-best">BEST {bestDisp.toLocaleString()}</p>
         </div>
-        <div className="sd-round-box">
-          <p className="sd-round-text">ROUND {round + 1}</p>
-          <p className="sd-grid-text">{gridSize}x{gridSize}</p>
+        <div className="sd-round-box sd-hud-card">
+          <p className="sd-meta-label">ROUND</p>
+          <p className="sd-round-value">{round + 1}</p>
+          <p className="sd-grid-text">{gridSize}x{gridSize} GRID</p>
         </div>
-        <div className="sd-time-box">
+        <div className="sd-time-box sd-hud-card">
+          <p className="sd-meta-label sd-meta-label-right">TIME</p>
           <p className={`sd-time ${isLow ? 'low' : ''} ${isFrozen ? 'frozen' : ''}`}>
             {isFrozen ? 'FREEZE' : `${timeSec}s`}
           </p>
+          <p className="sd-time-note">{timeNote}</p>
         </div>
       </div>
 
@@ -1082,6 +1326,7 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         {isFever && <span className="sd-fever-pill">FEVER x{FEVER_MULT} {(feverMs / 1000).toFixed(1)}s</span>}
         {doubleLeft > 0 && <span className="sd-double-pill">x2 ({doubleLeft})</span>}
         {isFrozen && <span className="sd-frozen-pill">FROZEN!</span>}
+        {isBlackout && <span className="sd-blackout-pill">BLACKOUT</span>}
       </div>
 
       {isFever && (
@@ -1109,12 +1354,11 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           {grid.map((cell, i) => {
             const isWrong = wrongFlashIdx === cell.cellIndex
             const isCorrect = correctFlashIdx === cell.cellIndex
-            const showHint = cell.isDifferent && hintOpacity > 0 && !isCorrect
             let cls = 'sd-cell'
             if (isWrong) cls += ' wrong'
             if (isCorrect) cls += ' correct'
-            if (showHint) cls += ' hint'
             if (cell.isFreeze) cls += ' freeze-cell'
+            if (cell.isJammer) cls += ' jammer'
             if (shuffleFlash) cls += ' shuffle-flash'
 
             return (
@@ -1124,25 +1368,27 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
                 type="button"
                 onClick={() => handleTap(cell)}
                 disabled={isGameOver}
-                style={{
-                  animationDelay: `${i * 0.02}s`,
-                  ...(showHint ? { '--ho': hintOpacity } as React.CSSProperties : {}),
-                }}
+                data-threat={cell.isJammer ? 'jammer' : undefined}
+                style={{ animationDelay: `${i * 0.02}s` }}
               >
                 <img className="sd-cell-img" src={cell.character.imageSrc} alt={cell.character.name} draggable={false} />
               </button>
             )
           })}
         </div>
+        {isBlackout && (
+          <div className="sd-blackout-mask" aria-hidden>
+            <p className="sd-blackout-text">BLACKOUT</p>
+          </div>
+        )}
       </div>
 
       {/* Bottom */}
       <div className="sd-bottom">
-        <div>
-          <p className="sd-hint-text">FIND THE ODD ONE!</p>
-          <p className="sd-penalty">MISS: -{TIME_PENALTY_MS / 1000}s</p>
-        </div>
-        <button className="sd-exit" type="button" onClick={onExit}>EXIT</button>
+        <span className="sd-tip-pill">ODD ONE = SCORE</span>
+        <span className="sd-tip-pill warn">MISS: -{TIME_PENALTY_MS / 1000}s</span>
+        <span className="sd-tip-pill danger">GLITCH: -{GLITCH_PENALTY_MS / 1000}s</span>
+        <span className="sd-tip-pill cool">FREEZE STOPS TIME</span>
       </div>
 
       {/* Round Transition */}
@@ -1157,6 +1403,9 @@ function SpotDiffGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
       {/* Perfect */}
       {showPerfect && <div className="sd-perfect-popup">PERFECT!</div>}
+
+      {/* Glitch Trap */}
+      {showGlitchTrap && <div className="sd-glitch-popup">GLITCH TRAP!</div>}
 
       {/* Streak Milestone */}
       {showStreakMilestone > 0 && <div className="sd-streak-popup">{showStreakMilestone} STREAK!</div>}
@@ -1182,7 +1431,7 @@ export const spotDiffModule: MiniGameModule = {
   manifest: {
     id: 'spot-diff',
     title: 'Spot Diff',
-    description: 'Find the different one! Faster = higher score!',
+    description: 'Find the odd one while glitches, blackout, and shuffles pile on.',
     unlockCost: 25,
     baseReward: 11,
     scoreRewardMultiplier: 1.05,

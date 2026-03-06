@@ -3,7 +3,7 @@ import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
-// ─── Sound imports (12 SFX) ──────────────────────
+// ─── Sound imports (12 SFX + BGM) ────────────────
 import hitSfx from '../../../assets/sounds/ball-bounce-hit.mp3'
 import perfectSfx from '../../../assets/sounds/ball-bounce-perfect.mp3'
 import feverSfx from '../../../assets/sounds/ball-bounce-fever.mp3'
@@ -16,6 +16,7 @@ import coinSfx from '../../../assets/sounds/ball-bounce-coin.mp3'
 import windSfx from '../../../assets/sounds/ball-bounce-wind.mp3'
 import levelupSfx from '../../../assets/sounds/ball-bounce-levelup.mp3'
 import dashSfx from '../../../assets/sounds/ball-bounce-dash.mp3'
+import ballBounceBgm from '../../../assets/sounds/ball-bounce-bgm.mp3'
 
 // ─── Pixel palette (NES-inspired) ────────────────
 const PX = {
@@ -57,7 +58,8 @@ const BALL_R = 28
 const TAP_RADIUS = 110
 const PERFECT_RADIUS = 44
 const COMBO_DECAY_MS = 2200
-const HT_SCORE_DIV = 65
+const HT_SCORE_DIV = 220
+const HEIGHT_SCORE_INTERVAL_MS = 400
 const PX_BORDER = 3
 
 // PowerUps
@@ -80,7 +82,7 @@ const OB_SPEED = 0.09
 // Stars (coins)
 const STAR_SPAWN_MS = 3500
 const STAR_SIZE = 22
-const STAR_PTS = 5
+const STAR_PTS = 8
 
 // Platforms
 const PLAT_CHANCE = 0.2
@@ -92,6 +94,31 @@ const PLAT_DUR_MS = 5000
 const WIND_INTERVAL_MS = 15000
 const WIND_DURATION_MS = 3000
 const WIND_FORCE = 0.06
+
+// Teleport gates
+const GATE_SPAWN_MS = 12500
+const GATE_SIZE = 42
+const GATE_TTL_MS = 4500
+const GATE_BONUS_PTS = 12
+const GATE_COOLDOWN_MS = 700
+const GATE_EXIT_PUSH = 0.24
+
+// Spring rings
+const SPRING_RING_SPAWN_MS = 9000
+const SPRING_RING_SIZE = 56
+const SPRING_RING_TTL_MS = 5200
+const SPRING_RING_BONUS_PTS = 10
+const SPRING_RING_VY = -0.82
+
+// Laser sweep
+const LASER_INTERVAL_MS = 17000
+const LASER_WARN_MS = 1100
+const LASER_ACTIVE_MS = 1600
+const LASER_WIDTH = 34
+const LASER_HIT_COOLDOWN_MS = 550
+const LASER_HIT_VY = 0.38
+const LASER_HIT_PUSH = 0.22
+const LASER_COMBO_PENALTY = 3
 
 // Score zones (horizontal bands that give bonus)
 const SCORE_ZONE_COUNT = 3
@@ -108,6 +135,9 @@ interface Ob { x: number; y: number; w: number; h: number; vx: number }
 interface Star { x: number; y: number; ok: boolean; frame: number }
 interface Trail { x: number; y: number; age: number }
 interface ScoreZone { y: number; h: number; mult: number; color: string }
+interface GatePair { leftY: number; rightY: number; ms: number; cooldown: number }
+interface SpringRing { x: number; y: number; ms: number }
+interface LaserSweep { x: number; phase: 'warn' | 'active'; ms: number; cooldown: number }
 
 // ─── Helpers ─────────────────────────────────────
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
@@ -122,10 +152,10 @@ const pxBorder = (color: string, size = PX_BORDER) =>
 function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const fx = useGameEffects({ maxParticles: 50 })
   const fxRef = useRef(fx)
-  fxRef.current = fx
   const arenaRef = useRef<HTMLDivElement | null>(null)
 
   // Arena measured size
+  const [arenaW, setArenaW] = useState(320)
   const [arenaH, setArenaH] = useState(568)
   const awRef = useRef(320)
   const ahRef = useRef(568)
@@ -155,6 +185,10 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const [zones, setZones] = useState<ScoreZone[]>([])
   const [level, setLevel] = useState(1)
   const [dashReady, setDashReady] = useState(true)
+  const [gatePair, setGatePair] = useState<GatePair | null>(null)
+  const [rings, setRings] = useState<SpringRing[]>([])
+  const [laser, setLaser] = useState<LaserSweep | null>(null)
+  const [starFrame, setStarFrame] = useState(0)
 
   // Refs
   const bxR = useRef(160)
@@ -182,11 +216,18 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const zonesR = useRef<ScoreZone[]>([])
   const levelR = useRef(1)
   const dashReadyR = useRef(true)
+  const gateR = useRef<GatePair | null>(null)
+  const ringsR = useRef<SpringRing[]>([])
+  const laserR = useRef<LaserSweep | null>(null)
   const dashCdR = useRef(0)
   const lastPuSpawnR = useRef(0)
   const lastObSpawnR = useRef(0)
   const lastStarSpawnR = useRef(0)
   const lastWindR = useRef(0)
+  const lastGateSpawnR = useRef(0)
+  const lastRingSpawnR = useRef(0)
+  const lastLaserSpawnR = useRef(0)
+  const lastHeightScoreR = useRef(0)
   const lastMsRef = useRef(0)
   const msTimerRef = useRef<number | null>(null)
   const rafR = useRef<number | null>(null)
@@ -195,30 +236,53 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const feverR = useRef(false)
   const trailCntR = useRef(0)
   const measuredR = useRef(false)
-  const starFrameR = useRef(0)
 
   // Audio
   const audR = useRef<Record<string, HTMLAudioElement | null>>({})
+  const bgmRef = useRef<HTMLAudioElement | null>(null)
   const sfx = useCallback((k: string, vol: number, rate = 1) => {
     const a = audR.current[k]
     if (!a) return
     a.currentTime = 0; a.volume = vol; a.playbackRate = rate
     void a.play().catch(() => {})
   }, [])
+  const startBgm = useCallback(() => {
+    const bgm = bgmRef.current
+    if (!bgm || doneR.current) return
+    if (bgm.paused) void bgm.play().catch(() => {})
+  }, [])
 
   // ─── Init audio ────────────────────────────────
+  useEffect(() => {
+    fxRef.current = fx
+  }, [fx])
+
   useEffect(() => {
     const srcs: Record<string, string> = {
       hit: hitSfx, perfect: perfectSfx, fever: feverSfx, wall: wallSfx,
       powerup: powerupSfx, fall: fallSfx, combo: comboSfx, comboBreak: comboBreakSfx,
       coin: coinSfx, wind: windSfx, levelup: levelupSfx, dash: dashSfx,
     }
+    const audios = audR.current
     for (const [k, s] of Object.entries(srcs)) {
-      const a = new Audio(s); a.preload = 'auto'; audR.current[k] = a
+      const a = new Audio(s); a.preload = 'auto'; audios[k] = a
     }
     return () => {
-      for (const a of Object.values(audR.current)) { if (a) { a.pause(); a.currentTime = 0 } }
+      for (const a of Object.values(audios)) { if (a) { a.pause(); a.currentTime = 0 } }
       fxRef.current.cleanup()
+    }
+  }, [])
+
+  useEffect(() => {
+    const bgm = new Audio(ballBounceBgm)
+    bgm.preload = 'auto'
+    bgm.loop = true
+    bgm.volume = 0.22
+    bgmRef.current = bgm
+    return () => {
+      bgm.pause()
+      bgm.currentTime = 0
+      bgmRef.current = null
     }
   }, [])
 
@@ -249,7 +313,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       if (!el) return
       const w = el.clientWidth, h = el.clientHeight
       if (w > 0 && h > 0) {
-        awRef.current = w; ahRef.current = h; setArenaH(h)
+        awRef.current = w; ahRef.current = h; setArenaW(w); setArenaH(h)
         if (!measuredR.current) {
           measuredR.current = true
           bxR.current = w / 2; byR.current = h * 0.55
@@ -266,6 +330,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const finish = useCallback(() => {
     if (doneR.current) return
     doneR.current = true; setOver(true)
+    if (bgmRef.current) { bgmRef.current.pause(); bgmRef.current.currentTime = 0 }
     sfx('fall', 0.7, 0.85)
     fxRef.current.triggerShake(14, 400)
     fxRef.current.triggerFlash('rgba(255,48,48,0.5)', 250)
@@ -396,12 +461,13 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       sfx('hit', 0.45, 1 + nc * 0.01)
     }
     if (nc > 0 && nc % 5 === 0) sfx('combo', 0.4, 0.9 + nc * 0.01)
-  }, [sfx, applyPU, finish])
+  }, [sfx])
 
   // ─── Double-tap dash ───────────────────────────
   const lastTapRef = useRef(0)
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault()
+    startBgm()
     const now = performance.now()
     const dt = now - lastTapRef.current
     lastTapRef.current = now
@@ -418,7 +484,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     }
 
     handleTap(e.clientX, e.clientY)
-  }, [handleTap, sfx])
+  }, [handleTap, sfx, startBgm])
 
   // ─── ESC ───────────────────────────────────────
   useEffect(() => {
@@ -467,6 +533,30 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         if (windTimerR.current <= 0) { windR.current = 0; setWind(0) }
       }
 
+      if (gateR.current) {
+        gateR.current.ms -= dt
+        gateR.current.cooldown = Math.max(0, gateR.current.cooldown - dt)
+        if (gateR.current.ms <= 0) {
+          gateR.current = null
+          setGatePair(null)
+        } else {
+          setGatePair({ ...gateR.current })
+        }
+      }
+
+      if (laserR.current) {
+        laserR.current.ms -= dt
+        laserR.current.cooldown = Math.max(0, laserR.current.cooldown - dt)
+        if (laserR.current.phase === 'warn' && laserR.current.ms <= 0) {
+          laserR.current = { ...laserR.current, phase: 'active', ms: LASER_ACTIVE_MS, cooldown: 0 }
+          setLaser({ ...laserR.current })
+          fxRef.current.triggerFlash(`${PX.danger}44`, 90)
+        } else if (laserR.current.ms <= 0) {
+          laserR.current = null
+          setLaser(null)
+        }
+      }
+
       // Gravity + wind
       const grav = apuR.current === 'slow' ? BASE_GRAVITY * 0.4 : gravR.current
       vyR.current += grav * dt
@@ -489,6 +579,43 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
       }
 
+      if (gateR.current && gateR.current.cooldown <= 0) {
+        const leftGateX = 10 + GATE_SIZE / 2
+        const rightGateX = AW - 10 - GATE_SIZE / 2
+        const leftHit = Math.hypot(nx - leftGateX, ny - gateR.current.leftY) < br + GATE_SIZE * 0.45
+        const rightHit = Math.hypot(nx - rightGateX, ny - gateR.current.rightY) < br + GATE_SIZE * 0.45
+        if (leftHit || rightHit) {
+          const exitLeft = rightHit
+          nx = exitLeft ? leftGateX + br * 0.7 : rightGateX - br * 0.7
+          ny = exitLeft ? gateR.current.leftY : gateR.current.rightY
+          vxR.current = exitLeft ? -(Math.abs(vxR.current) + GATE_EXIT_PUSH) : Math.abs(vxR.current) + GATE_EXIT_PUSH
+          vyR.current = Math.min(vyR.current, -0.34)
+          gateR.current.cooldown = GATE_COOLDOWN_MS
+          scoreR.current += GATE_BONUS_PTS
+          setScore(scoreR.current)
+          fxRef.current.showScorePopup(GATE_BONUS_PTS, nx, ny - 12, PX.purple)
+          fxRef.current.spawnParticles(6, nx, ny, ['W', '+'], 'circle')
+          fxRef.current.triggerFlash(`${PX.purple}44`, 100)
+          sfx('powerup', 0.35, 1.2)
+          setGatePair({ ...gateR.current })
+        }
+      }
+
+      for (let i = ringsR.current.length - 1; i >= 0; i--) {
+        const ring = ringsR.current[i]
+        if (Math.hypot(nx - ring.x, ny - ring.y) < br + SPRING_RING_SIZE * 0.42) {
+          ringsR.current.splice(i, 1)
+          vyR.current = SPRING_RING_VY
+          vxR.current += (nx < ring.x ? -1 : 1) * 0.04
+          scoreR.current += SPRING_RING_BONUS_PTS
+          setScore(scoreR.current)
+          fxRef.current.showScorePopup(SPRING_RING_BONUS_PTS, ring.x, ring.y - 18, PX.green)
+          fxRef.current.spawnParticles(6, ring.x, ring.y, ['UP', '+', '!'])
+          fxRef.current.triggerFlash(`${PX.green}44`, 100)
+          sfx('dash', 0.4, 1.15)
+        }
+      }
+
       // Obstacle
       for (let i = obsR.current.length - 1; i >= 0; i--) {
         const o = obsR.current[i]; o.x += o.vx * dt
@@ -502,6 +629,33 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
             fxRef.current.spawnParticles(4, nx, ny, ['X', '!'])
           }
         }
+      }
+
+      if (
+        laserR.current?.phase === 'active'
+        && laserR.current.cooldown <= 0
+        && Math.abs(nx - laserR.current.x) < br + LASER_WIDTH / 2
+      ) {
+        laserR.current.cooldown = LASER_HIT_COOLDOWN_MS
+        if (shieldR.current) {
+          shieldR.current = false
+          setShield(false)
+          fxRef.current.triggerFlash(`${PX.shield}77`, 100)
+          fxRef.current.spawnParticles(5, laserR.current.x, ny, ['!', '*'])
+        } else {
+          vyR.current = Math.max(vyR.current, LASER_HIT_VY)
+          vxR.current += (nx < laserR.current.x ? -1 : 1) * LASER_HIT_PUSH
+          const nextCombo = Math.max(0, comboR.current - LASER_COMBO_PENALTY)
+          comboR.current = nextCombo
+          setCombo(nextCombo)
+          feverR.current = nextCombo >= FEVER_COMBO
+          setFever(feverR.current)
+          fxRef.current.triggerShake(8, 140)
+          fxRef.current.triggerFlash(`${PX.danger}55`, 120)
+          fxRef.current.spawnParticles(6, laserR.current.x, ny, ['X', '!'])
+          sfx('comboBreak', 0.35, 1.05)
+        }
+        setLaser({ ...laserR.current })
       }
 
       // Star collection + magnet
@@ -540,6 +694,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
       // Decay platforms
       platsR.current = platsR.current.map(p => ({ ...p, ms: p.ms - dt })).filter(p => p.ms > 0)
+      ringsR.current = ringsR.current.map(r => ({ ...r, ms: r.ms - dt })).filter(r => r.ms > 0)
       starsR.current = starsR.current.filter(s => !s.ok)
 
       // Floor
@@ -565,9 +720,38 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         lastStarSpawnR.current = el
         starsR.current.push({ x: 25 + Math.random() * (AW - 50), y: 35 + Math.random() * (AH * 0.45), ok: false, frame: 0 })
       }
+      if (el - lastGateSpawnR.current > GATE_SPAWN_MS * lvScale && bounceR.current > 7 && !gateR.current) {
+        lastGateSpawnR.current = el
+        gateR.current = {
+          leftY: 95 + Math.random() * (AH * 0.4),
+          rightY: 95 + Math.random() * (AH * 0.4),
+          ms: GATE_TTL_MS,
+          cooldown: 0,
+        }
+        setGatePair({ ...gateR.current })
+      }
+      if (el - lastRingSpawnR.current > SPRING_RING_SPAWN_MS * lvScale && bounceR.current > 4) {
+        lastRingSpawnR.current = el
+        ringsR.current.push({
+          x: 44 + Math.random() * (AW - 88),
+          y: 100 + Math.random() * (AH * 0.4),
+          ms: SPRING_RING_TTL_MS,
+        })
+      }
+      if (el - lastLaserSpawnR.current > LASER_INTERVAL_MS * lvScale && bounceR.current > 9 && !laserR.current) {
+        lastLaserSpawnR.current = el
+        laserR.current = {
+          x: 48 + Math.random() * (AW - 96),
+          phase: 'warn',
+          ms: LASER_WARN_MS,
+          cooldown: 0,
+        }
+        setLaser({ ...laserR.current })
+        fxRef.current.triggerFlash(`${PX.orange}33`, 80)
+      }
 
       // Star frame animation
-      starFrameR.current = (starFrameR.current + dt * 0.005) % 1
+      setStarFrame((prev) => (prev + dt * 0.005) % 1)
 
       // Trail
       trailCntR.current += dt
@@ -584,14 +768,15 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       if (ch > maxHtR.current) { maxHtR.current = ch; setMaxHt(ch) }
 
       // Height score
-      if (bounceR.current > 0) {
+      if (bounceR.current > 0 && el - lastHeightScoreR.current >= HEIGHT_SCORE_INTERVAL_MS) {
+        lastHeightScoreR.current = el
         const hs = Math.floor(ch / HT_SCORE_DIV)
         if (hs > 0) { scoreR.current += hs; setScore(scoreR.current) }
       }
 
       // Sync
       setPlats([...platsR.current]); setPus([...pusR.current]); setObs([...obsR.current])
-      setStars(starsR.current.filter(s => !s.ok)); setTrail([...trailR.current])
+      setStars(starsR.current.filter(s => !s.ok)); setTrail([...trailR.current]); setRings([...ringsR.current])
 
       fxRef.current.updateParticles()
       rafR.current = requestAnimationFrame(step)
@@ -630,6 +815,9 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         @keyframes bb-pop{0%{transform:scale(0);opacity:0}40%{transform:scale(1.3);opacity:1}100%{transform:scale(1);opacity:1}}
         @keyframes bb-danger{0%,100%{border-color:${PX.danger}66}50%{border-color:${PX.danger}}}
         @keyframes bb-wind-arrow{0%{opacity:0;transform:translateX(-20px)}50%{opacity:.5}100%{opacity:0;transform:translateX(20px)}}
+        @keyframes bb-portal-glow{0%,100%{transform:scale(1);opacity:.75}50%{transform:scale(1.08);opacity:1}}
+        @keyframes bb-laser-warn{0%,100%{opacity:.18}50%{opacity:.55}}
+        @keyframes bb-laser-live{0%,100%{opacity:.72}50%{opacity:1}}
       `}</style>
       <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
       <ParticleRenderer particles={fx.particles} />
@@ -642,12 +830,24 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         background: `linear-gradient(180deg, ${PX.black}ee 0%, transparent 100%)`,
       }}>
         {/* Score row */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 36, fontWeight: 800, color: PX.text, textShadow: `2px 2px 0 ${PX.black}` }}>
-            {score.toLocaleString()}
-          </span>
-          <span style={{ fontSize: 14, color: PX.textDim }}>
-            BEST {best.toLocaleString()}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span style={{
+              fontSize: 72,
+              lineHeight: 0.9,
+              letterSpacing: -2,
+              fontWeight: 800,
+              color: PX.text,
+              textShadow: `3px 3px 0 ${PX.black}`,
+            }}>
+              {score.toLocaleString()}
+            </span>
+            <span style={{ fontSize: 14, color: PX.textDim }}>
+              BEST {best.toLocaleString()}
+            </span>
+          </div>
+          <span style={{ fontSize: 13, color: PX.textDim, textAlign: 'right' }}>
+            TAP OR DOUBLE TAP
           </span>
         </div>
 
@@ -658,6 +858,44 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           <span style={{ color: bc, fontWeight: 700 }}>C<strong>{combo}</strong></span>
           <span>HT<strong style={{ color: PX.text }}>{Math.floor(maxHt)}</strong></span>
         </div>
+
+        {(gatePair || rings.length > 0 || laser) && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {gatePair && (
+              <span style={{
+                padding: '2px 6px',
+                fontSize: 12,
+                color: PX.white,
+                background: `${PX.purple}cc`,
+                boxShadow: pxBorder(PX.black, 1),
+              }}>
+                WARP OPEN
+              </span>
+            )}
+            {rings.length > 0 && (
+              <span style={{
+                padding: '2px 6px',
+                fontSize: 12,
+                color: PX.white,
+                background: `${PX.green}cc`,
+                boxShadow: pxBorder(PX.black, 1),
+              }}>
+                SPRING x{rings.length}
+              </span>
+            )}
+            {laser && (
+              <span style={{
+                padding: '2px 6px',
+                fontSize: 12,
+                color: PX.white,
+                background: laser.phase === 'warn' ? `${PX.orange}cc` : `${PX.danger}cc`,
+                boxShadow: pxBorder(PX.black, 1),
+              }}>
+                {laser.phase === 'warn' ? 'LASER WARN' : 'LASER LIVE'}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Fever */}
         {fever && (
@@ -740,6 +978,56 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           </div>
         )}
 
+        {gatePair && (
+          <>
+            {[
+              { side: 'left', y: gatePair.leftY, left: 10, color: PX.purple },
+              { side: 'right', y: gatePair.rightY, left: arenaW - GATE_SIZE - 10, color: PX.platform },
+            ].map((gate) => (
+              <div key={`gate-${gate.side}`} style={{
+                position: 'absolute',
+                left: gate.left,
+                top: gate.y - GATE_SIZE / 2,
+                width: GATE_SIZE,
+                height: GATE_SIZE,
+                borderRadius: '50%',
+                border: `4px solid ${gate.color}`,
+                boxShadow: `0 0 0 2px ${PX.black}, inset 0 0 12px ${gate.color}88, 0 0 14px ${gate.color}88`,
+                animation: 'bb-portal-glow 0.8s ease-in-out infinite',
+                pointerEvents: 'none',
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  inset: 7,
+                  borderRadius: '50%',
+                  border: `2px dashed ${PX.white}88`,
+                  animation: 'bb-spin 1.8s linear infinite',
+                }} />
+              </div>
+            ))}
+          </>
+        )}
+
+        {laser && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: laser.x - LASER_WIDTH / 2,
+            width: LASER_WIDTH,
+            background: laser.phase === 'warn'
+              ? `linear-gradient(180deg, transparent 0%, ${PX.orange}44 16%, ${PX.orange}99 50%, ${PX.orange}44 84%, transparent 100%)`
+              : `linear-gradient(180deg, transparent 0%, ${PX.danger}55 12%, ${PX.white}cc 50%, ${PX.danger}55 88%, transparent 100%)`,
+            boxShadow: laser.phase === 'warn'
+              ? `0 0 0 2px ${PX.orange}66`
+              : `0 0 18px ${PX.danger}aa, 0 0 30px ${PX.white}55`,
+            opacity: laser.phase === 'warn' ? 0.45 : 0.92,
+            animation: laser.phase === 'warn' ? 'bb-laser-warn 0.25s linear infinite' : 'bb-laser-live 0.12s linear infinite',
+            pointerEvents: 'none',
+            zIndex: 6,
+          }} />
+        )}
+
         {/* Floor (pixel style) */}
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: 8,
@@ -794,9 +1082,31 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           }} />
         ))}
 
+        {rings.map((ring, i) => (
+          <div key={`ring-${i}`} style={{
+            position: 'absolute',
+            left: ring.x - SPRING_RING_SIZE / 2,
+            top: ring.y - SPRING_RING_SIZE / 2,
+            width: SPRING_RING_SIZE,
+            height: SPRING_RING_SIZE,
+            borderRadius: '50%',
+            border: `4px dashed ${PX.green}`,
+            boxShadow: `0 0 0 2px ${PX.black}, 0 0 12px ${PX.green}99`,
+            animation: 'bb-pulse 0.45s ease-in-out infinite',
+            opacity: Math.min(1, ring.ms / 900),
+          }}>
+            <div style={{
+              position: 'absolute',
+              inset: 9,
+              borderRadius: '50%',
+              border: `2px solid ${PX.white}99`,
+            }} />
+          </div>
+        ))}
+
         {/* Stars (pixel coin) */}
         {stars.map((s, i) => {
-          const f = Math.floor(((s.frame || 0) + starFrameR.current * 4) % 4)
+          const f = Math.floor(((s.frame || 0) + starFrame * 4) % 4)
           const w = f === 0 ? STAR_SIZE : f === 1 ? STAR_SIZE * 0.7 : f === 2 ? STAR_SIZE * 0.3 : STAR_SIZE * 0.7
           return (
             <div key={`st-${i}`} style={{
@@ -887,7 +1197,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
               textShadow: `3px 3px 0 ${PX.black}`, margin: 0,
             }}>GAME OVER</p>
             <p style={{
-              fontSize: 28, color: PX.accent, fontWeight: 700, margin: 0,
+              fontSize: 56, color: PX.accent, fontWeight: 700, margin: 0,
               textShadow: `2px 2px 0 ${PX.black}`,
             }}>Score: {score.toLocaleString()}</p>
             <div style={{ fontSize: 16, color: PX.textDim, textAlign: 'center' }}>

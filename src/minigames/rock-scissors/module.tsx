@@ -25,6 +25,11 @@ import timebonusSfx from '../../../assets/sounds/rock-scissors-timebonus.mp3'
 import tauntSfx from '../../../assets/sounds/rock-scissors-taunt.mp3'
 import roundStartSfx from '../../../assets/sounds/rock-scissors-round-start.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import uiButtonPopSfx from '../../../assets/sounds/ui-button-pop.mp3'
+import cannonHitSfx from '../../../assets/sounds/cannon-hit.mp3'
+import cannonWhooshSfx from '../../../assets/sounds/cannon-whoosh.mp3'
+import comboMilestoneSfx from '../../../assets/sounds/combo-milestone.mp3'
+import feverTimeBoostSfx from '../../../assets/sounds/fever-time-boost.mp3'
 
 const ROUND_DURATION_MS = 90000
 const LOW_TIME_THRESHOLD_MS = 10000
@@ -48,6 +53,9 @@ const STREAK_MILESTONE_BONUS = 15
 const STREAK_MILESTONES = [10, 20, 30, 50]
 const TIME_BONUS_MS = 5000
 const TIME_BONUS_STREAKS = [5, 15, 25, 40]
+const WIN_PARTICLE_EMOJIS = ['💥', '⚡', '🔥', '🌟', '✨'] as const
+const DRAW_PARTICLE_EMOJIS = ['✨', '💫', '🌀', '⭐'] as const
+const LOSE_PARTICLE_EMOJIS = ['💢', '⚠️', '☄️'] as const
 
 type Hand = 'rock' | 'scissors' | 'paper'
 type RoundResult = 'win' | 'lose' | 'draw'
@@ -145,10 +153,23 @@ function getPatternHint(history: Hand[]): string | null {
   return null
 }
 
-type AudioRefMap = Record<string, React.MutableRefObject<HTMLAudioElement | null>>
+type AudioElementMap = Record<string, HTMLAudioElement | null>
 
 function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const effects = useGameEffects()
+  const {
+    particles,
+    scorePopups,
+    isFlashing,
+    flashColor,
+    spawnParticles,
+    triggerShake,
+    triggerFlash,
+    showScorePopup,
+    comboHitBurst,
+    updateParticles,
+    cleanup: cleanupEffects,
+    getShakeStyle,
+  } = useGameEffects()
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [wins, setWins] = useState(0)
@@ -173,9 +194,11 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [feverActive, setFeverActive] = useState(false)
   const [recentHistory, setRecentHistory] = useState<{ player: Hand; ai: Hand; result: RoundResult }[]>([])
   const feverActiveRef = useRef(false)
+  const panelRef = useRef<HTMLElement | null>(null)
 
   const scoreRef = useRef(0)
   const comboRef = useRef(0)
+  const speedTierRef = useRef(0)
   const maxComboRef = useRef(0)
   const winsRef = useRef(0)
   const drawsRef = useRef(0)
@@ -193,22 +216,27 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const lowTimeSecondRef = useRef<number | null>(null)
   const revealStartRef = useRef<number>(0)
 
-  const audioRefs: AudioRefMap = {
-    shake: useRef<HTMLAudioElement | null>(null),
-    win: useRef<HTMLAudioElement | null>(null),
-    lose: useRef<HTMLAudioElement | null>(null),
-    draw: useRef<HTMLAudioElement | null>(null),
-    combo: useRef<HTMLAudioElement | null>(null),
-    fever: useRef<HTMLAudioElement | null>(null),
-    tick: useRef<HTMLAudioElement | null>(null),
-    perfect: useRef<HTMLAudioElement | null>(null),
-    critical: useRef<HTMLAudioElement | null>(null),
-    speedup: useRef<HTMLAudioElement | null>(null),
-    timebonus: useRef<HTMLAudioElement | null>(null),
-    taunt: useRef<HTMLAudioElement | null>(null),
-    roundStart: useRef<HTMLAudioElement | null>(null),
-    gameOver: useRef<HTMLAudioElement | null>(null),
-  }
+  const audioRefs = useRef<AudioElementMap>({
+    shake: null,
+    win: null,
+    lose: null,
+    draw: null,
+    combo: null,
+    fever: null,
+    tick: null,
+    perfect: null,
+    critical: null,
+    speedup: null,
+    timebonus: null,
+    taunt: null,
+    roundStart: null,
+    gameOver: null,
+    select: null,
+    impact: null,
+    whoosh: null,
+    milestone: null,
+    boost: null,
+  })
 
   const clearTimeoutSafe = (timerRef: { current: number | null }) => {
     if (timerRef.current !== null) {
@@ -219,7 +247,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
   const playAudio = useCallback(
     (key: string, volume: number, playbackRate = 1) => {
-      const audio = audioRefs[key]?.current
+      const audio = audioRefs.current[key]
       if (!audio) return
       audio.currentTime = 0
       audio.volume = Math.min(1, Math.max(0, volume))
@@ -228,6 +256,15 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     },
     [],
   )
+
+  const getEffectPoint = useCallback((xRatio: number, yRatio: number) => {
+    const rect = panelRef.current?.getBoundingClientRect()
+
+    return {
+      x: rect ? rect.width * xRatio : 216,
+      y: rect ? rect.height * yRatio : 360,
+    }
+  }, [])
 
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
@@ -271,6 +308,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       setAiTaunt(null)
       setAiReaction(null)
 
+      playAudio('select', 0.24, 0.94 + Math.random() * 0.12)
       playAudio('shake', 0.5, 1)
 
       const speedReduction = Math.min(250, Math.floor(scoreRef.current / 10) * SPEED_UP_PER_10_SCORE / 10)
@@ -281,6 +319,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         if (finishedRef.current) return
 
         playAudio('roundStart', 0.3, 1.1)
+        playAudio('whoosh', 0.16, 0.9 + Math.random() * 0.12)
 
         const aiChoice = pickAiHand(aiHistoryRef.current, getDifficulty())
         aiHistoryRef.current = [...aiHistoryRef.current, aiChoice]
@@ -297,6 +336,10 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         let scoreDelta = 0
         let nextCombo = comboRef.current
         const rolledCritical = Math.random() < CRITICAL_CHANCE
+        const centerFx = getEffectPoint(0.5, 0.47)
+        const playerFx = getEffectPoint(0.28, 0.48)
+        const aiFx = getEffectPoint(0.72, 0.48)
+        const scoreFx = getEffectPoint(0.16, 0.16)
 
         if (result === 'win') {
           nextCombo += 1
@@ -307,17 +350,22 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             scoreDelta *= CRITICAL_MULTIPLIER
             setIsCritical(true)
             playAudio('critical', 0.6, 1)
-            effects.spawnParticles(8, 200, 250)
+            playAudio('impact', 0.34, 0.9)
+            spawnParticles(10, centerFx.x, centerFx.y, WIN_PARTICLE_EMOJIS)
+            triggerShake(10, 180)
+            triggerFlash('rgba(250, 204, 21, 0.34)', 120)
           }
 
           if (isPerfectTiming) {
             scoreDelta += PERFECT_TIMING_BONUS
             setIsPerfect(true)
             playAudio('perfect', 0.5, 1.2)
+            playAudio('boost', 0.18, 1.12)
           }
 
           if (nextCombo === MIND_READER_THRESHOLD) {
             scoreDelta += MIND_READER_BONUS
+            playAudio('milestone', 0.28, 0.96)
           }
           if (nextCombo >= FEVER_COMBO_THRESHOLD) {
             scoreDelta *= FEVER_MULTIPLIER
@@ -325,18 +373,21 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
               feverActiveRef.current = true
               setFeverActive(true)
               playAudio('fever', 0.55, 1)
+              playAudio('boost', 0.26, 1.02)
             }
           }
 
           if (STREAK_MILESTONES.includes(nextCombo)) {
             scoreDelta += STREAK_MILESTONE_BONUS
             setStreakAnnounce(`${nextCombo}\uC5F0\uC2B9! +${STREAK_MILESTONE_BONUS}`)
+            playAudio('milestone', 0.42, 0.94 + nextCombo * 0.01)
           }
 
           if (TIME_BONUS_STREAKS.includes(nextCombo)) {
             remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_MS)
             setTimeBonusMsg(`+${TIME_BONUS_MS / 1000}s TIME!`)
             playAudio('timebonus', 0.5, 1)
+            playAudio('boost', 0.24, 0.94)
           }
 
           if (nextCombo >= 3 && !rolledCritical) {
@@ -344,19 +395,25 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           } else if (!rolledCritical) {
             playAudio('win', 0.5, 1 + nextCombo * 0.04)
           }
+          playAudio('impact', 0.22, 0.98 + Math.min(nextCombo, 5) * 0.03)
 
           winsRef.current += 1
           setWins(winsRef.current)
           setFlashClass('rps-flash-win')
           setAiReaction(AI_LOSE_REACTIONS[Math.floor(Math.random() * AI_LOSE_REACTIONS.length)])
-          effects.triggerFlash()
-          effects.spawnParticles(3 + Math.min(nextCombo, 6), 200, 250)
+          comboHitBurst(centerFx.x, centerFx.y, nextCombo, 0, WIN_PARTICLE_EMOJIS)
+          spawnParticles(4 + Math.min(nextCombo, 8), playerFx.x, playerFx.y, WIN_PARTICLE_EMOJIS)
+          spawnParticles(5 + Math.min(nextCombo, 8), aiFx.x, aiFx.y, WIN_PARTICLE_EMOJIS)
+          showScorePopup(scoreDelta, scoreFx.x, scoreFx.y, feverActiveRef.current ? '#fbbf24' : '#22c55e')
         } else if (result === 'draw') {
           scoreDelta = SCORE_DRAW
           drawsRef.current += 1
           setDraws(drawsRef.current)
           setFlashClass('rps-flash-draw')
           playAudio('draw', 0.4, 0.95)
+          playAudio('whoosh', 0.12, 0.84)
+          triggerFlash('rgba(250, 204, 21, 0.22)', 100)
+          spawnParticles(7, centerFx.x, centerFx.y, DRAW_PARTICLE_EMOJIS)
         } else {
           nextCombo = 0
           scoreDelta = SCORE_LOSE
@@ -365,9 +422,13 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           setFlashClass('rps-flash-lose')
           feverActiveRef.current = false
           setFeverActive(false)
-          effects.triggerShake(6)
-          effects.triggerFlash('rgba(239,68,68,0.5)')
+          triggerShake(8, 170)
+          triggerFlash('rgba(239,68,68,0.42)', 120)
+          spawnParticles(8, centerFx.x, centerFx.y, LOSE_PARTICLE_EMOJIS)
+          spawnParticles(5, playerFx.x, playerFx.y, LOSE_PARTICLE_EMOJIS)
           playAudio('lose', 0.5, 0.85)
+          playAudio('impact', 0.24, 0.76)
+          playAudio('whoosh', 0.16, 0.74)
           setAiReaction(AI_WIN_REACTIONS[Math.floor(Math.random() * AI_WIN_REACTIONS.length)])
 
           if (Math.random() < 0.4) {
@@ -388,6 +449,13 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         const nextScore = scoreRef.current + scoreDelta
         scoreRef.current = nextScore
         setScore(nextScore)
+        const nextSpeedTier = Math.max(0, Math.floor(Math.max(0, nextScore) / 10))
+        if (nextSpeedTier > speedTierRef.current) {
+          playAudio('speedup', 0.28, 1 + nextSpeedTier * 0.04)
+          playAudio('boost', 0.14, 0.96)
+          triggerFlash('rgba(59, 130, 246, 0.16)', 90)
+        }
+        speedTierRef.current = nextSpeedTier
 
         setAiHand(aiChoice)
         setLastResult(result)
@@ -429,7 +497,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         }, REVEAL_DURATION_MS)
       }, currentShakeDuration)
     },
-    [playAudio, getDifficulty],
+    [comboHitBurst, getDifficulty, getEffectPoint, playAudio, showScorePopup, spawnParticles, triggerFlash, triggerShake],
   )
 
   useEffect(() => {
@@ -438,12 +506,15 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       combo: comboSfx, fever: feverSfx, tick: tickSfx, perfect: perfectSfx,
       critical: criticalSfx, speedup: speedupSfx, timebonus: timebonusSfx,
       taunt: tauntSfx, roundStart: roundStartSfx, gameOver: gameOverHitSfx,
+      select: uiButtonPopSfx, impact: cannonHitSfx, whoosh: cannonWhooshSfx,
+      milestone: comboMilestoneSfx, boost: feverTimeBoostSfx,
     }
+    const audioElements = audioRefs.current
 
     for (const [key, src] of Object.entries(sfxMap)) {
       const audio = new Audio(src)
       audio.preload = 'auto'
-      if (audioRefs[key]) audioRefs[key].current = audio
+      audioElements[key] = audio
     }
 
     revealStartRef.current = performance.now()
@@ -452,12 +523,12 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       clearTimeoutSafe(phaseTimerRef)
       clearTimeoutSafe(flashTimerRef)
       clearTimeoutSafe(popupTimerRef)
-      effects.cleanup()
+      cleanupEffects()
       for (const key of Object.keys(sfxMap)) {
-        if (audioRefs[key]) audioRefs[key].current = null
+        audioElements[key] = null
       }
     }
-  }, [])
+  }, [cleanupEffects])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -489,6 +560,13 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         if (lowTimeSecondRef.current !== nextLowTimeSecond) {
           lowTimeSecondRef.current = nextLowTimeSecond
           playAudio('tick', 0.25, 1.1 + (LOW_TIME_THRESHOLD_MS - remainingMsRef.current) / 12000)
+          if (nextLowTimeSecond <= 5) {
+            triggerFlash('rgba(239,68,68,0.14)', 90)
+            triggerShake(2, 90)
+            if (nextLowTimeSecond === 5 || nextLowTimeSecond === 3) {
+              playAudio('whoosh', 0.1, 0.78 + (5 - nextLowTimeSecond) * 0.06)
+            }
+          }
         }
       } else {
         lowTimeSecondRef.current = null
@@ -496,7 +574,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       if (remainingMsRef.current <= 0) { finishGame(); animationFrameRef.current = null; return }
 
-      effects.updateParticles()
+      updateParticles()
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
 
@@ -508,22 +586,27 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       }
       lastFrameAtRef.current = null
     }
-  }, [finishGame, playAudio])
+  }, [finishGame, playAudio, triggerFlash, triggerShake, updateParticles])
 
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS && remainingMs > 0
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const comboLabel = combo >= 2 ? `x${Math.min(combo, 5)}` : ''
   const timerProgress = remainingMs / ROUND_DURATION_MS
   const winRate = rounds > 0 ? Math.round((wins / rounds) * 100) : 0
+  const playerFrameResultClass =
+    lastResult === 'win' ? 'rps-hand-win' : lastResult === 'lose' ? 'rps-hand-lose' : lastResult === 'draw' ? 'rps-hand-draw' : ''
+  const aiFrameResultClass =
+    lastResult === 'lose' ? 'rps-hand-win' : lastResult === 'win' ? 'rps-hand-lose' : lastResult === 'draw' ? 'rps-hand-draw' : ''
 
   const resultLabel =
     lastResult === 'win' ? 'WIN!' : lastResult === 'lose' ? 'LOSE' : lastResult === 'draw' ? 'DRAW' : ''
 
   return (
     <section
-      className={`mini-game-panel rps-panel ${feverActive ? 'rps-fever-bg' : ''}`}
+      ref={panelRef}
+      className={`mini-game-panel rps-panel ${feverActive ? 'rps-fever-bg' : ''} ${isLowTime ? 'rps-lowtime-bg' : ''}`}
       aria-label="rock-scissors-game"
-      style={{ position: 'relative', maxWidth: '432px', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}
+      style={{ position: 'relative', margin: '0 auto', overflow: 'hidden', ...getShakeStyle() }}
     >
       {/* Timer Bar */}
       <div className="rps-timer-bar">
@@ -564,10 +647,23 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       {/* Arena */}
       <div className={`rps-arena ${flashClass}`}>
+        {feverActive && combo >= FEVER_COMBO_THRESHOLD && <div className="rps-fever-halo" aria-hidden="true" />}
+        {isLowTime && <div className="rps-lowtime-halo" aria-hidden="true" />}
+        {lastResult !== null && (
+          <div className={`rps-impact-burst burst-${lastResult}`} aria-hidden="true">
+            <span className="rps-impact-ring primary" />
+            <span className="rps-impact-ring secondary" />
+            <span className="rps-impact-spark spark-a" />
+            <span className="rps-impact-spark spark-b" />
+            <span className="rps-impact-spark spark-c" />
+            {lastResult === 'win' && combo >= 3 && <span className="rps-impact-combo">{comboLabel} RUSH</span>}
+          </div>
+        )}
+
         {/* Player Side */}
         <div className="rps-fighter-col">
           <img src={playerCharImg} alt="Player" className="rps-char-icon" />
-          <div className={`rps-hand-frame player-frame ${phase === 'shaking' ? 'rps-shaking' : ''} ${lastResult === 'win' ? 'rps-pulse-win' : ''}`}>
+          <div className={`rps-hand-frame player-frame ${phase === 'shaking' ? 'rps-shaking' : ''} ${lastResult === 'win' ? 'rps-pulse-win' : ''} ${playerFrameResultClass}`}>
             {playerHand ? (
               <img src={HAND_IMAGES[playerHand]} alt={playerHand} className="rps-hand-img" />
             ) : (
@@ -596,7 +692,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         {/* AI Side */}
         <div className="rps-fighter-col">
           <img src={aiCharImg} alt="AI" className="rps-char-icon" />
-          <div className={`rps-hand-frame ai-frame ${phase === 'shaking' ? 'rps-shaking' : ''} ${lastResult === 'lose' ? 'rps-pulse-win' : ''}`}>
+          <div className={`rps-hand-frame ai-frame ${phase === 'shaking' ? 'rps-shaking' : ''} ${lastResult === 'lose' ? 'rps-pulse-win' : ''} ${aiFrameResultClass}`}>
             {phase === 'revealing' && aiHand ? (
               <img src={HAND_IMAGES[aiHand]} alt={aiHand} className="rps-hand-img" />
             ) : (
@@ -649,9 +745,9 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       <style>{GAME_EFFECTS_CSS}</style>
       <style>{RPS_CSS}</style>
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={isFlashing} flashColor={flashColor} />
+      <ParticleRenderer particles={particles} />
+      <ScorePopupRenderer popups={scorePopups} />
     </section>
   )
 }
@@ -718,6 +814,141 @@ const RPS_CSS = `
   0% { opacity: 0; transform: scale(0) rotate(-20deg); }
   40% { opacity: 1; transform: scale(1.3) rotate(5deg); }
   100% { opacity: 0; transform: scale(0.5) translateY(-20px); }
+}
+@keyframes rps-impact-ring {
+  0% { opacity: 0.95; transform: scale(0.28); }
+  100% { opacity: 0; transform: scale(1.18); }
+}
+@keyframes rps-impact-spark {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--spark-rotate)) scaleY(0.2); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -125%) rotate(var(--spark-rotate)) scaleY(1); }
+}
+@keyframes rps-impact-combo {
+  0% { opacity: 0; transform: translate(-50%, -90%) scale(0.7); }
+  30% { opacity: 1; transform: translate(-50%, -140%) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -170%) scale(0.94); }
+}
+@keyframes rps-fever-halo {
+  0% { opacity: 0.2; transform: scale(0.94); }
+  100% { opacity: 0.78; transform: scale(1.06); }
+}
+@keyframes rps-lowtime-halo {
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 0.28; }
+}
+@keyframes rps-hand-win-slam {
+  0% { transform: translateY(0) scale(1); }
+  32% { transform: translateY(-10px) scale(1.1) rotate(-4deg); }
+  60% { transform: translateY(4px) scale(0.96) rotate(3deg); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes rps-hand-lose-jolt {
+  0% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-8px) rotate(-6deg); }
+  60% { transform: translateX(6px) rotate(4deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+@keyframes rps-hand-draw-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.rps-fever-halo,
+.rps-lowtime-halo,
+.rps-impact-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.rps-fever-halo,
+.rps-lowtime-halo {
+  inset: 6% 4%;
+  border-radius: 28px;
+  z-index: 0;
+}
+.rps-fever-halo {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(253, 224, 71, 0.26), rgba(253, 224, 71, 0) 55%),
+    radial-gradient(circle at 50% 55%, rgba(249, 115, 22, 0.22), rgba(249, 115, 22, 0) 72%);
+  animation: rps-fever-halo 0.55s ease-in-out infinite alternate;
+}
+.rps-lowtime-halo {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(239, 68, 68, 0.18), rgba(239, 68, 68, 0) 60%);
+  animation: rps-lowtime-halo 0.5s ease-in-out infinite;
+}
+.rps-impact-burst {
+  z-index: 0;
+}
+.rps-impact-burst.burst-win {
+  --rps-impact-main: rgba(34, 197, 94, 0.55);
+  --rps-impact-accent: rgba(134, 239, 172, 0.95);
+}
+.rps-impact-burst.burst-draw {
+  --rps-impact-main: rgba(250, 204, 21, 0.46);
+  --rps-impact-accent: rgba(253, 224, 71, 0.95);
+}
+.rps-impact-burst.burst-lose {
+  --rps-impact-main: rgba(239, 68, 68, 0.52);
+  --rps-impact-accent: rgba(252, 165, 165, 0.96);
+}
+.rps-impact-ring {
+  position: absolute;
+  inset: 24% 31%;
+  border: 4px solid var(--rps-impact-main);
+  border-radius: 999px;
+  box-shadow: 0 0 28px var(--rps-impact-main);
+  animation: rps-impact-ring 0.56s ease-out forwards;
+}
+.rps-impact-ring.secondary {
+  inset: 18% 25%;
+  border-style: dashed;
+  animation-duration: 0.72s;
+  animation-delay: 0.04s;
+}
+.rps-impact-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(14px, 4vw, 22px);
+  height: clamp(70px, 18vw, 118px);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--rps-impact-accent));
+  box-shadow: 0 0 22px var(--rps-impact-accent);
+  transform-origin: center bottom;
+  animation: rps-impact-spark 0.56s ease-out forwards;
+}
+.rps-impact-spark.spark-a { --spark-rotate: -52deg; }
+.rps-impact-spark.spark-b { --spark-rotate: 0deg; animation-delay: 0.03s; }
+.rps-impact-spark.spark-c { --spark-rotate: 52deg; animation-delay: 0.06s; }
+.rps-impact-combo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -145%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: clamp(0.88rem, 2.7vw, 1.05rem);
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: #fff7ed;
+  background: rgba(15, 23, 42, 0.72);
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.28);
+  animation: rps-impact-combo 0.7s ease-out forwards;
+}
+.rps-hand-win {
+  animation: rps-hand-win-slam 0.48s cubic-bezier(0.2, 0.9, 0.18, 1) both;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14), 0 18px 34px rgba(34, 197, 94, 0.22);
+}
+.rps-hand-lose {
+  animation: rps-hand-lose-jolt 0.42s ease-out both;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12), 0 18px 34px rgba(239, 68, 68, 0.18);
+}
+.rps-hand-draw {
+  animation: rps-hand-draw-bump 0.36s ease-out both;
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.12), 0 18px 34px rgba(250, 204, 21, 0.16);
 }
 `
 

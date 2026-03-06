@@ -6,6 +6,7 @@ import kimYeonjaSprite from '../../../assets/images/same-character/kim-yeonja.pn
 import parkSangminSprite from '../../../assets/images/same-character/park-sangmin.png'
 import parkWankyuSprite from '../../../assets/images/same-character/park-wankyu.png'
 import seoTaijiSprite from '../../../assets/images/same-character/seo-taiji.png'
+import flappySingerBgmLoop from '../../../assets/sounds/generated/flappy-singer/flappy-singer-bgm-loop.mp3'
 import flapSfxUrl from '../../../assets/sounds/flappy-singer-flap.mp3'
 import scoreSfxUrl from '../../../assets/sounds/flappy-singer-score.mp3'
 import coinSfxUrl from '../../../assets/sounds/flappy-singer-coin.mp3'
@@ -19,6 +20,7 @@ import lifelostSfxUrl from '../../../assets/sounds/flappy-singer-lifelost.mp3'
 import streakSfxUrl from '../../../assets/sounds/flappy-singer-streak.mp3'
 import windSfxUrl from '../../../assets/sounds/flappy-singer-wind.mp3'
 import goldenSfxUrl from '../../../assets/sounds/flappy-singer-golden.mp3'
+import { getActiveBgmTrack, playBackgroundAudio as playSharedBgm, stopBackgroundAudio as stopSharedBgm } from '../../gui/sound-manager'
 
 // ─── Character Pool ─────────────────────────────────────────
 const CHARACTER_SPRITES = [kimYeonjaSprite, parkSangminSprite, parkWankyuSprite, seoTaijiSprite]
@@ -33,6 +35,12 @@ const MAX_FALL_VELOCITY = 0.55
 const CHAR_X = 72
 const CHAR_SIZE = 40
 const HITBOX_SHRINK = 7
+const CHARACTER_ROTATION_FACTOR = 82
+const CHARACTER_ROTATION_MIN = -18
+const CHARACTER_ROTATION_MAX = 38
+const WING_FLAP_SPEED = 0.0052
+const WING_SCALE_BASE = 0.88
+const WING_SCALE_AMPLITUDE = 0.12
 
 const PIPE_W = 44
 const PIPE_SPEED_BASE = 0.13
@@ -45,7 +53,9 @@ const PIPE_CAP_H = 12
 const PIPE_CAP_OH = 4
 
 const GROUND_H = 40
+const FLOOR_DEATH_Y = VH - GROUND_H - CHAR_SIZE / 2 + HITBOX_SHRINK
 const TIMEOUT_MS = 120000
+const FLAPPY_SINGER_BGM_VOLUME = 0.2
 
 const PIPE_SPEED_INC = 0.0025
 const MAX_PIPE_SPEED = 0.28
@@ -276,10 +286,11 @@ function streakLabel(streak: number): string | null {
 
 // ─── Game CSS ───────────────────────────────────────────────
 const CSS = `
-.fs-panel{width:100%;height:100%;max-width:432px;margin:0 auto;overflow:hidden;position:relative;background:#000;touch-action:manipulation;user-select:none;-webkit-user-select:none}
-.fs-board{position:relative;width:100%;height:100%}
+.fs-panel{width:100%;height:100%;max-width:432px;margin:0 auto;padding:0;overflow:hidden;position:relative;display:flex;flex-direction:column;box-sizing:border-box;background:#000;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.fs-board{position:relative;width:100%;height:100%;flex:1;min-height:0}
 .fs-svg{display:block;width:100%;height:100%}
-.fs-hud{position:absolute;top:8px;left:0;right:0;z-index:10;pointer-events:none;text-align:center}
+.fs-hud{position:absolute;top:8px;left:0;right:0;z-index:10;padding:0 72px;pointer-events:none;text-align:center}
+.fs-actions{position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:24}
 .fs-score{font-size:clamp(2.5rem,10vw,3.5rem);font-weight:900;color:#fff;text-shadow:3px 3px 0 #1f2937,-1px -1px 0 #1f2937,1px -1px 0 #1f2937,-1px 1px 0 #1f2937;margin:0;line-height:1;font-family:monospace}
 .fs-best{font-size:clamp(0.55rem,2.3vw,0.75rem);color:#fbbf24;text-shadow:1px 1px 0 #1f2937;margin:1px 0 0;font-family:monospace}
 .fs-hp{display:flex;justify-content:center;gap:2px;margin:3px 0}
@@ -293,8 +304,7 @@ const CSS = `
 .fs-start-sub{font-size:clamp(0.55rem,2.3vw,0.75rem);color:#e2e8f0;text-shadow:1px 1px 0 #1f2937;margin:6px 0 0;font-family:monospace}
 .fs-go-txt{font-size:clamp(2rem,9vw,3rem);font-weight:900;color:#ef4444;text-shadow:3px 3px 0 #1f2937;font-family:monospace;animation:fs-shake .4s ease-out}
 .fs-go-score{font-size:clamp(1.2rem,5vw,1.6rem);font-weight:700;color:#fbbf24;text-shadow:2px 2px 0 #1f2937;margin:6px 0 0;font-family:monospace}
-.fs-btns{position:absolute;bottom:12px;left:0;right:0;display:flex;justify-content:center;gap:8px;z-index:20}
-.fs-btn{padding:8px 18px;font-size:clamp(0.6rem,2.5vw,0.75rem);font-weight:700;border:2px solid #6b7280;border-radius:5px;background:rgba(31,41,55,.85);color:#f9fafb;cursor:pointer;box-shadow:2px 2px 0 #374151;min-height:40px;font-family:monospace}
+.fs-btn{padding:7px 12px;font-size:clamp(0.55rem,2.4vw,0.7rem);font-weight:700;border:2px solid #6b7280;border-radius:5px;background:rgba(31,41,55,.88);color:#f9fafb;cursor:pointer;box-shadow:2px 2px 0 #374151;min-height:36px;min-width:62px;font-family:monospace}
 .fs-btn.ghost{background:rgba(31,41,55,.5);border-color:#4b5563;color:#9ca3af}
 .fs-multi{font-size:clamp(0.7rem,3vw,0.9rem);font-weight:800;color:#fbbf24;text-shadow:2px 2px 0 #1f2937;text-align:center;margin:1px 0;font-family:monospace;animation:fs-pulse .5s ease-in-out infinite alternate}
 .fs-fever{position:absolute;inset:0;pointer-events:none;z-index:5;border:3px solid rgba(251,191,36,.6);box-shadow:inset 0 0 30px rgba(251,191,36,.15);animation:fs-fglow .8s ease-in-out infinite alternate}
@@ -305,6 +315,7 @@ const CSS = `
 .fs-scanline{position:absolute;inset:0;pointer-events:none;z-index:4;background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0px,rgba(0,0,0,0) 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);mix-blend-mode:multiply}
 .fs-vignette{position:absolute;inset:0;pointer-events:none;z-index:3;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.25) 100%)}
 .fs-dmg-flash{position:absolute;inset:0;pointer-events:none;z-index:30;animation:fs-dmg .3s ease-out forwards}
+.hub-frame.game-immersive .fs-panel{min-height:100%;height:100%}
 @keyframes fs-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 @keyframes fs-shake{0%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}100%{transform:translateX(0)}}
 @keyframes fs-pulse{from{transform:scale(1)}to{transform:scale(1.08)}}
@@ -388,6 +399,10 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const fxRef = useRef(fx)
   fxRef.current = fx
 
+  const ensureBgm = useCallback(() => {
+    playSharedBgm(flappySingerBgmLoop, FLAPPY_SINGER_BGM_VOLUME)
+  }, [])
+
   // ─── Refs ─────────────────────────────────────────────────
   const R = useRef({
     score: 0, charY: VH / 2, vel: 0, pipes: [] as Pipe[], coins: [] as Coin[],
@@ -426,19 +441,41 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     onFinishRef.current({ score: R.current.score, durationMs: R.current.elapsed > 0 ? Math.round(R.current.elapsed) : Math.round(DEFAULT_FRAME_MS) })
   }, [])
 
+  const triggerDeath = useCallback((impactY: number) => {
+    const colors = ['#ef4444', '#f97316', '#fbbf24', '#22c55e', '#3b82f6', '#a855f7']
+    const dpx: DeathPixel[] = Array.from({ length: 16 }, (_, i) => ({
+      id: i,
+      x: CHAR_X,
+      y: impactY,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      color: colors[i % colors.length],
+      size: 3 + Math.random() * 4,
+      life: 1,
+    }))
+    R.current.deathPx = dpx
+    setDeathPx(dpx)
+    setOver(true)
+    sfx(A.current.crash, 0.65, 0.95)
+    fxRef.current.triggerShake(16)
+    fxRef.current.triggerFlash('rgba(239,68,68,.5)')
+    finish()
+  }, [finish, sfx])
+
   const flap = useCallback(() => {
     if (R.current.finished) return
     if (!R.current.started) { R.current.started = true; setStarted(true) }
+    ensureBgm()
     R.current.vel = FLAP_VELOCITY; setVel(FLAP_VELOCITY)
     sfx(A.current.flap, 0.4, 1.1)
     fxRef.current.spawnParticles(3, CHAR_X - 10, R.current.charY + 20)
     const nn = ['♪', '♫', '♬', '♩']
     const t: NoteTrail = { id: R.current.trailId++, x: CHAR_X + 15 + Math.random() * 10, y: R.current.charY - 5 + Math.random() * 10, opacity: 1, note: nn[Math.floor(Math.random() * nn.length)] }
     R.current.notes = [...R.current.notes, t].slice(-8); setNotes([...R.current.notes])
-  }, [sfx])
+  }, [ensureBgm, sfx])
 
   const tap = useCallback((e: React.PointerEvent | React.MouseEvent) => { e.preventDefault(); flap() }, [flap])
-  const rot = useMemo(() => clamp(vel * 120, -30, 70), [vel])
+  const rot = useMemo(() => clamp(vel * CHARACTER_ROTATION_FACTOR, CHARACTER_ROTATION_MIN, CHARACTER_ROTATION_MAX), [vel])
 
   useEffect(() => {
     const kd = (e: KeyboardEvent) => {
@@ -458,20 +495,32 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     A.current.mag = ld(magnetSfxUrl); A.current.life = ld(lifelostSfxUrl)
     A.current.streak = ld(streakSfxUrl); A.current.wind = ld(windSfxUrl)
     A.current.golden = ld(goldenSfxUrl)
-    return () => { fxRef.current.cleanup(); for (const a of aa) { a.pause(); a.currentTime = 0 } }
+    return () => {
+      fxRef.current.cleanup()
+      if (getActiveBgmTrack() === flappySingerBgmLoop) stopSharedBgm()
+      for (const a of aa) { a.pause(); a.currentTime = 0 }
+    }
   }, [])
+
+  useEffect(() => {
+    ensureBgm()
+    return () => {
+      if (getActiveBgmTrack() === flappySingerBgmLoop) stopSharedBgm()
+    }
+  }, [ensureBgm])
 
   // ─── Game Loop ────────────────────────────────────────────
   useEffect(() => {
-    R.current.lastFrame = null
+    const current = R.current
+    current.lastFrame = null
     const step = (now: number) => {
-      const r = R.current
+      const r = current
       if (r.finished) { r.raf = null; return }
       if (r.lastFrame === null) r.lastFrame = now
       const dt = Math.min(now - r.lastFrame, MAX_FRAME_DELTA_MS)
       r.lastFrame = now
 
-      r.wingPh = (r.wingPh + dt * 0.008) % (Math.PI * 2); setWingPh(r.wingPh)
+      r.wingPh = (r.wingPh + dt * WING_FLAP_SPEED) % (Math.PI * 2); setWingPh(r.wingPh)
 
       // Cloud & mountain scroll
       r.cloudOff = r.cloudOff.map((o, i) => { const n = o + CLOUDS[i].speed * dt; return n > VW + CLOUDS[i].w ? -CLOUDS[i].w : n })
@@ -504,6 +553,14 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       r.vel = nv; setVel(nv)
       const ny = r.charY + nv * dt; r.charY = ny; setCharY(ny)
       const pipeSpd = Math.min(MAX_PIPE_SPEED, PIPE_SPEED_BASE + r.score * PIPE_SPEED_INC)
+
+      if (ny >= FLOOR_DEATH_Y) {
+        r.charY = FLOOR_DEATH_Y; setCharY(FLOOR_DEATH_Y)
+        r.vel = 0; setVel(0)
+        triggerDeath(FLOOR_DEATH_Y)
+        r.raf = null
+        return
+      }
 
       r.gndX = (r.gndX + pipeSpd * dt) % 16; setGndX(r.gndX)
 
@@ -671,16 +728,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           nStreak = 0; r.streak = 0; setStreak(0)
 
           if (r.hp <= 0) {
-            // Death - spawn pixel explosion
-            const colors = ['#ef4444', '#f97316', '#fbbf24', '#22c55e', '#3b82f6', '#a855f7']
-            const dpx: DeathPixel[] = Array.from({ length: 16 }, (_, i) => ({
-              id: i, x: CHAR_X, y: ny, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
-              color: colors[i % colors.length], size: 3 + Math.random() * 4, life: 1,
-            }))
-            r.deathPx = dpx; setDeathPx(dpx)
-            setOver(true); sfx(A.current.crash, 0.65, 0.95)
-            fxRef.current.triggerShake(16); fxRef.current.triggerFlash('rgba(239,68,68,.5)')
-            finish(); r.raf = null; return
+            triggerDeath(ny); r.raf = null; return
           } else {
             // Damage but alive
             sfx(A.current.life, 0.55, 1)
@@ -694,14 +742,14 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       r.raf = requestAnimationFrame(step)
     }
-    R.current.raf = requestAnimationFrame(step)
+    current.raf = requestAnimationFrame(step)
     return () => {
-      if (R.current.raf !== null) { cancelAnimationFrame(R.current.raf); R.current.raf = null }
-      R.current.lastFrame = null
-      if (R.current.nmTimer) clearTimeout(R.current.nmTimer)
+      if (current.raf !== null) { cancelAnimationFrame(current.raf); current.raf = null }
+      current.lastFrame = null
+      if (current.nmTimer) clearTimeout(current.nmTimer)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [triggerDeath])
 
   const bestDisp = Math.max(bestScore, score)
   const combo = getComboLabel(score)
@@ -710,7 +758,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const gnd = groundCol(score)
   const mt = mtCol(score)
   const isNight = score >= NIGHT_AT
-  const ws = 0.7 + Math.sin(wingPh) * 0.3
+  const ws = WING_SCALE_BASE + Math.sin(wingPh) * WING_SCALE_AMPLITUDE
   const sl = streakLabel(streak)
 
   return (
@@ -721,6 +769,12 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
         <ParticleRenderer particles={fx.particles} />
         <ScorePopupRenderer popups={fx.scorePopups} />
+        <div className="fs-actions">
+          <button className="fs-btn" type="button" onPointerDown={e => e.stopPropagation()}
+            onClick={() => { sfx(A.current.score, 0.5, 1); finish() }}>FINISH</button>
+          <button className="fs-btn ghost" type="button" onPointerDown={e => e.stopPropagation()}
+            onClick={() => onExitRef.current()}>EXIT</button>
+        </div>
 
         {/* CRT scanlines + vignette */}
         <div className="fs-scanline" />
@@ -876,7 +930,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             </g>
 
             <image href={sprite} x={-CHAR_SIZE / 2} y={-CHAR_SIZE / 2} width={CHAR_SIZE} height={CHAR_SIZE}
-              preserveAspectRatio="xMidYMid meet" style={{ imageRendering: 'pixelated' as any }} />
+              preserveAspectRatio="xMidYMid meet" style={{ imageRendering: 'pixelated' }} />
 
             {vel < -0.2 && (
               <>
@@ -941,13 +995,6 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             <p className="fs-go-score">Score: {score}</p>
           </div>
         )}
-
-        <div className="fs-btns">
-          <button className="fs-btn" type="button" onPointerDown={e => e.stopPropagation()}
-            onClick={() => { sfx(A.current.score, 0.5, 1); finish() }}>FINISH</button>
-          <button className="fs-btn ghost" type="button" onPointerDown={e => e.stopPropagation()}
-            onClick={() => onExitRef.current()}>EXIT</button>
-        </div>
       </div>
     </section>
   )
