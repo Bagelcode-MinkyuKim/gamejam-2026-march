@@ -33,6 +33,10 @@ import runRunItem01 from '../../../assets/images/Run Run/Item 01.png'
 import runRunItem02 from '../../../assets/images/Run Run/Item 02.png'
 import runRunItem03 from '../../../assets/images/Run Run/Item 03.png'
 import runRunTile01 from '../../../assets/images/Run Run/Tile 01.png'
+import runRunScoreBoard from '../../../assets/images/Run Run/Score Board.png'
+import runRunHomeButton from '../../../assets/images/Run Run/Home Btn.png'
+import runRunPauseButton from '../../../assets/images/Run Run/Pause Btn.png'
+import runRunPlayButton from '../../../assets/images/Run Run/Play Btn.png'
 
 const TICK_MS = 16
 const SPEED_STAGE_LEVELS = [100, 120, 140, 160] as const
@@ -1744,16 +1748,27 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
         </svg>
 
         <div className="run-run-hud" aria-label="현재 점수">
-          <div className="run-run-score-frame">
-            <span className="run-run-score-chip" aria-hidden="true">
-              ★
-            </span>
-            <span className="run-run-score-title">SCORE</span>
+          <div
+            className="run-run-score-frame"
+            style={{ '--run-run-score-board': `url(${runRunScoreBoard})` } as ReactCSSProperties}
+          >
             <p className="run-run-score-value">{score}</p>
           </div>
         </div>
 
-        <div className="run-run-overlay-actions">
+        <div className="run-run-overlay-actions run-run-overlay-actions-left">
+          <button
+            className="run-run-action-button"
+            type="button"
+            aria-label="홈"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onExit}
+          >
+            <img className="run-run-action-icon-image" src={runRunHomeButton} alt="" draggable={false} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="run-run-overlay-actions run-run-overlay-actions-right">
           <button
             className="run-run-action-button"
             type="button"
@@ -1761,20 +1776,13 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
             onPointerDown={(event) => event.stopPropagation()}
             onClick={togglePause}
           >
-            <span className="run-run-action-icon" aria-hidden="true">
-              {isPaused ? '▶' : 'Ⅱ'}
-            </span>
-          </button>
-          <button
-            className="run-run-action-button ghost"
-            type="button"
-            aria-label="홈"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={onExit}
-          >
-            <span className="run-run-action-icon" aria-hidden="true">
-              ⌂
-            </span>
+            <img
+              className="run-run-action-icon-image"
+              src={isPaused ? runRunPlayButton : runRunPauseButton}
+              alt=""
+              draggable={false}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
