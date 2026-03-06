@@ -279,7 +279,7 @@ function FierceCheerGame({ onFinish, onExit }: MiniGameSessionProps) {
         <svg
           className="fierce-cheer-svg"
           viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-          preserveAspectRatio="xMidYMid meet"
+          preserveAspectRatio="xMidYMid slice"
           style={{ pointerEvents: 'none' }}
         >
           <defs>

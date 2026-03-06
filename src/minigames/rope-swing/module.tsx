@@ -135,6 +135,8 @@ function PxB({ x, y, s, c, o = 1 }: { x: number; y: number; s: number; c: string
 // --- Component ---
 function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const fx = useGameEffects()
+  const fxRef = useRef(fx)
+  fxRef.current = fx
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [phase, setPhase] = useState<Phase>('swinging')
@@ -204,11 +206,16 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     void cl.play().catch(() => {})
   }, [])
 
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const fin = useCallback(() => {
     if (dnR.current) return
     dnR.current = true; phR.current = 'ended'; setPhase('ended')
-    onFinish({ score: sR.current, durationMs: Math.round(Math.max(16.66, elR.current)) })
-  }, [onFinish])
+    onFinishRef.current({ score: sR.current, durationMs: Math.round(Math.max(16.66, elR.current)) })
+  }, [])
 
   const tap = useCallback(() => {
     if (dnR.current) return
@@ -235,10 +242,10 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       p.vy = -380; p.vx *= 1.15
       djR.current -= 1; setDj(djR.current)
       sfx('bounce', 0.55, 1.3)
-      fx.spawnParticles(8, p.x, p.y)
-      fx.triggerFlash('rgba(34,197,94,0.35)')
+      fxRef.current.spawnParticles(8, p.x, p.y)
+      fxRef.current.triggerFlash('rgba(34,197,94,0.35)')
     }
-  }, [sfx, fx])
+  }, [sfx])
 
   const sync = useCallback(() => {
     const p = pR.current
@@ -262,17 +269,17 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       bounce: bounceSfx, dash: dashSfx,
     }
     for (const [k, src] of Object.entries(m)) { const a = new Audio(src); a.preload = 'auto'; auR.current[k] = a }
-    return () => { for (const a of Object.values(auR.current)) { if (a) { a.pause(); a.currentTime = 0 } }; fx.cleanup() }
+    return () => { for (const a of Object.values(auR.current)) { if (a) { a.pause(); a.currentTime = 0 } }; fxRef.current.cleanup() }
   }, [])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Escape') { e.preventDefault(); onExitRef.current(); return }
       if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); tap() }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [tap, onExit])
+  }, [tap])
 
   // --- Main game loop ---
   useEffect(() => {
@@ -326,7 +333,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           if (Math.hypot(p.x - c.x, p.y - c.y) < COIN_CR) {
             c.collected = true; cctR.current += 1; setCoinCt(cctR.current)
             let pts = COIN_PTS * cMul(coR.current); if (apuR.current.has('score-x2')) pts *= 2
-            sR.current += pts; setScore(sR.current); sfx('coin', 0.4, 1.1 + Math.random() * 0.3); fx.spawnParticles(3, c.x, c.y)
+            sR.current += pts; setScore(sR.current); sfx('coin', 0.4, 1.1 + Math.random() * 0.3); fxRef.current.spawnParticles(3, c.x, c.y)
           }
         }
         cnsR.current = cnsR.current.filter(c => !c.collected)
@@ -337,7 +344,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           if (Math.hypot(p.x - s.x, p.y - s.y) < COIN_CR) {
             s.collected = true; let pts = STAR_PTS * cMul(coR.current); if (apuR.current.has('score-x2')) pts *= 2
             sR.current += pts; setScore(sR.current); sfx('star', 0.5, 1.2)
-            fx.spawnParticles(6, s.x, s.y); fx.showScorePopup(pts, s.x, s.y - 20, '#fbbf24'); fx.triggerFlash('rgba(250,204,21,0.25)')
+            fxRef.current.spawnParticles(6, s.x, s.y); fxRef.current.showScorePopup(pts, s.x, s.y - 20, '#fbbf24'); fxRef.current.triggerFlash('rgba(250,204,21,0.25)')
           }
         }
         stR.current = stR.current.filter(s => !s.collected)
@@ -354,7 +361,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
               case 'speed-boost': apuR.current.set('speed-boost', now + SPB_MS); sfx('speedup', 0.45, 1.2); break
               case 'slow-motion': apuR.current.set('slow-motion', now + SLO_MS); sfx('slowmo', 0.45, 1); break
             }
-            sfx('combo', 0.45, 1.3); fx.triggerFlash(PUD[pu.type].gl + '40'); fx.spawnParticles(5, pu.x, pu.y)
+            sfx('combo', 0.45, 1.3); fxRef.current.triggerFlash(PUD[pu.type].gl + '40'); fxRef.current.spawnParticles(5, pu.x, pu.y)
           }
         }
         puR.current = puR.current.filter(pu => !pu.collected)
@@ -364,10 +371,10 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           if (Math.hypot(p.x - o.x, p.y - o.y) < OBS_R + PW / 3) {
             if (shR.current) {
               shR.current = false; setShld(false); apuR.current.delete('shield')
-              fx.triggerFlash('rgba(59,130,246,0.5)'); fx.triggerShake(3); sfx('grab', 0.5, 0.7); o.x = -999
+              fxRef.current.triggerFlash('rgba(59,130,246,0.5)'); fxRef.current.triggerShake(3); sfx('grab', 0.5, 0.7); o.x = -999
             } else {
               phR.current = 'falling'; setPhase('falling')
-              fx.triggerShake(6); fx.triggerFlash('rgba(239,68,68,0.5)')
+              fxRef.current.triggerShake(6); fxRef.current.triggerFlash('rgba(239,68,68,0.5)')
               sfx('fall', 0.6, 1); sfx('gameOver', 0.6, 0.9)
               fin(); rafR.current = null; sync(); return
             }
@@ -386,9 +393,9 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             const nLvl = Math.min(MAX_LVL, 1 + Math.floor(swR.current / LVL_SW))
             if (nLvl > lvR.current) {
               lvR.current = nLvl; setLvl(nLvl); setLvUp(true); setTimeout(() => setLvUp(false), 1200)
-              sfx('levelup', 0.55, 1); fx.triggerFlash('rgba(250,204,21,0.35)'); fx.spawnParticles(12, p.x, p.y)
+              sfx('levelup', 0.55, 1); fxRef.current.triggerFlash('rgba(250,204,21,0.35)'); fxRef.current.spawnParticles(12, p.x, p.y)
               chiR.current = (chiR.current + 1) % ALL_CHARS.length; setChI(chiR.current)
-              const lb = nLvl * 5; sR.current += lb; setScore(sR.current); fx.showScorePopup(lb, p.x, p.y - 40, '#fbbf24')
+              const lb = nLvl * 5; sR.current += lb; setScore(sR.current); fxRef.current.showScorePopup(lb, p.x, p.y - 40, '#fbbf24')
             }
 
             const gx = p.x - r.anchorX, gy = p.y - ROPE_AY
@@ -411,9 +418,9 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             sR.current += pts; setScore(sR.current)
             phR.current = 'swinging'; setPhase('swinging'); trR.current = []
             if (cmv > 1) sfx('combo', 0.5, 1 + coR.current * 0.02); else sfx('grab', 0.4, 1.05)
-            fx.triggerFlash(isPf ? 'rgba(250,204,21,0.4)' : undefined)
-            fx.spawnParticles(isPf ? 10 : 4, p.x, p.y)
-            if (pts > 5) fx.showScorePopup(pts, p.x, p.y - 30)
+            fxRef.current.triggerFlash(isPf ? 'rgba(250,204,21,0.4)' : undefined)
+            fxRef.current.spawnParticles(isPf ? 10 : 4, p.x, p.y)
+            if (pts > 5) fxRef.current.showScorePopup(pts, p.x, p.y - 30)
 
             if (i + 1 < allR.length) {
               const nxA = allR[i + 1] ? allR[i + 1].anchorX : r.anchorX + 100
@@ -448,7 +455,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         if (p.y > FALL_Y || p.x < -180 || p.x > VW + 180) {
           phR.current = 'falling'; setPhase('falling')
-          fx.triggerShake(5); fx.triggerFlash('rgba(239,68,68,0.5)')
+          fxRef.current.triggerShake(5); fxRef.current.triggerFlash('rgba(239,68,68,0.5)')
           sfx('fall', 0.6, 1); sfx('gameOver', 0.6, 0.9)
           fin(); rafR.current = null; sync(); return
         }
@@ -456,12 +463,13 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
       const tcx = p.x - VW / 2
       cxR.current += (tcx - cxR.current) * 0.08
-      sync(); fx.updateParticles()
+      sync(); fxRef.current.updateParticles()
       rafR.current = window.requestAnimationFrame(step)
     }
     rafR.current = window.requestAnimationFrame(step)
     return () => { if (rafR.current !== null) { window.cancelAnimationFrame(rafR.current); rafR.current = null }; lfR.current = null }
-  }, [fin, sfx, sync, fx])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const isSw = phase === 'swinging'
   const wArr = useMemo(() => {
@@ -663,7 +671,7 @@ function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, pointerEvents: 'auto', zIndex: 15 }}>
           <PxBtn l="FINISH" onClick={(e) => { e.stopPropagation(); fin() }} />
-          <PxBtn l="EXIT" g onClick={(e) => { e.stopPropagation(); onExit() }} />
+          <PxBtn l="EXIT" g onClick={(e) => { e.stopPropagation(); onExitRef.current() }} />
         </div>
       </div>
 

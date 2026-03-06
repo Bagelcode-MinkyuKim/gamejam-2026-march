@@ -180,6 +180,8 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [warps, setWarps] = useState<Warp[]>([])
 
   const fx = useGameEffects()
+  const fxRef = useRef(fx)
+  fxRef.current = fx
 
   const pxR = useRef(W / 2), txR = useRef(W / 2)
   const hpR = useRef(INIT_HP), scR = useRef(0), bonR = useRef(0), msR = useRef(0)
@@ -208,14 +210,19 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     void a.play().catch(() => {})
   }, [])
 
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const finish = useCallback(() => {
     if (finRef.current) return; finRef.current = true
     const dur = msR.current > 0 ? Math.round(msR.current) : Math.round(DEFAULT_FRAME_MS)
     const sc = Math.floor((msR.current / 1000) * PTS_SEC) + bonR.current
     play('gameover', 0.65, 0.9); setMsg('GAME OVER')
-    fx.triggerShake(14); fx.triggerFlash('rgba(239,68,68,0.6)')
-    onFinish({ score: sc, durationMs: dur })
-  }, [onFinish, play, fx])
+    fxRef.current.triggerShake(14); fxRef.current.triggerFlash('rgba(239,68,68,0.6)')
+    onFinishRef.current({ score: sc, durationMs: dur })
+  }, [play])
 
   const dash = useCallback((dir: number) => {
     const now = msR.current
@@ -225,9 +232,9 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     ghostR.current = [...ghostR.current, { x: pxR.current, y: H - PY_OFF, t: now }]
     pxR.current = nx; txR.current = nx; setPx(nx)
     setDashing(true); play('dash', 0.5, 1.2)
-    fx.spawnParticles(4, nx, H - PY_OFF)
+    fxRef.current.spawnParticles(4, nx, H - PY_OFF)
     setTimeout(() => setDashing(false), 200)
-  }, [play, fx])
+  }, [play])
 
   const updTx = useCallback((cx: number) => {
     const el = stgRef.current; if (!el) return
@@ -274,7 +281,7 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     }
     const all: HTMLAudioElement[] = []
     for (const [k, src] of Object.entries(map)) { const a = new Audio(src); a.preload = 'auto'; sfxRefs.current[k] = a; all.push(a) }
-    return () => { fx.cleanup(); for (const a of all) { a.pause(); a.currentTime = 0 } }
+    return () => { fxRef.current.cleanup(); for (const a of all) { a.pause(); a.currentTime = 0 } }
   }, [])
 
   useEffect(() => {
@@ -285,13 +292,13 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       const raw = Math.min(now - lastTRef.current, MAX_FRAME_DELTA_MS); lastTRef.current = now
       const isSlow = msR.current < slUntil.current
       const ts = isSlow ? SLOW_FACT : 1, dt = raw * ts, ds = dt / 1000
-      msR.current += raw; setMs(msR.current); fx.updateParticles()
+      msR.current += raw; setMs(msR.current); fxRef.current.updateParticles()
       const el = msR.current, sec = el / 1000, isFever = el < feverUntil.current
 
       const nl = getLevel(sec)
       if (nl > lvlR.current) {
         lvlR.current = nl; setLvl(nl); setMsg(LVL_N[nl] ?? `SECTOR ${nl + 1}`)
-        play('lvlup', 0.6, 1); fx.triggerFlash('rgba(250,204,21,0.3)', 120); fx.triggerShake(4)
+        play('lvlup', 0.6, 1); fxRef.current.triggerFlash('rgba(250,204,21,0.3)', 120); fxRef.current.triggerShake(4)
         setLvlFlash(true); setTimeout(() => setLvlFlash(false), 600)
       }
       setNebHue(LVL_HUE[Math.min(nl, LVL_HUE.length - 1)] + Math.sin(sec * 0.05) * 20)
@@ -311,7 +318,7 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         metR.current = [...metR.current, { id: nid.current++, x: rng(r, W - r), y: -r, radius: r, speed: mSpd * rng(0.8, 1.2), isFire: fire, isBoss: false, hp: 1, rot: Math.random() * 6.28, rotSpd: rng(-4, 4) }] }
 
       const bSec = Math.floor(sec / BOSS_INT_SEC)
-      if (bSec > lBossSec.current && sec > 20) { lBossSec.current = bSec; play('danger', 0.7, 0.8); setMsg('BOSS INCOMING!'); fx.triggerFlash('rgba(239,68,68,0.25)', 150); fx.triggerShake(8)
+      if (bSec > lBossSec.current && sec > 20) { lBossSec.current = bSec; play('danger', 0.7, 0.8); setMsg('BOSS INCOMING!'); fxRef.current.triggerFlash('rgba(239,68,68,0.25)', 150); fxRef.current.triggerShake(8)
         metR.current = [...metR.current, { id: nid.current++, x: W / 2, y: -BOSS_R * 2, radius: BOSS_R, speed: BOSS_SPD, isFire: true, isBoss: true, hp: BOSS_HP_MAX, rot: 0, rotSpd: 1.5 }] }
 
       if (el - lsS.current >= STAR_INT) { lsS.current = el; staR.current = [...staR.current, { id: nid.current++, x: rng(20, W - 20), y: -STAR_R, speed: STAR_SPD }] }
@@ -328,14 +335,14 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (buS > lBstSec.current) { lBstSec.current = buS; play('burst', 0.55, 1)
         for (let b = 0; b < BURST_N; b++) { const r = rng(M_MIN_R, M_MAX_R)
           metR.current = [...metR.current, { id: nid.current++, x: rng(r, W - r), y: -r - b * 35, radius: r, speed: mSpd * rng(0.9, 1.4), isFire: Math.random() < 0.3, isBoss: false, hp: 1, rot: Math.random() * 6.28, rotSpd: rng(-4, 4) }] }
-        setMsg('METEOR BURST!'); fx.triggerFlash('rgba(249,115,22,0.35)', 100); fx.triggerShake(6) }
+        setMsg('METEOR BURST!'); fxRef.current.triggerFlash('rgba(249,115,22,0.35)', 100); fxRef.current.triggerShake(6) }
 
       const laS = Math.floor(sec / LASER_SEC)
       if (laS > lLasSec.current && sec > 10) { lLasSec.current = laS; play('laser', 0.45, 1)
         lasR.current = [...lasR.current, { x: rng(LASER_W, W - LASER_W), warnAt: el, activeAt: el + LASER_WARN, endAt: el + LASER_WARN + LASER_ACT }] }
 
       const hrS = Math.floor(sec / HP_REST_SEC)
-      if (hrS > lHpSec.current && hpR.current < MAX_HP) { lHpSec.current = hrS; hpR.current = Math.min(MAX_HP, hpR.current + 1); setHp(hpR.current); setMsg('+1 HP!'); play('hprestore', 0.5, 1); fx.triggerFlash('rgba(34,197,94,0.3)', 80) }
+      if (hrS > lHpSec.current && hpR.current < MAX_HP) { lHpSec.current = hrS; hpR.current = Math.min(MAX_HP, hpR.current + 1); setHp(hpR.current); setMsg('+1 HP!'); play('hprestore', 0.5, 1); fxRef.current.triggerFlash('rgba(34,197,94,0.3)', 80) }
 
       if (comboR.current > 0 && el > comboTmr.current) { comboR.current = 0; setCombo(0) }
       boomR.current = boomR.current.filter(b => el - b.t < 500)
@@ -352,18 +359,18 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         const u = { ...m, y: m.y + m.speed * ds }
         if (m.isBoss && shAct && hit(pxR.current, py, PCOL + 10, u.x, u.y, u.radius)) {
           u.hp -= 1
-          if (u.hp <= 0) { bonR.current += BOSS_PTS * sMult; fx.comboHitBurst(u.x, u.y, 12, BOSS_PTS * sMult); fx.triggerShake(10); play('explode', 0.6, 0.8)
+          if (u.hp <= 0) { bonR.current += BOSS_PTS * sMult; fxRef.current.comboHitBurst(u.x, u.y, 12, BOSS_PTS * sMult); fxRef.current.triggerShake(10); play('explode', 0.6, 0.8)
             boomR.current = [...boomR.current, { id: nid.current++, x: u.x, y: u.y, r: BOSS_R * 2, t: el, c: '#ef4444' }]; setMsg(`BOSS DESTROYED! +${BOSS_PTS * sMult}`); continue }
-          fx.spawnParticles(3, u.x, u.y); play('hit', 0.4, 0.9); nm.push(u); continue }
-        if (u.y > H + u.radius + 20) { if (!m.isBoss) { dodgeStreak.current++; if (dodgeStreak.current % 10 === 0) { bonR.current += 20; fx.comboHitBurst(W / 2, 80, 4, 20); setMsg(`${dodgeStreak.current} Dodge!`); if (dodgeStreak.current % 30 === 0) play('dodge', 0.4, 1.2) } } continue }
+          fxRef.current.spawnParticles(3, u.x, u.y); play('hit', 0.4, 0.9); nm.push(u); continue }
+        if (u.y > H + u.radius + 20) { if (!m.isBoss) { dodgeStreak.current++; if (dodgeStreak.current % 10 === 0) { bonR.current += 20; fxRef.current.comboHitBurst(W / 2, 80, 4, 20); setMsg(`${dodgeStreak.current} Dodge!`); if (dodgeStreak.current % 30 === 0) play('dodge', 0.4, 1.2) } } continue }
         let lasDest = false
-        for (const l of lasR.current) { if (el >= l.activeAt && el < l.endAt && Math.abs(u.x - l.x) < LASER_W / 2 + u.radius) { lasDest = true; fx.spawnParticles(4, u.x, u.y); bonR.current += 10; boomR.current = [...boomR.current, { id: nid.current++, x: u.x, y: u.y, r: u.radius * 1.5, t: el, c: '#9ca3af' }]; break } }
+        for (const l of lasR.current) { if (el >= l.activeAt && el < l.endAt && Math.abs(u.x - l.x) < LASER_W / 2 + u.radius) { lasDest = true; fxRef.current.spawnParticles(4, u.x, u.y); bonR.current += 10; boomR.current = [...boomR.current, { id: nid.current++, x: u.x, y: u.y, r: u.radius * 1.5, t: el, c: '#9ca3af' }]; break } }
         if (lasDest) continue
         if (!isInv && !hitFrame && hit(pxR.current, py, PCOL, u.x, u.y, u.radius)) {
           hitFrame = true; dodgeStreak.current = 0; const dmg = m.isFire ? 2 : 1; const nh = Math.max(0, hpR.current - dmg)
           hpR.current = nh; setHp(nh); invUntil.current = el + HIT_INV_MS; setInv(true); play('hit', 0.6, m.isFire ? 0.8 : 1)
-          setMsg(m.isFire ? `FIRE! -${dmg}` : `HP ${nh}`); fx.triggerShake(m.isFire ? 12 : 7); fx.triggerFlash(m.isFire ? 'rgba(220,38,38,0.5)' : 'rgba(239,68,68,0.4)')
-          fx.spawnParticles(m.isFire ? 8 : 5, pxR.current, py); comboR.current = 0; setCombo(0)
+          setMsg(m.isFire ? `FIRE! -${dmg}` : `HP ${nh}`); fxRef.current.triggerShake(m.isFire ? 12 : 7); fxRef.current.triggerFlash(m.isFire ? 'rgba(220,38,38,0.5)' : 'rgba(239,68,68,0.4)')
+          fxRef.current.spawnParticles(m.isFire ? 8 : 5, pxR.current, py); comboR.current = 0; setCombo(0)
           if (nh === 1) play('danger', 0.5, 1.2)
           if (nh <= 0) { metR.current = nm; setMeteors(nm); finish(); rafRef.current = null; return }
           continue }
@@ -378,9 +385,9 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         if (hit(pxR.current, py, PCOL, u.x, u.y, STAR_R)) {
           const cm = COMBO_MULT[Math.min(comboR.current, COMBO_MULT.length - 1)]; const pts = Math.floor(STAR_PTS * cm * sMult); bonR.current += pts; gotStar = true
           comboR.current = Math.min(comboR.current + 1, COMBO_MULT.length - 1); comboTmr.current = el + COMBO_WIN; setCombo(comboR.current)
-          setMsg(comboR.current > 1 ? `x${cm}! +${pts}` : `+${pts}`); fx.comboHitBurst(pxR.current, py - 30, 5, pts)
+          setMsg(comboR.current > 1 ? `x${cm}! +${pts}` : `+${pts}`); fxRef.current.comboHitBurst(pxR.current, py - 30, 5, pts)
           if (comboR.current >= 2) play('combo', 0.45, 1 + comboR.current * 0.15)
-          if (comboR.current >= FEVER_COMBO && el >= feverUntil.current) { feverUntil.current = el + FEVER_DUR; setFeverOn(true); setMsg('FEVER!'); play('fever', 0.6, 1); fx.triggerFlash('rgba(250,204,21,0.4)', 150); fx.triggerShake(5) }
+          if (comboR.current >= FEVER_COMBO && el >= feverUntil.current) { feverUntil.current = el + FEVER_DUR; setFeverOn(true); setMsg('FEVER!'); play('fever', 0.6, 1); fxRef.current.triggerFlash('rgba(250,204,21,0.4)', 150); fxRef.current.triggerShake(5) }
           continue }
         ns.push(u) }
       staR.current = ns; if (gotStar) play('star', 0.5, 1.2)
@@ -392,8 +399,8 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         const u = { ...c, x: ccx, y: ccy }; if (u.y > H + 30) continue
         if (hit(pxR.current, py, PCOL, u.x, u.y, COIN_R)) {
           const cm = COMBO_MULT[Math.min(comboR.current, COMBO_MULT.length - 1)]; const pts = Math.floor(COIN_PTS * cm * sMult); bonR.current += pts; gotCoin = true
-          comboR.current = Math.min(comboR.current + 1, COMBO_MULT.length - 1); comboTmr.current = el + COMBO_WIN; setCombo(comboR.current); fx.comboHitBurst(pxR.current, py - 30, 4, pts)
-          if (comboR.current >= FEVER_COMBO && el >= feverUntil.current) { feverUntil.current = el + FEVER_DUR; setFeverOn(true); setMsg('FEVER!'); play('fever', 0.6, 1); fx.triggerFlash('rgba(250,204,21,0.4)', 150) }
+          comboR.current = Math.min(comboR.current + 1, COMBO_MULT.length - 1); comboTmr.current = el + COMBO_WIN; setCombo(comboR.current); fxRef.current.comboHitBurst(pxR.current, py - 30, 4, pts)
+          if (comboR.current >= FEVER_COMBO && el >= feverUntil.current) { feverUntil.current = el + FEVER_DUR; setFeverOn(true); setMsg('FEVER!'); play('fever', 0.6, 1); fxRef.current.triggerFlash('rgba(250,204,21,0.4)', 150) }
           continue }
         nc.push(u) }
       coinR.current = nc; if (gotCoin) play('coin', 0.45, 1.4)
@@ -403,10 +410,10 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         const u = { ...p, y: p.y + p.speed * ds }; if (u.y > H + 20) continue
         const pr = p.type === 'shield' ? SHIELD_R : p.type === 'magnet' ? MAGNET_R : SLOW_R
         if (hit(pxR.current, py, PCOL, u.x, u.y, pr)) {
-          if (p.type === 'shield') { shUntil.current = el + SHIELD_DUR; setShieldOn(true); setMsg('SHIELD!'); play('shield', 0.5, 1); fx.triggerFlash('rgba(56,189,248,0.3)', 80) }
-          else if (p.type === 'magnet') { mgUntil.current = el + MAGNET_DUR; setMagnetOn(true); setMsg('MAGNET!'); play('magnet', 0.5, 1); fx.triggerFlash('rgba(168,85,247,0.3)', 80) }
-          else { slUntil.current = el + SLOW_DUR; setSlowOn(true); setMsg('SLOW!'); play('slow', 0.5, 1); fx.triggerFlash('rgba(52,211,153,0.3)', 80) }
-          fx.spawnParticles(6, pxR.current, py); continue }
+          if (p.type === 'shield') { shUntil.current = el + SHIELD_DUR; setShieldOn(true); setMsg('SHIELD!'); play('shield', 0.5, 1); fxRef.current.triggerFlash('rgba(56,189,248,0.3)', 80) }
+          else if (p.type === 'magnet') { mgUntil.current = el + MAGNET_DUR; setMagnetOn(true); setMsg('MAGNET!'); play('magnet', 0.5, 1); fxRef.current.triggerFlash('rgba(168,85,247,0.3)', 80) }
+          else { slUntil.current = el + SLOW_DUR; setSlowOn(true); setMsg('SLOW!'); play('slow', 0.5, 1); fxRef.current.triggerFlash('rgba(52,211,153,0.3)', 80) }
+          fxRef.current.spawnParticles(6, pxR.current, py); continue }
         np.push(u) }
       pupR.current = np
 
@@ -415,7 +422,7 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         const u = { ...w, y: w.y + w.speed * ds }; if (u.y > H + 40) continue
         if (hit(pxR.current, py, PCOL, u.x, u.y, WARP_R)) {
           bonR.current += WARP_PTS * sMult; play('warp', 0.6, 1); setMsg(`WARP! +${WARP_PTS * sMult}`)
-          fx.triggerFlash('rgba(139,92,246,0.4)', 200); fx.triggerShake(8); fx.comboHitBurst(pxR.current, py, 10, WARP_PTS * sMult)
+          fxRef.current.triggerFlash('rgba(139,92,246,0.4)', 200); fxRef.current.triggerShake(8); fxRef.current.comboHitBurst(pxR.current, py, 10, WARP_PTS * sMult)
           for (const m of metR.current) { if (!m.isBoss) boomR.current = [...boomR.current, { id: nid.current++, x: m.x, y: m.y, r: m.radius * 1.5, t: el, c: '#8b5cf6' }] }
           metR.current = metR.current.filter(m => m.isBoss); play('explode', 0.5, 1.1); continue }
         nw.push(u) }
@@ -425,7 +432,7 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (laserHit && !hitFrame) {
         hitFrame = true; dodgeStreak.current = 0; hpR.current = Math.max(0, hpR.current - 1); setHp(hpR.current)
         invUntil.current = el + HIT_INV_MS; setInv(true); play('hit', 0.7, 1.2); setMsg('LASER!')
-        fx.triggerShake(10); fx.triggerFlash('rgba(239,68,68,0.5)'); fx.spawnParticles(6, pxR.current, py)
+        fxRef.current.triggerShake(10); fxRef.current.triggerFlash('rgba(239,68,68,0.5)'); fxRef.current.spawnParticles(6, pxR.current, py)
         if (hpR.current <= 0) { finish(); rafRef.current = null; return } }
       lasR.current = lasR.current.filter(l => el < l.endAt)
       if (isInv && el >= invUntil.current && !shAct && !daAct) setInv(false)
@@ -438,7 +445,7 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     }
     rafRef.current = window.requestAnimationFrame(step)
     return () => { if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }; lastTRef.current = null }
-  }, [finish, play, fx])
+  }, [finish, play])
 
   const bestDisp = Math.max(bestScore, score), py = H - PY_OFF
   const hearts = useMemo(() => { const r: string[] = []; for (let i = 0; i < MAX_HP; i++) r.push(i < hp ? '\u2764\uFE0F' : '\uD83E\uDE76'); return r }, [hp])

@@ -596,7 +596,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-score {
-          font-size: clamp(28px, 8vw, 36px);
+          font-size: clamp(48px, 14vw, 64px);
           font-weight: 900;
           margin: 0;
           color: #1f2937;
@@ -615,17 +615,17 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-best {
-          font-size: 11px;
+          font-size: 18px;
           color: #9ca3af;
           margin: 0;
         }
 
         .speed-tap-timer {
-          font-size: clamp(22px, 6vw, 28px);
+          font-size: clamp(36px, 10vw, 48px);
           font-weight: 900;
           margin: 0;
           color: #374151;
-          min-width: 60px;
+          min-width: 90px;
           text-align: right;
         }
 
@@ -640,9 +640,9 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-progress-bar {
-          height: 8px;
+          height: 12px;
           background: #e8e5dc;
-          border-radius: 4px;
+          border-radius: 6px;
           margin: 0 14px 4px;
           overflow: hidden;
           position: relative;
@@ -667,8 +667,8 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .speed-tap-rush-banner {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 16px;
+          gap: 8px;
+          font-size: 28px;
           font-weight: 900;
           color: #ef4444;
           animation: speed-tap-rush-flash 0.2s ease-in-out infinite alternate;
@@ -677,15 +677,15 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-rush-banner img {
-          width: 24px;
-          height: 24px;
+          width: 36px;
+          height: 36px;
         }
 
         .speed-tap-fever-banner {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 16px;
+          gap: 8px;
+          font-size: 28px;
           font-weight: 900;
           color: #f97316;
           animation: speed-tap-fever-glow 0.3s ease-in-out infinite alternate;
@@ -693,24 +693,24 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-fever-banner img {
-          width: 28px;
-          height: 28px;
+          width: 44px;
+          height: 44px;
           animation: speed-tap-fever-flame 0.2s ease-in-out infinite alternate;
         }
 
         .speed-tap-golden-banner {
           display: flex;
           align-items: center;
-          gap: 4px;
-          font-size: 14px;
+          gap: 8px;
+          font-size: 24px;
           font-weight: 800;
           color: #d97706;
           animation: speed-tap-bounce 0.5s ease-out;
         }
 
         .speed-tap-golden-banner img {
-          width: 22px;
-          height: 22px;
+          width: 36px;
+          height: 36px;
           animation: speed-tap-spin 0.6s ease-out;
         }
 
@@ -724,18 +724,18 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-combo {
-          font-size: 12px;
+          font-size: 20px;
           color: #6b7280;
           margin: 0;
         }
 
         .speed-tap-combo strong {
-          font-size: clamp(18px, 5vw, 22px);
+          font-size: clamp(32px, 9vw, 40px);
           color: #f59e0b;
         }
 
         .speed-tap-combo-label {
-          font-size: 15px;
+          font-size: 26px;
           font-weight: 900;
           margin: 0;
           animation: speed-tap-bounce 0.3s ease-out;
@@ -772,8 +772,8 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-face {
-          width: clamp(160px, 50vw, 220px);
-          height: clamp(160px, 50vw, 220px);
+          width: clamp(280px, 70vw, 400px);
+          height: clamp(280px, 70vw, 400px);
           transition: transform 0.06s;
           pointer-events: none;
           filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15));
@@ -784,15 +784,15 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-tap-button-hint {
-          width: clamp(48px, 14vw, 64px);
-          height: clamp(48px, 14vw, 64px);
+          width: clamp(96px, 28vw, 128px);
+          height: clamp(96px, 28vw, 128px);
           opacity: 0.4;
           pointer-events: none;
           animation: speed-tap-tap-hint-bounce 0.8s ease-in-out infinite;
         }
 
         .speed-tap-tap-count {
-          font-size: clamp(14px, 4vw, 18px);
+          font-size: clamp(24px, 7vw, 32px);
           font-weight: 700;
           color: rgba(255, 255, 255, 0.8);
           margin: 0;
@@ -803,7 +803,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .speed-tap-particle {
           position: absolute;
           pointer-events: none;
-          font-size: 16px;
+          font-size: 28px;
         }
 
         .speed-tap-score-popup {
@@ -811,7 +811,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           top: 25%;
           left: 50%;
           transform: translateX(-50%);
-          font-size: clamp(24px, 7vw, 32px);
+          font-size: clamp(44px, 12vw, 56px);
           font-weight: 900;
           color: #fff;
           text-shadow: 0 2px 8px rgba(0,0,0,0.4);
@@ -821,12 +821,12 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
         .speed-tap-score-popup.rush-popup {
           color: #fbbf24;
-          font-size: clamp(28px, 8vw, 36px);
+          font-size: clamp(52px, 14vw, 64px);
         }
 
         .speed-tap-score-popup.fever-popup {
           color: #f97316;
-          font-size: clamp(28px, 8vw, 36px);
+          font-size: clamp(52px, 14vw, 64px);
           text-shadow: 0 0 12px rgba(249, 115, 22, 0.6);
         }
 
@@ -862,7 +862,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-milestone-text {
-          font-size: clamp(36px, 10vw, 52px);
+          font-size: clamp(56px, 16vw, 80px);
           font-weight: 900;
           color: #fff;
           text-shadow: 0 0 30px rgba(251, 191, 36, 0.8), 0 4px 20px rgba(0,0,0,0.4);
@@ -873,8 +873,8 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .speed-tap-stats {
           display: flex;
           justify-content: space-around;
-          padding: 4px 14px;
-          font-size: 12px;
+          padding: 6px 14px;
+          font-size: 20px;
           color: #9ca3af;
         }
 
@@ -906,7 +906,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-finished-score {
-          font-size: clamp(40px, 12vw, 56px);
+          font-size: clamp(64px, 18vw, 88px);
           font-weight: 900;
           color: #fff;
           text-shadow: 0 4px 20px rgba(0,0,0,0.4);
@@ -915,7 +915,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .speed-tap-finished-label {
-          font-size: 16px;
+          font-size: 26px;
           color: rgba(255, 255, 255, 0.7);
           margin: 0;
         }
@@ -925,7 +925,7 @@ function SpeedTapGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           top: 12%;
           left: 50%;
           transform: translateX(-50%);
-          font-size: clamp(24px, 7vw, 32px);
+          font-size: clamp(40px, 12vw, 52px);
           font-weight: 900;
           color: #fbbf24;
           text-shadow: 0 0 20px rgba(251, 191, 36, 0.8), 0 0 40px rgba(251, 191, 36, 0.4);

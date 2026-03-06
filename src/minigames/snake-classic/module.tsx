@@ -159,6 +159,8 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [lvlUpFlash, setLvlUpFlash] = useState(0)
 
   const fx = useGameEffects()
+  const fxRef = useRef(fx)
+  fxRef.current = fx
 
   // ── Refs ──
   const R = useRef({
@@ -184,10 +186,15 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const load = useCallback((k: string, s: string) => { if (!audio.current.has(k)) { const a = new Audio(s); a.preload = 'auto'; audio.current.set(k, a) } }, [])
   const sfx = useCallback((k: string, v: number, r = 1) => { const a = audio.current.get(k); if (!a) return; a.currentTime = 0; a.volume = Math.min(1, Math.max(0, v)); a.playbackRate = r; void a.play().catch(() => {}) }, [])
 
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const finish = useCallback(() => {
-    const r = R.current; if (r.done) return; r.done = true; fx.cleanup()
-    onFinish({ score: r.score, durationMs: Math.max(Math.round(r.elapsed), Math.round(DEFAULT_FRAME_MS)) })
-  }, [onFinish, fx])
+    const r = R.current; if (r.done) return; r.done = true; fxRef.current.cleanup()
+    onFinishRef.current({ score: r.score, durationMs: Math.max(Math.round(r.elapsed), Math.round(DEFAULT_FRAME_MS)) })
+  }, [])
 
   const chDir = useCallback((nd: Dir) => {
     const r = R.current; if (r.over) return
@@ -199,13 +206,13 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Escape') { e.preventDefault(); onExitRef.current(); return }
       if (R.current.over) return
       const m: Record<string, Dir> = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' }
       const d = m[e.code]; if (d) { e.preventDefault(); chDir(d) }
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
-  }, [chDir, onExit])
+  }, [chDir])
 
   // Audio
   useEffect(() => {
@@ -214,7 +221,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     load('warp', snakeWarpSfx); load('poison', snakePoisonSfx); load('fever', snakeFeverSfx)
     load('bomb', snakeBombSfx); load('star', snakeStarSfx); load('magnet', snakeMagnetSfx)
     load('reverse', snakeReverseSfx); load('levelup', snakeLevelUpSfx); load('perfect', snakePerfectSfx)
-    return () => { fx.cleanup(); audio.current.forEach(a => { a.pause(); a.currentTime = 0 }) }
+    return () => { fxRef.current.cleanup(); audio.current.forEach(a => { a.pause(); a.currentTime = 0 }) }
   }, [])
 
   // ── Game Loop ──
@@ -223,7 +230,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
     const die = () => {
       r.over = true; setGameOver(true)
-      sfx('crash', 0.7, 0.85); fx.triggerShake(12); fx.triggerFlash('rgba(255,50,50,0.6)')
+      sfx('crash', 0.7, 0.85); fxRef.current.triggerShake(12); fxRef.current.triggerFlash('rgba(255,50,50,0.6)')
       finish(); r.raf = null
     }
 
@@ -232,7 +239,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       if (r.lastFrame === null) r.lastFrame = now
       const dt = Math.min(now - r.lastFrame, MAX_FRAME_DELTA_MS)
       r.lastFrame = now; r.elapsed += dt; setElapsedMs(r.elapsed)
-      fx.updateParticles()
+      fxRef.current.updateParticles()
 
       // Expiries
       if (r.shield && now > r.shieldExp) { r.shield = false; setHasShield(false) }
@@ -263,7 +270,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       if (oob(nh)) {
         if (ww) { nh = { x: ((nh.x % G) + G) % G, y: ((nh.y % G) + G) % G }; sfx('warp', 0.35, 1.0) }
-        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fx.triggerFlash('rgba(68,170,255,0.4)'); fx.triggerShake(4) }
+        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fxRef.current.triggerFlash('rgba(68,170,255,0.4)'); fxRef.current.triggerShake(4) }
         else if (r.ghost) { nh = { x: ((nh.x % G) + G) % G, y: ((nh.y % G) + G) % G } }
         else { die(); return }
       }
@@ -271,14 +278,14 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       // Obstacle
       if (r.obs.some(o => eq(nh, o))) {
         if (r.ghost) { /* pass through */ }
-        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fx.triggerFlash('rgba(68,170,255,0.4)'); fx.triggerShake(4) }
+        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fxRef.current.triggerFlash('rgba(68,170,255,0.4)'); fxRef.current.triggerShake(4) }
         else { die(); return }
       }
 
       // Self collision
       if (cur.some((s, i) => i > 0 && eq(nh, s))) {
         if (r.ghost) { /* pass through */ }
-        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fx.triggerFlash('rgba(68,170,255,0.4)'); fx.triggerShake(4) }
+        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fxRef.current.triggerFlash('rgba(68,170,255,0.4)'); fxRef.current.triggerShake(4) }
         else { die(); return }
       }
 
@@ -289,7 +296,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         r.score += PTS_STAR; setScore(r.score)
         sfx('star', 0.6, 1.2)
         const ex = nh.x * (100 / G) + (50 / G), ey = nh.y * (100 / G) + (50 / G)
-        fx.comboHitBurst(ex, ey, r.eaten, PTS_STAR)
+        fxRef.current.comboHitBurst(ex, ey, r.eaten, PTS_STAR)
       }
 
       // ── Eat apple ──
@@ -301,7 +308,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
         if (kind === 'poison') {
           next = cur.length > POISON_SHRINK + 1 ? [nh, ...cur.slice(0, -POISON_SHRINK)] : [nh]
-          sfx('poison', 0.6, 1.0); fx.triggerFlash('rgba(204,68,255,0.35)'); fx.triggerShake(4)
+          sfx('poison', 0.6, 1.0); fxRef.current.triggerFlash('rgba(204,68,255,0.35)'); fxRef.current.triggerShake(4)
           // Reverse controls as penalty!
           r.reversed = true; r.reverseExp = now + REVERSE_MS; setReversed(true)
           sfx('reverse', 0.5, 1.0)
@@ -318,7 +325,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           // Fever
           if (r.combo >= FEVER_AT && !r.fever) {
             r.fever = true; r.feverExp = now + FEVER_MS; setFever(true)
-            sfx('fever', 0.7, 1.0); fx.triggerFlash('rgba(255,204,0,0.3)')
+            sfx('fever', 0.7, 1.0); fxRef.current.triggerFlash('rgba(255,204,0,0.3)')
           }
 
           // Score
@@ -341,11 +348,11 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           if (r.combo >= 3) sfx('combo', 0.5, 0.9 + r.combo * 0.08)
 
           // Perfect combo milestone
-          if (r.combo === 10) { sfx('perfect', 0.7, 1.0); fx.triggerFlash('rgba(255,255,68,0.3)') }
+          if (r.combo === 10) { sfx('perfect', 0.7, 1.0); fxRef.current.triggerFlash('rgba(255,255,68,0.3)') }
 
           // Burst
           const ex = nh.x * (100 / G) + (50 / G), ey = nh.y * (100 / G) + (50 / G)
-          fx.comboHitBurst(ex, ey, r.eaten, pts)
+          fxRef.current.comboHitBurst(ex, ey, r.eaten, pts)
         }
 
         // Next apple
@@ -404,11 +411,11 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       // Collect power-up
       if (r.pup && eq(nh, r.pup.pos)) {
         const t = r.pup.type
-        if (t === 'shield') { r.shield = true; r.shieldExp = now + SHIELD_MS; setHasShield(true); fx.triggerFlash('rgba(68,170,255,0.25)'); sfx('golden', 0.5, 1.5) }
-        else if (t === 'rush') { r.rush = true; r.rushExp = now + RUSH_MS; setHasRush(true); fx.triggerFlash('rgba(255,136,51,0.25)'); sfx('speedup', 0.6, 1.3) }
-        else if (t === 'bomb') { r.obs = []; setObs([]); fx.triggerFlash('rgba(255,68,68,0.35)'); fx.triggerShake(6); sfx('bomb', 0.7, 1.0); r.score += 30; setScore(r.score) }
-        else if (t === 'magnet') { r.magnet = true; r.magnetExp = now + MAGNET_MS; setHasMagnet(true); fx.triggerFlash('rgba(255,68,255,0.25)'); sfx('magnet', 0.6, 1.0) }
-        else if (t === 'ghost') { r.ghost = true; r.ghostExp = now + GHOST_MS; setHasGhost(true); fx.triggerFlash('rgba(170,255,170,0.25)'); sfx('warp', 0.5, 1.3) }
+        if (t === 'shield') { r.shield = true; r.shieldExp = now + SHIELD_MS; setHasShield(true); fxRef.current.triggerFlash('rgba(68,170,255,0.25)'); sfx('golden', 0.5, 1.5) }
+        else if (t === 'rush') { r.rush = true; r.rushExp = now + RUSH_MS; setHasRush(true); fxRef.current.triggerFlash('rgba(255,136,51,0.25)'); sfx('speedup', 0.6, 1.3) }
+        else if (t === 'bomb') { r.obs = []; setObs([]); fxRef.current.triggerFlash('rgba(255,68,68,0.35)'); fxRef.current.triggerShake(6); sfx('bomb', 0.7, 1.0); r.score += 30; setScore(r.score) }
+        else if (t === 'magnet') { r.magnet = true; r.magnetExp = now + MAGNET_MS; setHasMagnet(true); fxRef.current.triggerFlash('rgba(255,68,255,0.25)'); sfx('magnet', 0.6, 1.0) }
+        else if (t === 'ghost') { r.ghost = true; r.ghostExp = now + GHOST_MS; setHasGhost(true); fxRef.current.triggerFlash('rgba(170,255,170,0.25)'); sfx('warp', 0.5, 1.3) }
         r.pup = null; setPup(null)
       }
 
@@ -418,7 +425,8 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
     r.raf = requestAnimationFrame(step)
     return () => { if (r.raf !== null) cancelAnimationFrame(r.raf); r.lastFrame = null }
-  }, [finish, sfx, fx])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Render data ──
   const snakeSet = new Set(snake.map(idx))
@@ -482,20 +490,20 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           background:repeating-linear-gradient(0deg,transparent,transparent 1px,rgba(0,0,0,0.15) 1px,rgba(0,0,0,0.15) 2px); }
 
         /* HUD */
-        .sc-h { display:flex; align-items:center; justify-content:space-between; width:100%; padding:2px 6px; flex-shrink:0; z-index:2; }
+        .sc-h { display:flex; align-items:center; justify-content:space-between; width:100%; padding:6px 10px; flex-shrink:0; z-index:2; }
         .sc-hl { display:flex; flex-direction:column; }
-        .sc-sc { font-size:1.8rem; font-weight:900; color:${C.text}; margin:0; line-height:1; text-shadow:0 0 8px ${C.headGlow}; letter-spacing:2px; }
-        ${fever ? `.sc-sc { color:${C.golden}; text-shadow:0 0 12px ${C.goldenGlow}; animation:sc-fsc 0.25s infinite alternate; }
+        .sc-sc { font-size:clamp(2.2rem,8vw,3rem); font-weight:900; color:${C.text}; margin:0; line-height:1; text-shadow:0 0 12px ${C.headGlow}; letter-spacing:3px; }
+        ${fever ? `.sc-sc { color:${C.golden}; text-shadow:0 0 16px ${C.goldenGlow}; animation:sc-fsc 0.25s infinite alternate; }
         @keyframes sc-fsc { from{transform:scale(1)} to{transform:scale(1.04)} }` : ''}
-        .sc-bs { font-size:0.5rem; color:${C.textDim}; margin:0; letter-spacing:1px; }
-        .sc-hr { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
-        .sc-bg { font-size:0.45rem; font-weight:700; padding:1px 5px; border:1px solid ${C.border}; color:${C.textDim}; letter-spacing:0.5px; }
-        .sc-cb { font-size:0.6rem; font-weight:900; padding:2px 6px; border:1px solid; animation:sc-cp 0.3s ease; letter-spacing:1px; }
+        .sc-bs { font-size:0.7rem; color:${C.textDim}; margin:2px 0 0; letter-spacing:1px; }
+        .sc-hr { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+        .sc-bg { font-size:0.65rem; font-weight:700; padding:2px 8px; border:1px solid ${C.border}; color:${C.textDim}; letter-spacing:0.5px; }
+        .sc-cb { font-size:1rem; font-weight:900; padding:4px 10px; border:2px solid; animation:sc-cp 0.3s ease; letter-spacing:1px; }
         @keyframes sc-cp { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.3)} 100%{transform:scale(1);opacity:1} }
 
         /* Status */
-        .sc-st-bar { display:flex; gap:3px; justify-content:center; width:100%; flex-shrink:0; min-height:14px; flex-wrap:wrap; z-index:2; }
-        .sc-pill { font-size:0.4rem; font-weight:800; padding:1px 5px; border:1px solid; letter-spacing:0.5px; animation:sc-pp 0.8s ease-in-out infinite alternate; }
+        .sc-st-bar { display:flex; gap:4px; justify-content:center; width:100%; flex-shrink:0; min-height:18px; flex-wrap:wrap; z-index:2; padding:2px 0; }
+        .sc-pill { font-size:0.6rem; font-weight:800; padding:3px 8px; border:1px solid; letter-spacing:0.5px; animation:sc-pp 0.8s ease-in-out infinite alternate; }
         @keyframes sc-pp { from{opacity:0.7} to{opacity:1} }
 
         /* Length bar */
@@ -503,14 +511,14 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         .sc-lb { height:100%; transition:width 0.3s ease; }
 
         /* Level up flash */
-        .sc-lvl { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:1.2rem; font-weight:900; color:${C.golden};
-          text-shadow:0 0 20px ${C.goldenGlow}; z-index:20; animation:sc-lvla 1.2s ease-out forwards; pointer-events:none; letter-spacing:2px; }
+        .sc-lvl { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:clamp(1.6rem,5vw,2.2rem); font-weight:900; color:${C.golden};
+          text-shadow:0 0 24px ${C.goldenGlow}; z-index:20; animation:sc-lvla 1.2s ease-out forwards; pointer-events:none; letter-spacing:3px; }
         @keyframes sc-lvla { 0%{opacity:0;transform:translate(-50%,-50%) scale(2)} 20%{opacity:1;transform:translate(-50%,-50%) scale(1)} 80%{opacity:1} 100%{opacity:0;transform:translate(-50%,-80%) scale(0.8)} }
 
         /* Reverse warning */
         ${reversed ? `.sc-p::after { content:'REVERSED!'; position:absolute; top:30%; left:50%; transform:translate(-50%,-50%);
-          font-size:0.7rem; color:${C.poison}; text-shadow:0 0 10px ${C.poisonGlow}; z-index:20; animation:sc-rev 0.5s ease-in-out infinite alternate;
-          pointer-events:none; letter-spacing:2px; font-weight:900; }
+          font-size:1.1rem; color:${C.poison}; text-shadow:0 0 14px ${C.poisonGlow}; z-index:20; animation:sc-rev 0.5s ease-in-out infinite alternate;
+          pointer-events:none; letter-spacing:3px; font-weight:900; }
         @keyframes sc-rev { from{opacity:0.4;transform:translate(-50%,-50%) scale(0.95)} to{opacity:1;transform:translate(-50%,-50%) scale(1.05)} }` : ''}
 
         /* Grid */
@@ -547,25 +555,25 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
         .sc-ov .sc-g { opacity:0.3; filter:grayscale(0.6); }
         .sc-ol { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; pointer-events:none; z-index:10; }
-        .sc-olt { font-size:1.6rem; font-weight:900; color:${C.apple}; text-shadow:0 0 20px ${C.appleGlow}; animation:sc-goa 0.5s cubic-bezier(0.34,1.56,0.64,1); letter-spacing:3px; }
-        .sc-ols { font-size:0.7rem; font-weight:700; color:${C.golden}; text-shadow:0 0 8px rgba(0,0,0,0.5); letter-spacing:1px; }
-        .sc-olst { font-size:0.4rem; color:${C.textDim}; letter-spacing:0.5px; }
+        .sc-olt { font-size:clamp(2rem,7vw,2.8rem); font-weight:900; color:${C.apple}; text-shadow:0 0 24px ${C.appleGlow}; animation:sc-goa 0.5s cubic-bezier(0.34,1.56,0.64,1); letter-spacing:3px; }
+        .sc-ols { font-size:clamp(1rem,3.5vw,1.4rem); font-weight:700; color:${C.golden}; text-shadow:0 0 12px rgba(0,0,0,0.5); letter-spacing:1px; }
+        .sc-olst { font-size:0.6rem; color:${C.textDim}; letter-spacing:0.5px; }
         @keyframes sc-goa { 0%{transform:scale(3) rotate(-10deg);opacity:0} 100%{transform:scale(1) rotate(0);opacity:1} }
 
         /* D-Pad */
-        .sc-dp { display:flex; flex-direction:column; align-items:center; gap:2px; flex-shrink:0; padding:2px 0; z-index:2; }
-        .sc-dr { display:flex; align-items:center; gap:2px; }
-        .sc-db { width:clamp(46px,12vw,56px); height:clamp(46px,12vw,56px); border:2px solid ${C.border}; border-radius:0; background:${C.cell};
-          color:${C.textDim}; font-size:1.2rem; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.08s;
+        .sc-dp { display:flex; flex-direction:column; align-items:center; gap:3px; flex-shrink:0; padding:4px 0; z-index:2; }
+        .sc-dr { display:flex; align-items:center; gap:3px; }
+        .sc-db { width:clamp(52px,14vw,64px); height:clamp(52px,14vw,64px); border:2px solid ${C.border}; border-radius:0; background:${C.cell};
+          color:${C.textDim}; font-size:1.5rem; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.08s;
           -webkit-tap-highlight-color:transparent; font-family:inherit; }
         .sc-db:active { background:${C.body}; color:${C.bg}; border-color:${C.body}; }
-        .sc-dc { width:clamp(46px,12vw,56px); height:clamp(46px,12vw,56px); display:flex; align-items:center; justify-content:center;
-          font-size:0.9rem; color:${C.text}; font-weight:900; opacity:0.5; }
+        .sc-dc { width:clamp(52px,14vw,64px); height:clamp(52px,14vw,64px); display:flex; align-items:center; justify-content:center;
+          font-size:1.1rem; color:${C.text}; font-weight:900; opacity:0.5; }
 
         /* Actions */
-        .sc-ac { display:flex; gap:6px; flex-shrink:0; padding:2px 0; z-index:2; }
-        .sc-ab { padding:6px 16px; border:2px solid ${C.body}; border-radius:0; background:transparent; color:${C.body};
-          font-weight:800; font-size:0.6rem; cursor:pointer; transition:all 0.1s; font-family:inherit; letter-spacing:1px; }
+        .sc-ac { display:flex; gap:8px; flex-shrink:0; padding:4px 0; z-index:2; }
+        .sc-ab { padding:10px 22px; border:2px solid ${C.body}; border-radius:0; background:transparent; color:${C.body};
+          font-weight:800; font-size:0.8rem; cursor:pointer; transition:all 0.1s; font-family:inherit; letter-spacing:1px; }
         .sc-ab:active { background:${C.body}; color:${C.bg}; }
         .sc-ab.gh { border-color:${C.border}; color:${C.textDim}; }
         .sc-ab.gh:active { background:${C.border}; color:${C.bg}; }
@@ -644,9 +652,9 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       {/* Actions */}
       <div className="sc-ac">
         <button className="sc-ab" type="button" onClick={() => {
-          if (!R.current.over) { R.current.over = true; setGameOver(true); sfx('crash', 0.5, 1); fx.triggerShake(6); finish() }
+          if (!R.current.over) { R.current.over = true; setGameOver(true); sfx('crash', 0.5, 1); fxRef.current.triggerShake(6); finish() }
         }}>FINISH</button>
-        <button className="sc-ab gh" type="button" onClick={onExit}>EXIT</button>
+        <button className="sc-ab gh" type="button" onClick={() => onExitRef.current()}>EXIT</button>
       </div>
     </section>
   )

@@ -1533,7 +1533,6 @@ img {
 .hub-frame.game-immersive .cham-panel,
 .hub-frame.game-immersive .intense-cheer-panel,
 .hub-frame.game-immersive .dd-panel,
-.hub-frame.game-immersive .dunga-dunga-panel,
 .hub-frame.game-immersive .fierce-cheer-panel,
 .hub-frame.game-immersive .speed-tap-panel,
 .hub-frame.game-immersive .rhythm-tap-panel,
@@ -1796,10 +1795,17 @@ img {
   flex: 1;
   height: 100%;
   min-height: 520px;
+  --run-run-score-board-width: clamp(188px, 40vw, 320px);
+  --run-run-score-board-height: calc(var(--run-run-score-board-width) * 144 / 600);
+  --run-run-action-button-size: 46px;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.run-run-board.paused {
+  cursor: default;
 }
 
 .run-run-svg {
@@ -1815,73 +1821,99 @@ img {
 
 .run-run-hud {
   position: absolute;
-  left: 10px;
+  left: 50%;
   top: 10px;
+  transform: translateX(-50%);
   z-index: 6;
-  color: #132b40;
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.72);
   pointer-events: none;
 }
 
-.run-run-score {
+.run-run-score-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--run-run-score-board-width);
+  height: var(--run-run-score-board-height);
+  padding: 0 24px;
+  background-image: var(--run-run-score-board);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  filter: drop-shadow(3px 3px 0 rgba(0, 0, 0, 0.28));
+  image-rendering: pixelated;
+}
+
+.run-run-score-value {
   margin: 0;
-  font-size: clamp(1.6rem, 11vw, 3rem);
+  width: 100%;
+  color: #fffef3;
+  font-size: clamp(0.94rem, 4.6vw, 1.6rem);
   line-height: 1;
-}
-
-.run-run-best {
-  margin: 4px 0 0;
-  display: inline-block;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 0.5rem;
-  background: rgba(255, 255, 255, 0.78);
-  border: 2px solid rgba(15, 23, 42, 0.28);
-}
-
-.run-run-meta {
-  margin: 6px 0 0;
-  font-size: 0.5rem;
-  color: #0f172a;
-}
-
-.run-run-status {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 96px;
-  margin: 0;
-  z-index: 6;
-  font-size: 0.52rem;
-  line-height: 1.5;
-  color: #17344b;
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.68);
-  pointer-events: none;
+  text-align: center;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow:
+    1px 1px 0 #1c2430,
+    2px 2px 0 rgba(0, 0, 0, 0.32);
 }
 
 .run-run-overlay-actions {
   position: absolute;
-  right: 10px;
   top: 10px;
-  z-index: 7;
+  height: var(--run-run-score-board-height);
+  z-index: 8;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.run-run-overlay-actions-left {
+  left: 10px;
+}
+
+.run-run-overlay-actions-right {
+  right: 10px;
 }
 
 .run-run-action-button {
-  border: 2px solid rgba(15, 23, 42, 0.3);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.82);
-  color: #0f172a;
-  padding: 8px 10px;
-  font-size: 0.52rem;
+  width: var(--run-run-action-button-size);
+  height: var(--run-run-action-button-size);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
-.run-run-action-button.ghost {
-  background: rgba(15, 23, 42, 0.68);
-  color: #f8fafc;
+.run-run-action-button:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.run-run-action-icon-image {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+@media (max-width: 520px) {
+  .run-run-board {
+    --run-run-score-board-width: clamp(170px, 54vw, 240px);
+    --run-run-action-button-size: 41px;
+  }
+
+  .run-run-score-frame {
+    padding: 0 20px;
+  }
+
+  .run-run-score-value {
+    font-size: clamp(0.82rem, 4.8vw, 1.18rem);
+  }
 }
 
 .hub-frame.game-immersive .run-run-panel {
@@ -1889,6 +1921,7 @@ img {
 }
 
 .hub-frame.game-immersive .run-run-board {
+  margin-top: 0;
   min-height: 100%;
   border-radius: 0;
   border: 0;
@@ -5288,7 +5321,7 @@ img {
   flex-direction: column;
   transition: filter 0.3s;
   z-index: 1;
-  padding: 4px;
+  padding: 2px;
 }
 
 .dd-stage.frozen {
@@ -5299,7 +5332,7 @@ img {
   text-align: center;
   position: relative;
   z-index: 10;
-  padding: 6px 0 2px;
+  padding: 4px 0 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5307,16 +5340,16 @@ img {
 }
 
 .dd-score-value {
-  font-size: clamp(2.4rem, 12vw, 3.8rem);
+  font-size: clamp(3.2rem, 16vw, 5rem);
   font-weight: 900;
   color: #fff;
   line-height: 1;
-  text-shadow: 0 3px 0 rgba(0,0,0,0.5), 0 6px 0 rgba(0,0,0,0.2);
-  letter-spacing: 2px;
+  text-shadow: 0 4px 0 rgba(0,0,0,0.6), 0 8px 0 rgba(0,0,0,0.25);
+  letter-spacing: 3px;
 }
 
 .dd-score-mult {
-  font-size: 1.1rem;
+  font-size: 1.5rem;
   font-weight: 900;
   color: #fbbf24;
   text-shadow: 0 2px 0 #8b6914;
@@ -5349,7 +5382,7 @@ img {
 }
 
 .dd-timer {
-  font-size: clamp(1.4rem, 7vw, 2rem);
+  font-size: clamp(1.8rem, 9vw, 2.6rem);
   font-weight: 900;
   color: #fff;
   line-height: 1;
@@ -5379,7 +5412,7 @@ img {
 }
 
 .dd-combo-badge {
-  font-size: 0.6rem;
+  font-size: 0.8rem;
   font-weight: 900;
   color: #fbbf24;
   text-shadow: 0 1px 0 rgba(0,0,0,0.5);
@@ -5393,7 +5426,7 @@ img {
 }
 
 .dd-best {
-  font-size: 0.5rem;
+  font-size: 0.6rem;
   font-weight: 700;
   color: rgba(255,255,255,0.6);
 }
@@ -5444,8 +5477,8 @@ img {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   grid-template-rows: repeat(4, 1fr);
-  gap: 2px;
-  padding: 2px;
+  gap: 0;
+  padding: 0;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -5482,11 +5515,11 @@ img {
 
 .dd-mole {
   position: absolute;
-  inset: 2%;
+  inset: 0;
   margin: auto;
-  width: 88%;
+  width: 96%;
   aspect-ratio: 1;
-  max-height: 88%;
+  max-height: 96%;
   border: none;
   background: none;
   cursor: pointer;
@@ -5531,8 +5564,8 @@ img {
 }
 
 .dd-mole-img {
-  width: 92%;
-  height: 92%;
+  width: 98%;
+  height: 98%;
   object-fit: contain;
   pointer-events: none;
   image-rendering: pixelated;
@@ -5683,11 +5716,11 @@ img {
 
 .dd-mole-squash {
   position: absolute;
-  inset: 2%;
+  inset: 0;
   margin: auto;
-  width: 88%;
+  width: 96%;
   aspect-ratio: 1;
-  max-height: 88%;
+  max-height: 96%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5705,9 +5738,9 @@ img {
 .dd-feedback {
   position: absolute;
   left: 50%;
-  top: 30%;
+  top: 25%;
   z-index: 20;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: 900;
   color: #fff;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.8);
@@ -5716,25 +5749,25 @@ img {
 }
 
 .dd-feedback.golden {
-  font-size: 0.8rem;
+  font-size: 1rem;
   color: #fbbf24;
   text-shadow: 0 2px 0 #8b6914;
 }
 
 .dd-feedback.bomb {
-  font-size: 0.8rem;
+  font-size: 1rem;
   color: #fca5a5;
   text-shadow: 0 2px 0 #7f1d1d;
 }
 
 .dd-feedback.freeze {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: #7dd3fc;
   text-shadow: 0 2px 0 #0c4a6e;
 }
 
 .dd-feedback.boss {
-  font-size: 0.85rem;
+  font-size: 1.1rem;
   color: #f0abfc;
   text-shadow: 0 2px 0 #701a75, 0 0 8px rgba(168, 85, 247, 0.6);
 }
@@ -5753,7 +5786,7 @@ img {
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 25;
-  font-size: 1.2rem;
+  font-size: 1.6rem;
   font-weight: 900;
   color: #fef3c7;
   text-shadow: 0 3px 0 #8b6914;
@@ -5763,13 +5796,13 @@ img {
 }
 
 .dd-combo-pop.super {
-  font-size: 1.4rem;
+  font-size: 1.8rem;
   color: #fca5a5;
   text-shadow: 0 3px 0 #7f1d1d;
 }
 
 .dd-combo-pop.mega {
-  font-size: 1.6rem;
+  font-size: 2.2rem;
   color: #f0abfc;
   text-shadow: 0 3px 0 #701a75;
 }
@@ -5877,6 +5910,7 @@ img {
 .fierce-cheer-panel {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 100%;
 }
 
@@ -5884,14 +5918,14 @@ img {
   margin-top: 0;
   flex: 1;
   height: 100%;
-  min-height: 420px;
+  min-height: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .fierce-cheer-svg {
   width: 100%;
   height: 100%;
-  min-height: 420px;
   display: block;
 }
 
@@ -5909,13 +5943,14 @@ img {
 
 .hub-frame.game-immersive .fierce-cheer-board {
   margin-top: 0;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   border-radius: 0;
   border: 0;
 }
 
 .hub-frame.game-immersive .fierce-cheer-svg {
-  min-height: 100%;
+  height: 100%;
 }
 
 /* ── Tic Tac Pro ── */
@@ -7248,11 +7283,11 @@ img {
 /* Gogunbuntu Game CSS */
 .gogunbuntu-panel { display: flex; flex-direction: column; min-height: 100%; padding: 0; background: linear-gradient(180deg, #e0f2fe, #fef3c7); border-color: #fbbf24; }
 .gogunbuntu-stage { position: relative; width: 100%; flex: 1; min-height: 0; overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; background: transparent; }
-.gogunbuntu-bg-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #bfdbfe 0%, #e0f2fe 30%, #fef9c3 60%, #fdba74 100%); z-index: 0; }
-.gogunbuntu-bg-layer { position: absolute; left: 0; right: 0; background-repeat: repeat-x; image-rendering: pixelated; pointer-events: none; }
-.gogunbuntu-bg-layer.depth-1 { top: 0; height: 45%; background-size: auto 100%; background-position-y: 0%; opacity: 0.6; filter: saturate(0.8) brightness(1.35); z-index: 1; }
-.gogunbuntu-bg-layer.depth-2 { top: 20%; height: 50%; background-size: auto 140%; background-position-y: 35%; opacity: 0.75; filter: saturate(1.0) brightness(1.2); z-index: 2; }
-.gogunbuntu-bg-layer.depth-3 { top: 45%; height: 55%; background-size: auto 160%; background-position-y: 65%; opacity: 0.92; filter: saturate(1.15) brightness(1.1); z-index: 3; }
+.gogunbuntu-bg-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #93c5fd 0%, #bfdbfe 20%, #fecaca 45%, #fdba74 70%, #f59e0b 100%); z-index: 0; }
+.gogunbuntu-bg-layer { position: absolute; left: 0; right: 0; background-repeat: repeat-x; image-rendering: pixelated; pointer-events: none; overflow: hidden; }
+.gogunbuntu-bg-layer.depth-1 { top: 0; height: 40%; background-size: auto 280%; background-position-y: 0%; z-index: 1; }
+.gogunbuntu-bg-layer.depth-2 { top: 15%; height: 45%; background-size: auto 220%; background-position-y: 40%; z-index: 2; }
+.gogunbuntu-bg-layer.depth-3 { bottom: 0; height: 55%; background-size: auto 180%; background-position-y: 100%; z-index: 3; }
 .gogunbuntu-bg-particles { position: absolute; inset: 0; z-index: 4; pointer-events: none; background: radial-gradient(1.5px 1.5px at 12% 18%, rgba(255,255,255,0.9) 50%, transparent 100%), radial-gradient(2px 2px at 30% 40%, rgba(253,224,71,0.6) 50%, transparent 100%), radial-gradient(1px 1px at 50% 12%, rgba(255,255,255,0.7) 50%, transparent 100%), radial-gradient(2.5px 2.5px at 72% 30%, rgba(253,224,71,0.5) 50%, transparent 100%), radial-gradient(1px 1px at 88% 50%, rgba(255,255,255,0.6) 50%, transparent 100%); animation: gogunbuntu-particles-drift 6s linear infinite; }
 .gogunbuntu-bg-ground-streak { position: absolute; left: 0; right: 0; bottom: 0; height: 18%; z-index: 4; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 40px, rgba(255,255,255,0.12) 40px 43px, transparent 43px 100px, rgba(251,191,36,0.1) 100px 103px, transparent 103px 200px); }
 .gogunbuntu-rope-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; }

@@ -121,6 +121,8 @@ const pxBorder = (color: string, size = PX_BORDER) =>
 // ─── Component ───────────────────────────────────
 function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const fx = useGameEffects({ maxParticles: 50 })
+  const fxRef = useRef(fx)
+  fxRef.current = fx
   const arenaRef = useRef<HTMLDivElement | null>(null)
 
   // Arena measured size
@@ -216,7 +218,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     }
     return () => {
       for (const a of Object.values(audR.current)) { if (a) { a.pause(); a.currentTime = 0 } }
-      fx.cleanup()
+      fxRef.current.cleanup()
     }
   }, [])
 
@@ -265,21 +267,21 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     if (doneR.current) return
     doneR.current = true; setOver(true)
     sfx('fall', 0.7, 0.85)
-    fx.triggerShake(14, 400)
-    fx.triggerFlash('rgba(255,48,48,0.5)', 250)
+    fxRef.current.triggerShake(14, 400)
+    fxRef.current.triggerFlash('rgba(255,48,48,0.5)', 250)
     const ms = Math.max(Math.round(DEFAULT_FRAME_MS), Math.round(elapsedR.current))
     onFinish({ score: scoreR.current, durationMs: ms })
-  }, [onFinish, sfx, fx])
+  }, [onFinish, sfx])
 
   // ─── PowerUp apply/clear ───────────────────────
   const applyPU = useCallback((t: PUType) => {
     apuR.current = t; puTimerR.current = PU_DUR_MS
     setActivePU(t); setPuTimer(PU_DUR_MS)
-    sfx('powerup', 0.5); fx.triggerFlash(`${PU_COLORS[t]}66`, 120)
+    sfx('powerup', 0.5); fxRef.current.triggerFlash(`${PU_COLORS[t]}66`, 120)
     if (t === 'shield') { shieldR.current = true; setShield(true) }
     if (t === 'giant') { scaleR.current = 1.7; setScale(1.7) }
     if (t === 'slow') gravR.current = BASE_GRAVITY * 0.4
-  }, [sfx, fx])
+  }, [sfx])
 
   const clearPU = useCallback(() => {
     const p = apuR.current
@@ -313,7 +315,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     // Combo break penalty
     if (!kept && prevCombo >= 3) {
       sfx('comboBreak', 0.4)
-      fx.spawnParticles(3, tx, ty, ['X', '!'], 'circle')
+      fxRef.current.spawnParticles(3, tx, ty, ['X', '!'], 'circle')
     }
 
     comboR.current = nc; setCombo(nc); lastBounceR.current = now
@@ -323,7 +325,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
     // Fever
     const fNow = nc >= FEVER_COMBO
-    if (fNow && !feverR.current) { sfx('fever', 0.55); fx.triggerFlash(`${PX.accent}66`, 150) }
+    if (fNow && !feverR.current) { sfx('fever', 0.55); fxRef.current.triggerFlash(`${PX.accent}66`, 150) }
     feverR.current = fNow; setFever(fNow)
 
     // Level up every 15 bounces
@@ -331,8 +333,8 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     if (newLv > levelR.current) {
       levelR.current = newLv; setLevel(newLv)
       sfx('levelup', 0.5)
-      fx.triggerFlash(`${PX.green}55`, 200)
-      fx.spawnParticles(8, awRef.current / 2, ahRef.current * 0.3, ['LV', 'UP', '!'])
+      fxRef.current.triggerFlash(`${PX.green}55`, 200)
+      fxRef.current.spawnParticles(8, awRef.current / 2, ahRef.current * 0.3, ['LV', 'UP', '!'])
       setMilestone(`LEVEL ${newLv}`)
       if (msTimerRef.current) clearTimeout(msTimerRef.current)
       msTimerRef.current = window.setTimeout(() => setMilestone(''), 1500)
@@ -349,7 +351,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     for (const z of zonesR.current) {
       if (byR.current >= z.y && byR.current <= z.y + z.h) {
         pts *= z.mult
-        fx.showScorePopup(z.mult, bxR.current, byR.current - 20, z.color)
+        fxRef.current.showScorePopup(z.mult, bxR.current, byR.current - 20, z.color)
         break
       }
     }
@@ -363,9 +365,9 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     for (const m of mils) {
       if (ns >= m && lastMsRef.current < m) {
         lastMsRef.current = m; setMilestone(`${m} PTS!`)
-        fx.triggerFlash(`${PX.accent}88`, 200)
-        fx.spawnParticles(10, awRef.current / 2, ahRef.current * 0.3, ['*', '!', '+'])
-        fx.triggerShake(5, 200)
+        fxRef.current.triggerFlash(`${PX.accent}88`, 200)
+        fxRef.current.spawnParticles(10, awRef.current / 2, ahRef.current * 0.3, ['*', '!', '+'])
+        fxRef.current.triggerShake(5, 200)
         sfx('levelup', 0.45, 1.2)
         if (msTimerRef.current) clearTimeout(msTimerRef.current)
         msTimerRef.current = window.setTimeout(() => setMilestone(''), 1500)
@@ -386,15 +388,15 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     vxR.current = -(dx / effR) * H_FORCE
 
     // FX
-    fx.comboHitBurst(tx, ty, nc, pts, perfect ? ['*', '+', '!'] : undefined)
+    fxRef.current.comboHitBurst(tx, ty, nc, pts, perfect ? ['*', '+', '!'] : undefined)
     if (perfect) {
-      fx.triggerFlash(`${PX.white}88`, 60)
+      fxRef.current.triggerFlash(`${PX.white}88`, 60)
       sfx('perfect', 0.5, 1 + nc * 0.015)
     } else {
       sfx('hit', 0.45, 1 + nc * 0.01)
     }
     if (nc > 0 && nc % 5 === 0) sfx('combo', 0.4, 0.9 + nc * 0.01)
-  }, [sfx, fx, applyPU, finish])
+  }, [sfx, applyPU, finish])
 
   // ─── Double-tap dash ───────────────────────────
   const lastTapRef = useRef(0)
@@ -410,13 +412,13 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       setDashReady(false)
       vyR.current = DASH_VY
       sfx('dash', 0.45)
-      fx.triggerFlash(`${PX.platform}44`, 80)
-      fx.spawnParticles(4, bxR.current, byR.current, ['>>'], 'circle')
+      fxRef.current.triggerFlash(`${PX.platform}44`, 80)
+      fxRef.current.spawnParticles(4, bxR.current, byR.current, ['>>'], 'circle')
       return
     }
 
     handleTap(e.clientX, e.clientY)
-  }, [handleTap, sfx, fx])
+  }, [handleTap, sfx])
 
   // ─── ESC ───────────────────────────────────────
   useEffect(() => {
@@ -474,8 +476,8 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       let ny = byR.current + vyR.current * dt
 
       // Wall bounce
-      if (nx <= wl) { nx = wl; vxR.current = Math.abs(vxR.current) * WALL_DAMP; sfx('wall', 0.2); fx.spawnParticles(2, nx, ny, undefined, 'circle') }
-      else if (nx >= wr) { nx = wr; vxR.current = -Math.abs(vxR.current) * WALL_DAMP; sfx('wall', 0.2); fx.spawnParticles(2, nx, ny, undefined, 'circle') }
+      if (nx <= wl) { nx = wl; vxR.current = Math.abs(vxR.current) * WALL_DAMP; sfx('wall', 0.2); fxRef.current.spawnParticles(2, nx, ny, undefined, 'circle') }
+      else if (nx >= wr) { nx = wr; vxR.current = -Math.abs(vxR.current) * WALL_DAMP; sfx('wall', 0.2); fxRef.current.spawnParticles(2, nx, ny, undefined, 'circle') }
       if (ny <= cy) { ny = cy; vyR.current = Math.abs(vyR.current) * 0.3 }
 
       // Platform
@@ -483,7 +485,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       for (const p of platsR.current) {
         if (ny + br >= p.y && ny + br <= p.y + PLAT_H + 5 && nx >= p.x - br && nx <= p.x + PLAT_W + br && vyR.current > 0) {
           ny = p.y - br; vyR.current = BOUNCE_VY * 0.7; onPlat = true
-          fx.spawnParticles(2, nx, p.y, undefined, 'circle'); break
+          fxRef.current.spawnParticles(2, nx, p.y, undefined, 'circle'); break
         }
       }
 
@@ -494,10 +496,10 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         if (nx + br > o.x && nx - br < o.x + o.w && ny + br > o.y && ny - br < o.y + o.h) {
           if (shieldR.current) {
             shieldR.current = false; setShield(false); obsR.current.splice(i, 1)
-            fx.triggerFlash(`${PX.shield}66`, 100); fx.spawnParticles(5, nx, ny, ['!', '*']); fx.triggerShake(6, 100)
+            fxRef.current.triggerFlash(`${PX.shield}66`, 100); fxRef.current.spawnParticles(5, nx, ny, ['!', '*']); fxRef.current.triggerShake(6, 100)
           } else {
-            vyR.current = 0.35; fx.triggerShake(10, 180); fx.triggerFlash(`${PX.danger}44`, 100)
-            fx.spawnParticles(4, nx, ny, ['X', '!'])
+            vyR.current = 0.35; fxRef.current.triggerShake(10, 180); fxRef.current.triggerFlash(`${PX.danger}44`, 100)
+            fxRef.current.spawnParticles(4, nx, ny, ['X', '!'])
           }
         }
       }
@@ -520,8 +522,8 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           s.ok = true
           const sp = STAR_PTS * (feverR.current ? FEVER_MULT : 1)
           scoreR.current += sp; setScore(scoreR.current)
-          fx.showScorePopup(sp, s.x, s.y, PX.accent)
-          fx.spawnParticles(3, s.x, s.y, ['*', '+'], 'circle')
+          fxRef.current.showScorePopup(sp, s.x, s.y, PX.accent)
+          fxRef.current.spawnParticles(3, s.x, s.y, ['*', '+'], 'circle')
           sfx('coin', 0.4, 1.2)
         }
       }
@@ -532,7 +534,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         if (p.ms <= 0) { pusR.current.splice(i, 1); continue }
         if (Math.hypot(nx - p.x, ny - p.y) < br + PU_SIZE) {
           applyPU(p.type); pusR.current.splice(i, 1)
-          fx.spawnParticles(5, p.x, p.y, [PU_ICONS[p.type]], 'emoji')
+          fxRef.current.spawnParticles(5, p.x, p.y, [PU_ICONS[p.type]], 'emoji')
         }
       }
 
@@ -544,7 +546,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       if (ny >= fy && !onPlat) {
         if (shieldR.current) {
           shieldR.current = false; setShield(false); vyR.current = STRONG_BOUNCE_VY; ny = fy - 1
-          fx.triggerFlash(`${PX.shield}88`, 120); fx.spawnParticles(6, nx, fy, ['!', '*']); fx.triggerShake(6, 100)
+          fxRef.current.triggerFlash(`${PX.shield}88`, 120); fxRef.current.spawnParticles(6, nx, fy, ['!', '*']); fxRef.current.triggerShake(6, 100)
         } else { finish(); rafR.current = null; return }
       }
 
@@ -591,13 +593,13 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       setPlats([...platsR.current]); setPus([...pusR.current]); setObs([...obsR.current])
       setStars(starsR.current.filter(s => !s.ok)); setTrail([...trailR.current])
 
-      fx.updateParticles()
+      fxRef.current.updateParticles()
       rafR.current = requestAnimationFrame(step)
     }
 
     rafR.current = requestAnimationFrame(step)
     return () => { if (rafR.current !== null) { cancelAnimationFrame(rafR.current); rafR.current = null } }
-  }, [finish, clearPU, applyPU, sfx, fx])
+  }, [finish, clearPU, applyPU, sfx])
 
   // ─── Render ────────────────────────────────────
   const bc = comboCol(combo)

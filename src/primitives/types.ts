@@ -6,7 +6,6 @@ export const MINI_GAME_IDS = [
   'combo-formula',
   'cham-cham-cham',
   'intense-cheer',
-  'dunga-dunga',
   'fierce-cheer',
   'speed-tap',
   'color-match',

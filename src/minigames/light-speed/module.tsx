@@ -154,6 +154,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [chainFlash, setChainFlash] = useState(false)
 
   const fx = useGameEffects()
+  const fxRef = useRef(fx)
+  fxRef.current = fx
 
   const scoreRef = useRef(0)
   const hpRef = useRef(INITIAL_HP)
@@ -254,10 +256,10 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     setIsFever(true)
     setFeverRemMs(FEVER_DURATION_MS)
     play('fever', 0.7)
-    fx.triggerFlash('rgba(247,226,107,0.5)', 200)
-    fx.triggerShake(8, 200)
+    fxRef.current.triggerFlash('rgba(247,226,107,0.5)', 200)
+    fxRef.current.triggerShake(8, 200)
     addPop(0.5, 0.3, '!! FEVER !!', '#f7e26b')
-  }, [play, fx, addPop])
+  }, [play, addPop])
 
   // ── Chain Lightning ────────────────────────────────────
   const chainLightning = useCallback(() => {
@@ -271,30 +273,35 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (c.type === 'bomb' || c.type === 'boss') { keep.push(c); continue }
       bonus += 2 * (feverRef.current ? FEVER_SCORE_MULTIPLIER : 1)
       addRipple(c.x, c.y, '#4dacbd')
-      fx.spawnParticles(2, c.x * aw, c.y * ah, undefined, 'circle')
+      fxRef.current.spawnParticles(2, c.x * aw, c.y * ah, undefined, 'circle')
     }
     if (bonus > 0) {
       scoreRef.current += bonus
       setScore(scoreRef.current)
       addPop(0.5, 0.4, `<< CHAIN ZAP >> +${bonus}`, '#4dacbd')
-      fx.triggerFlash('rgba(77,172,189,0.5)', 200)
-      fx.triggerShake(6, 150)
+      fxRef.current.triggerFlash('rgba(77,172,189,0.5)', 200)
+      fxRef.current.triggerShake(6, 150)
       play('chainzap', 0.7, 1.2)
     }
     circlesRef.current = keep
     setCircles(keep)
     chainRef.current = []
-  }, [addPop, addRipple, fx, play])
+  }, [addPop, addRipple, play])
 
   // ── Finish ─────────────────────────────────────────────
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const finish = useCallback(() => {
     if (doneRef.current) return
     doneRef.current = true
     play('gameover', 0.7, 0.95)
-    fx.cleanup()
+    fxRef.current.cleanup()
     const dur = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remMsRef.current))
-    onFinish({ score: scoreRef.current, durationMs: dur })
-  }, [onFinish, play, fx])
+    onFinishRef.current({ score: scoreRef.current, durationMs: dur })
+  }, [play])
 
   // ── Tap Handler ────────────────────────────────────────
   const handleTap = useCallback((cid: number) => {
@@ -326,8 +333,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         circlesRef.current = circlesRef.current.map(c => c.id === cid ? { ...c, bossHp } : c)
         setCircles(circlesRef.current)
         addPop(t.x, t.y, `HIT! ${bossHp}`, '#c23d69')
-        fx.triggerShake(4, 80)
-        fx.spawnParticles(3, ex, ey, undefined, 'circle')
+        fxRef.current.triggerShake(4, 80)
+        fxRef.current.spawnParticles(3, ex, ey, undefined, 'circle')
         play('bosshit', 0.6, 1 + (BOSS_HP - bossHp) * 0.1)
         return
       }
@@ -340,8 +347,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       comboRef.current += 3
       setCombo(comboRef.current)
       addPop(t.x, t.y, `BOSS DOWN! +${bs}`, '#c23d69')
-      fx.comboHitBurst(ex, ey, comboRef.current, bs)
-      fx.triggerShake(10, 200)
+      fxRef.current.comboHitBurst(ex, ey, comboRef.current, bs)
+      fxRef.current.triggerShake(10, 200)
       play('bosshit', 0.8, 0.7)
       play('bonuszone', 0.6)
       return
@@ -357,7 +364,7 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         shieldRef.current = false
         setHasShield(false)
         addPop(t.x, t.y, 'SHIELD BLOCK!', '#5ec97b')
-        fx.triggerFlash('rgba(94,201,123,0.4)', 100)
+        fxRef.current.triggerFlash('rgba(94,201,123,0.4)', 100)
         play('shield', 0.6, 1.2)
         return
       }
@@ -365,8 +372,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       setHp(hpRef.current)
       comboRef.current = 0; setCombo(0)
       addPop(t.x, t.y, '!! BOMB !!', '#eb6b6f')
-      fx.triggerShake(12, 200)
-      fx.triggerFlash('rgba(235,107,111,0.5)', 150)
+      fxRef.current.triggerShake(12, 200)
+      fxRef.current.triggerFlash('rgba(235,107,111,0.5)', 150)
       play('miss', 0.6, 0.8)
       play('combobreak', 0.5)
       if (hpRef.current <= 0) { finish(); return }
@@ -378,8 +385,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       frozenRef.current = now + FREEZE_DURATION_MS
       setIsFrozen(true)
       addPop(t.x, t.y, '<< FREEZE >>', '#67e8f9')
-      fx.triggerFlash('rgba(103,232,249,0.4)', 150)
-      fx.spawnParticles(6, ex, ey, undefined, 'circle')
+      fxRef.current.triggerFlash('rgba(103,232,249,0.4)', 150)
+      fxRef.current.spawnParticles(6, ex, ey, undefined, 'circle')
       play('shield', 0.6, 0.7)
       comboRef.current++; setCombo(comboRef.current)
       return
@@ -390,8 +397,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       shieldRef.current = true
       setHasShield(true)
       addPop(t.x, t.y, '<< SHIELD >>', '#5ec97b')
-      fx.triggerFlash('rgba(94,201,123,0.3)', 120)
-      fx.spawnParticles(5, ex, ey, undefined, 'circle')
+      fxRef.current.triggerFlash('rgba(94,201,123,0.3)', 120)
+      fxRef.current.spawnParticles(5, ex, ey, undefined, 'circle')
       play('shield', 0.7)
       comboRef.current++; setCombo(comboRef.current)
       return
@@ -402,8 +409,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       magnetRef.current = now + MAGNET_DURATION_MS
       setIsMagnet(true)
       addPop(t.x, t.y, '<< MAGNET >>', '#4dacbd')
-      fx.triggerFlash('rgba(77,172,189,0.3)', 120)
-      fx.spawnParticles(5, ex, ey, undefined, 'circle')
+      fxRef.current.triggerFlash('rgba(77,172,189,0.3)', 120)
+      fxRef.current.spawnParticles(5, ex, ey, undefined, 'circle')
       play('magnet', 0.7)
       comboRef.current++; setCombo(comboRef.current)
       return
@@ -417,8 +424,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       }
       comboRef.current++; setCombo(comboRef.current)
       addPop(t.x, t.y, '+1 HP', '#5ec97b')
-      fx.triggerFlash('rgba(94,201,123,0.3)', 80)
-      fx.spawnParticles(4, ex, ey, undefined, 'circle')
+      fxRef.current.triggerFlash('rgba(94,201,123,0.3)', 80)
+      fxRef.current.spawnParticles(4, ex, ey, undefined, 'circle')
       play('shield', 0.5, 1.2)
       return
     }
@@ -450,7 +457,7 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       const mb = multiRef.current.length * MULTI_TAP_BONUS_PER
       scoreRef.current += mb; setScore(scoreRef.current)
       addPop(0.5, 0.15, `MULTI x${multiRef.current.length}! +${mb}`, '#4dacbd')
-      fx.triggerFlash('rgba(77,172,189,0.3)', 60)
+      fxRef.current.triggerFlash('rgba(77,172,189,0.3)', 60)
       multiRef.current = []
     }
 
@@ -460,8 +467,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       levelRef.current = nl; setLevel(nl)
       play('levelup', 0.6)
       addPop(0.5, 0.2, `${LEVEL_NAMES[nl]}`, '#b550a1')
-      fx.triggerFlash('rgba(181,80,161,0.4)', 150)
-      fx.triggerShake(5, 120)
+      fxRef.current.triggerFlash('rgba(181,80,161,0.4)', 150)
+      fxRef.current.triggerShake(5, 120)
     }
 
     // Fever
@@ -479,19 +486,19 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     addPop(t.x, t.y, txt, pc)
 
     if (t.type === 'golden') {
-      fx.comboHitBurst(ex, ey, nc, total)
+      fxRef.current.comboHitBurst(ex, ey, nc, total)
       play('golden', 0.7, 1.1)
     } else if (fast) {
-      fx.comboHitBurst(ex, ey, nc, total)
+      fxRef.current.comboHitBurst(ex, ey, nc, total)
       play('perfect', 0.6, 1 + Math.min(0.4, nc * 0.02))
     } else {
-      fx.spawnParticles(3, ex, ey, undefined, 'circle')
-      fx.showScorePopup(total, ex, ey)
+      fxRef.current.spawnParticles(3, ex, ey, undefined, 'circle')
+      fxRef.current.showScorePopup(total, ex, ey)
       play('tap', 0.5, 1 + Math.min(0.3, nc * 0.015))
     }
     if (inZone && !t.type) play('bonuszone', 0.3, 1.5)
     if (nc > 0 && nc % 5 === 0) setBgHue(p => (p + 25) % 360)
-  }, [addPop, addRipple, play, fx, finish, startFever, chainLightning])
+  }, [addPop, addRipple, play, finish, startFever, chainLightning])
 
   useEffect(() => {
     const kd = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
@@ -511,7 +518,7 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       const a = new Audio(s); a.preload = 'auto'; audioRef.current[k] = a
     }
     return () => {
-      fx.cleanup()
+      fxRef.current.cleanup()
       for (const a of Object.values(audioRef.current)) { if (a) { a.pause(); a.src = '' } }
       audioRef.current = {}
     }
@@ -528,7 +535,7 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
       remMsRef.current = Math.max(0, remMsRef.current - dt)
       setRemainingMs(remMsRef.current)
-      fx.updateParticles()
+      fxRef.current.updateParticles()
 
       // Fever
       if (feverRef.current) {
@@ -556,8 +563,8 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (!rushRef.current && remMsRef.current <= RUSH_TIME_THRESHOLD_MS) {
         rushRef.current = true; setIsRush(true)
         addPop(0.5, 0.35, '!! RUSH TIME !! x1.5', '#eb6b6f')
-        fx.triggerFlash('rgba(235,107,111,0.4)', 200)
-        fx.triggerShake(6, 150)
+        fxRef.current.triggerFlash('rgba(235,107,111,0.4)', 200)
+        fxRef.current.triggerShake(6, 150)
         play('fever', 0.5, 1.3)
       }
 
@@ -604,7 +611,7 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (hpLost) {
         setHp(hpRef.current)
         play('miss', 0.5, 1.1)
-        fx.triggerShake(7); fx.triggerFlash('rgba(235,107,111,0.4)')
+        fxRef.current.triggerShake(7); fxRef.current.triggerFlash('rgba(235,107,111,0.4)')
         if (hpRef.current <= 0) { finish(); rafRef.current = null; return }
       }
       if (remMsRef.current <= 0) { finish(); rafRef.current = null; return }
@@ -612,7 +619,7 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     }
     rafRef.current = window.requestAnimationFrame(step)
     return () => { if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }; prevRef.current = null }
-  }, [finish, play, spawn, fx, addPop, handleTap])
+  }, [finish, play, spawn, addPop, handleTap])
 
   // ── Render ─────────────────────────────────────────────
   const bestDisp = useMemo(() => Math.max(bestScore, score), [bestScore, score])

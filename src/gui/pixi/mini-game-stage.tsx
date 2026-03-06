@@ -7,7 +7,6 @@ import sameCharacterStageImage from '../../../assets/images/same-character/park-
 import gogunbuntuStageImage from '../../../assets/images/gogunbuntu/dot-characters/kim-yeonja.png'
 import comboFormulaStageImage from '../../../assets/images/same-character/park-wankyu.png'
 import chamChamChamStageImage from '../../../assets/images/same-character/tae-jina.png'
-import dungaDungaStageImage from '../../../assets/images/same-character/kim-yeonja.png'
 import musicMemoryStageImage from '../../../assets/images/same-character/song-changsik.png'
 
 export type StageTransitionState = 'idle' | 'enter' | 'exit'
@@ -45,10 +44,6 @@ const STAGE_VISUAL_BY_GAME: Partial<Record<MiniGameId, StageVisualConfig>> = {
   'intense-cheer': {
     backgroundColor: 0x1a1a2e,
     characterImageSrc: chamChamChamStageImage,
-  },
-  'dunga-dunga': {
-    backgroundColor: 0xfef3c7,
-    characterImageSrc: dungaDungaStageImage,
   },
   'fierce-cheer': {
     backgroundColor: 0x1a0533,

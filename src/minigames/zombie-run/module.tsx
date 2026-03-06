@@ -96,6 +96,8 @@ interface Obs { id: number; x: number; y: number; w: number; h: number; type: Ob
 
 function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const fx = useGameEffects()
+  const fxRef = useRef(fx)
+  fxRef.current = fx
 
   // ── State ──
   const [score, setScore] = useState(0)
@@ -176,15 +178,20 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     void el.play().catch(() => {})
   }, [])
 
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const finish = useCallback((reason: string) => {
     if (doneRef.current) return; doneRef.current = true
     setStatus(reason)
     const dur = msRef.current > 0 ? msRef.current : Math.round(DEFAULT_FRAME_MS)
     const s = calcScore(pPos.current - PLAYER_START_POS, msRef.current, bonusRef.current)
     setScore(s); play(sndOver.current, 0.6, 0.95)
-    fx.triggerShake(12); fx.triggerFlash('rgba(239,68,68,0.6)')
-    onFinish({ score: s, durationMs: dur })
-  }, [onFinish, play, fx])
+    fxRef.current.triggerShake(12); fxRef.current.triggerFlash('rgba(239,68,68,0.6)')
+    onFinishRef.current({ score: s, durationMs: dur })
+  }, [play])
 
   // ── Tap handler ──
   const handleTap = useCallback(() => {
@@ -198,8 +205,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       pPos.current += DASH_BOOST
       dashCooldown.current = DASH_COOLDOWN_MS
       setDashReady(false)
-      fx.spawnParticles(6, VW * 0.6, GROUND_Y - 50, ['>>>', 'DASH!'])
-      fx.triggerFlash('rgba(34,211,238,0.15)')
+      fxRef.current.spawnParticles(6, VW * 0.6, GROUND_Y - 50, ['>>>', 'DASH!'])
+      fxRef.current.triggerFlash('rgba(34,211,238,0.15)')
       play(sndPow.current, 0.4, 1.5)
     }
 
@@ -210,8 +217,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     if (comboRef.current > 0 && comboRef.current % COMBO_BONUS_EVERY === 0) {
       const pts = COMBO_BONUS_PTS * Math.floor(comboRef.current / COMBO_BONUS_EVERY)
       bonusRef.current += pts; setBonusScore(bonusRef.current)
-      fx.showScorePopup(pts, VW * 0.6, GROUND_Y - 120)
-      fx.spawnParticles(5, VW * 0.6, GROUND_Y - 80, ['COMBO!'])
+      fxRef.current.showScorePopup(pts, VW * 0.6, GROUND_Y - 120)
+      fxRef.current.spawnParticles(5, VW * 0.6, GROUND_Y - 80, ['COMBO!'])
       play(sndCombo.current, 0.5, 1.0 + comboRef.current * 0.02)
     }
 
@@ -220,8 +227,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       feverRef.current = true; feverMsRef.current = FEVER_MS
       setFever(true); setFeverMs(FEVER_MS); tapsSinceFever.current = 0
       play(sndFever.current, 0.7)
-      fx.triggerFlash('rgba(239,68,68,0.25)')
-      fx.spawnParticles(10, VW / 2, GROUND_Y / 2, ['FEVER!', 'MAX!', 'POWER!'])
+      fxRef.current.triggerFlash('rgba(239,68,68,0.25)')
+      fxRef.current.spawnParticles(10, VW / 2, GROUND_Y / 2, ['FEVER!', 'MAX!', 'POWER!'])
     }
 
     const fMul = feverRef.current ? FEVER_MULT : 1
@@ -232,14 +239,14 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
     setTapFlash(true); setTimeout(() => setTapFlash(false), 70)
     play(sndHit.current, 0.2, 0.85 + Math.random() * 0.3)
-  }, [play, fx])
+  }, [play])
 
   const handleJump = useCallback(() => {
     if (doneRef.current || jumpAt.current !== null) return
     jumpAt.current = msRef.current; setJumping(true)
     play(sndJump.current, 0.5, 1.1)
-    fx.spawnParticles(3, VW * 0.6, GROUND_Y, ['dust', 'dust'])
-  }, [play, fx])
+    fxRef.current.spawnParticles(3, VW * 0.6, GROUND_Y, ['dust', 'dust'])
+  }, [play])
 
   // ── Init audio ──
   useEffect(() => {
@@ -253,7 +260,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     sndFever.current = mk(feverSfx)
     sndCombo.current = mk(comboSfx)
     sndOver.current = mk(gameOverHitSfx)
-    return () => { for (const a of all) { a.pause(); a.currentTime = 0 }; fx.cleanup() }
+    return () => { for (const a of all) { a.pause(); a.currentTime = 0 }; fxRef.current.cleanup() }
   }, [])
 
   // ── Input ──
@@ -302,8 +309,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       if (ns !== stageRef.current) {
         stageRef.current = ns; setStage(ns)
         setStageMsg(STAGE_NAMES[ns])
-        fx.triggerFlash('rgba(255,255,255,0.2)')
-        fx.spawnParticles(8, VW / 2, GROUND_Y / 2, ['STAGE ' + (ns + 1)])
+        fxRef.current.triggerFlash('rgba(255,255,255,0.2)')
+        fxRef.current.spawnParticles(8, VW / 2, GROUND_Y / 2, ['STAGE ' + (ns + 1)])
         play(sndPow.current, 0.5, 0.8)
         setTimeout(() => setStageMsg(null), 2200)
       }
@@ -422,46 +429,46 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             bonusRef.current += COIN_SCORE * mul; setBonusScore(bonusRef.current)
             coinRef.current++; setCoins(coinRef.current)
             play(sndCoin.current, 0.5, 1.0 + Math.random() * 0.3)
-            fx.spawnParticles(4, o.x + 12, o.y, ['+' + (COIN_SCORE * mul)])
-            fx.showScorePopup(COIN_SCORE * mul, o.x, o.y - 20)
+            fxRef.current.spawnParticles(4, o.x + 12, o.y, ['+' + (COIN_SCORE * mul)])
+            fxRef.current.showScorePopup(COIN_SCORE * mul, o.x, o.y - 20)
             continue
           }
           if (o.type === 'speed') {
             speedRef.current = true; speedMsRef.current = SPEED_DURATION_MS
             setSpeedBoosted(true); setSpeedMs(SPEED_DURATION_MS); pPos.current += SPEED_BOOST_VAL
-            play(sndPow.current, 0.5); fx.triggerFlash('rgba(34,211,238,0.2)')
-            fx.spawnParticles(5, o.x, o.y, ['SPEED!']); continue
+            play(sndPow.current, 0.5); fxRef.current.triggerFlash('rgba(34,211,238,0.2)')
+            fxRef.current.spawnParticles(5, o.x, o.y, ['SPEED!']); continue
           }
           if (o.type === 'invincible') {
             invRef.current = true; invMsRef.current = INVINCIBLE_MS
             setInvincible(true); setInvMs(INVINCIBLE_MS)
-            play(sndPow.current, 0.5, 1.3); fx.triggerFlash('rgba(167,139,250,0.2)')
-            fx.spawnParticles(5, o.x, o.y, ['SHIELD!']); continue
+            play(sndPow.current, 0.5, 1.3); fxRef.current.triggerFlash('rgba(167,139,250,0.2)')
+            fxRef.current.spawnParticles(5, o.x, o.y, ['SHIELD!']); continue
           }
           if (o.type === 'magnet') {
             magnetRef.current = true; magnetMsRef.current = MAGNET_MS
             setMagnetActive(true); setMagnetMs(MAGNET_MS)
-            play(sndPow.current, 0.5, 0.9); fx.triggerFlash('rgba(251,191,36,0.2)')
-            fx.spawnParticles(5, o.x, o.y, ['MAGNET!']); continue
+            play(sndPow.current, 0.5, 0.9); fxRef.current.triggerFlash('rgba(251,191,36,0.2)')
+            fxRef.current.spawnParticles(5, o.x, o.y, ['MAGNET!']); continue
           }
           if (o.type === 'heart') {
             if (hpRef.current < MAX_HP) {
               hpRef.current++; setHp(hpRef.current)
-              play(sndPow.current, 0.5, 1.1); fx.spawnParticles(4, o.x, o.y, ['+HP'])
-              fx.showScorePopup(0, o.x, o.y - 20)
+              play(sndPow.current, 0.5, 1.1); fxRef.current.spawnParticles(4, o.x, o.y, ['+HP'])
+              fxRef.current.showScorePopup(0, o.x, o.y - 20)
             }
             continue
           }
           // Obstacle collision
           if (!inAir) {
             if (invRef.current) {
-              play(sndHit.current, 0.3, 1.2); fx.spawnParticles(3, o.x, o.y, ['SMASH!'])
+              play(sndHit.current, 0.3, 1.2); fxRef.current.spawnParticles(3, o.x, o.y, ['SMASH!'])
               bonusRef.current += 5; setBonusScore(bonusRef.current); continue
             }
             hpRef.current--; setHp(hpRef.current)
             pPos.current -= 25
-            play(sndHit.current, 0.6); fx.triggerShake(10); fx.triggerFlash('rgba(239,68,68,0.4)')
-            fx.spawnParticles(5, pScreenX, GROUND_Y - 40, ['OUCH!', '-HP'])
+            play(sndHit.current, 0.6); fxRef.current.triggerShake(10); fxRef.current.triggerFlash('rgba(239,68,68,0.4)')
+            fxRef.current.spawnParticles(5, pScreenX, GROUND_Y - 40, ['OUCH!', '-HP'])
             if (hpRef.current <= 0) { finish('HP depleted!'); return }
             continue
           }
@@ -469,10 +476,10 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         alive.push(o)
       }
       obsArr.current = alive; setObs([...alive])
-      fx.updateParticles()
+      fxRef.current.updateParticles()
 
       if (curGap <= MIN_GAP_GAME_OVER) {
-        fx.triggerShake(15); fx.triggerFlash('rgba(239,68,68,0.7)')
+        fxRef.current.triggerShake(15); fxRef.current.triggerFlash('rgba(239,68,68,0.7)')
         finish('Caught by zombie!'); return
       }
 
@@ -481,7 +488,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
     rafRef.current = requestAnimationFrame(step)
     return () => { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }; lastT.current = null }
-  }, [finish, play, fx])
+  }, [finish, play])
 
   // ── Derived ──
   const best = Math.max(bestScore, score)
@@ -566,7 +573,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             style={{ left: VW * 0.15, top: GROUND_Y - ZOMBIE_H }}>
             <div className="zr-sprite-zombie" style={{
               backgroundImage: `url(${zombieSpriteSheet})`,
-              backgroundPosition: `${-(zombieFrame % 2) * 50}% ${-(Math.floor(zombieFrame / 2)) * 50}%`,
+              backgroundPosition: `${-(zombieFrame % 2) * 100}% ${-(Math.floor(zombieFrame / 2)) * 100}%`,
               backgroundSize: '200% 200%',
               width: ZOMBIE_W, height: ZOMBIE_H,
             }} />
@@ -577,7 +584,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             style={{ left: pScreenX - PLAYER_W / 2, top: GROUND_Y - PLAYER_H - jumpOff }}>
             <div className="zr-sprite-player" style={{
               backgroundImage: `url(${playerSpriteSheet})`,
-              backgroundPosition: `${-playerFrame * (100 / 3)}% 50%`,
+              backgroundPosition: `${-playerFrame * (100 / 3)}% 0%`,
               backgroundSize: '400% 100%',
               width: PLAYER_W, height: PLAYER_H,
             }} />
@@ -658,35 +665,37 @@ const ZR_CSS = `
 /* ─── HUD ─── */
 .zr-hud {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 12px 4px; flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(15,80,40,0.35) 0%, transparent 100%);
+  padding: 12px 16px 8px; flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(15,80,40,0.45) 0%, transparent 100%);
   border-bottom: 2px solid rgba(15,80,40,0.4);
 }
 .zr-hud-l, .zr-hud-r { display: flex; flex-direction: column; }
 .zr-hud-r { align-items: flex-end; }
-.zr-hud-hp { display: flex; gap: 4px; }
+.zr-hud-hp { display: flex; gap: 6px; }
 .zr-heart {
-  display: inline-block; width: 18px; height: 18px;
-  background: #ef4444; clip-path: path('M9 3C6.5 0 0 0 0 5.5C0 11 9 16 9 16S18 11 18 5.5C18 0 11.5 0 9 3Z');
+  display: inline-block; width: 24px; height: 24px;
+  background: #ef4444; clip-path: path('M12 4C9 0 0 0 0 7.3C0 14.7 12 21.3 12 21.3S24 14.7 24 7.3C24 0 15 0 12 4Z');
   transition: opacity 0.3s;
+  filter: drop-shadow(0 1px 3px rgba(239,68,68,0.5));
 }
-.zr-heart.off { background: #374151; opacity: 0.4; }
+.zr-heart.off { background: #374151; opacity: 0.4; filter: none; }
 .zr-score {
-  font-size: clamp(20px, 5vw, 28px); font-weight: 900;
-  color: #fde68a; text-shadow: 0 2px 8px rgba(253,230,138,0.4);
-  font-family: monospace;
+  font-size: clamp(32px, 8vw, 48px); font-weight: 900;
+  color: #fde68a; text-shadow: 0 2px 12px rgba(253,230,138,0.5), 0 0 20px rgba(253,230,138,0.3);
+  font-family: monospace; line-height: 1;
 }
-.zr-best { font-size: 9px; color: #6ee7b7; opacity: 0.7; font-family: monospace; }
+.zr-best { font-size: 12px; color: #6ee7b7; opacity: 0.8; font-family: monospace; }
 .zr-time {
-  font-size: clamp(18px, 4.5vw, 24px); font-weight: 800;
-  color: #93c5fd; font-family: monospace;
+  font-size: clamp(28px, 7vw, 40px); font-weight: 800;
+  color: #93c5fd; font-family: monospace; line-height: 1;
+  text-shadow: 0 2px 8px rgba(147,197,253,0.4);
 }
-.zr-stg { font-size: 8px; color: #9ca3af; letter-spacing: 1px; font-family: monospace; }
+.zr-stg { font-size: 11px; color: #9ca3af; letter-spacing: 1px; font-family: monospace; }
 
 /* ─── Badges ─── */
-.zr-badges { display: flex; gap: 4px; flex-wrap: wrap; padding: 2px 12px; flex-shrink: 0; }
+.zr-badges { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 16px; flex-shrink: 0; }
 .zr-b {
-  font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 3px;
+  font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 4px;
   font-family: monospace; letter-spacing: 0.5px;
 }
 .zr-b.combo { background: rgba(251,191,36,0.25); color: #fbbf24; }
@@ -698,15 +707,15 @@ const ZR_CSS = `
 .zr-b.dash { background: rgba(107,114,128,0.3); color: #9ca3af; }
 
 /* ─── Gap Bar ─── */
-.zr-gap { padding: 3px 12px; flex-shrink: 0; }
+.zr-gap { padding: 4px 16px; flex-shrink: 0; }
 .zr-gap-track {
-  width: 100%; height: 12px; background: #1f2937; border-radius: 6px;
+  width: 100%; height: 16px; background: #1f2937; border-radius: 8px;
   border: 2px solid #374151; position: relative; overflow: hidden;
 }
-.zr-gap-fill { height: 100%; border-radius: 4px; transition: width 0.1s ease-out; }
+.zr-gap-fill { height: 100%; border-radius: 6px; transition: width 0.1s ease-out; }
 .zr-gap-txt {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  font-size: 7px; color: #fff; font-weight: 800; font-family: monospace;
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; color: #fff; font-weight: 800; font-family: monospace;
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 .zr-gap-safe { background: linear-gradient(90deg, #059669, #34d399); }

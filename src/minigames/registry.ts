@@ -7,7 +7,6 @@ import { gogunbuntuModule } from './gogunbuntu/module'
 import { comboFormulaModule } from './combo-formula/module'
 import { chamChamChamModule } from './cham-cham-cham/module'
 import { intenseCheerModule } from './intense-cheer/module'
-import { dungaDungaModule } from './dunga-dunga/module'
 import { fierceCheerModule } from './fierce-cheer/module'
 import { speedTapModule } from './speed-tap/module'
 import { colorMatchModule } from './color-match/module'
@@ -69,7 +68,6 @@ export const miniGameModules: MiniGameModule[] = [
   chamChamChamModule,
   runRunModule,
   intenseCheerModule,
-  dungaDungaModule,
   fierceCheerModule,
   speedTapModule,
   colorMatchModule,
@@ -134,7 +132,6 @@ export const miniGameModuleById: Record<MiniGameId, MiniGameModule> = {
   'combo-formula': comboFormulaModule,
   'cham-cham-cham': chamChamChamModule,
   'intense-cheer': intenseCheerModule,
-  'dunga-dunga': dungaDungaModule,
   'fierce-cheer': fierceCheerModule,
   'speed-tap': speedTapModule,
   'color-match': colorMatchModule,

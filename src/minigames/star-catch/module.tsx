@@ -19,8 +19,7 @@ import comboMilestoneSfx from '../../../assets/sounds/star-catch/combo-milestone
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
 // ─── Game Config ───
-const ROUND_DURATION_MS = 35000
-const LOW_TIME_THRESHOLD_MS = 5000
+const MAX_LIVES = 3
 
 const ARENA_WIDTH = 432
 const ARENA_HEIGHT = 768
@@ -194,7 +193,7 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [wave, setWave] = useState(0)
-  const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
+  const [lives, setLives] = useState(MAX_LIVES)
   const [basketX, setBasketX] = useState(ARENA_WIDTH / 2)
   const [items, setItems] = useState<FallingItem[]>([])
   const [catchFlash, setCatchFlash] = useState<'good' | 'great' | 'bad' | 'power' | null>(null)
@@ -211,7 +210,8 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const comboRef = useRef(0)
   const maxComboRef = useRef(0)
   const waveRef = useRef(0)
-  const remainingMsRef = useRef(ROUND_DURATION_MS)
+  const livesRef = useRef(MAX_LIVES)
+  const elapsedMsRef = useRef(0)
   const basketXRef = useRef(ARENA_WIDTH / 2)
   const itemsRef = useRef<FallingItem[]>([])
   const nextItemIdRef = useRef(0)
@@ -223,7 +223,6 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const lastFrameAtRef = useRef<number | null>(null)
   const arenaRef = useRef<HTMLDivElement | null>(null)
   const catchFlashTimerRef = useRef<number | null>(null)
-  const lowTimeSecondRef = useRef<number | null>(null)
   const isFeverRef = useRef(false)
   const feverTimerRef = useRef<number | null>(null)
   const hasMagnetRef = useRef(false)
@@ -307,7 +306,7 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     finishedRef.current = true
     clearTimer(catchFlashTimerRef); clearTimer(feverTimerRef); clearTimer(magnetTimerRef); clearTimer(shieldTimerRef); clearTimer(freezeTimerRef)
     play(gameOverAudioRef, 0.6, 0.95)
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
+    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, elapsedMsRef.current))
     onFinish({ score: scoreRef.current, durationMs: elapsedMs })
   }, [onFinish, play])
 

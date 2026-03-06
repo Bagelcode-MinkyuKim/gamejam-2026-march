@@ -385,6 +385,8 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [invincible, setInvincible] = useState(false)
 
   const fx = useGameEffects()
+  const fxRef = useRef(fx)
+  fxRef.current = fx
 
   // ─── Refs ─────────────────────────────────────────────────
   const R = useRef({
@@ -413,33 +415,38 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     if (!s) return; s.currentTime = 0; s.volume = vol; s.playbackRate = rate; void s.play().catch(() => {})
   }, [])
 
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const finish = useCallback(() => {
     if (R.current.finished) return
-    R.current.finished = true; fx.cleanup()
-    onFinish({ score: R.current.score, durationMs: R.current.elapsed > 0 ? Math.round(R.current.elapsed) : Math.round(DEFAULT_FRAME_MS) })
-  }, [onFinish, fx])
+    R.current.finished = true; fxRef.current.cleanup()
+    onFinishRef.current({ score: R.current.score, durationMs: R.current.elapsed > 0 ? Math.round(R.current.elapsed) : Math.round(DEFAULT_FRAME_MS) })
+  }, [])
 
   const flap = useCallback(() => {
     if (R.current.finished) return
     if (!R.current.started) { R.current.started = true; setStarted(true) }
     R.current.vel = FLAP_VELOCITY; setVel(FLAP_VELOCITY)
     sfx(A.current.flap, 0.4, 1.1)
-    fx.spawnParticles(3, CHAR_X - 10, R.current.charY + 20)
+    fxRef.current.spawnParticles(3, CHAR_X - 10, R.current.charY + 20)
     const nn = ['♪', '♫', '♬', '♩']
     const t: NoteTrail = { id: R.current.trailId++, x: CHAR_X + 15 + Math.random() * 10, y: R.current.charY - 5 + Math.random() * 10, opacity: 1, note: nn[Math.floor(Math.random() * nn.length)] }
     R.current.notes = [...R.current.notes, t].slice(-8); setNotes([...R.current.notes])
-  }, [sfx, fx])
+  }, [sfx])
 
   const tap = useCallback((e: React.PointerEvent | React.MouseEvent) => { e.preventDefault(); flap() }, [flap])
   const rot = useMemo(() => clamp(vel * 120, -30, 70), [vel])
 
   useEffect(() => {
     const kd = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Escape') { e.preventDefault(); onExitRef.current(); return }
       if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); flap() }
     }
     window.addEventListener('keydown', kd); return () => window.removeEventListener('keydown', kd)
-  }, [flap, onExit])
+  }, [flap])
 
   useEffect(() => {
     const aa: HTMLAudioElement[] = []
@@ -451,7 +458,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     A.current.mag = ld(magnetSfxUrl); A.current.life = ld(lifelostSfxUrl)
     A.current.streak = ld(streakSfxUrl); A.current.wind = ld(windSfxUrl)
     A.current.golden = ld(goldenSfxUrl)
-    return () => { fx.cleanup(); for (const a of aa) { a.pause(); a.currentTime = 0 } }
+    return () => { fxRef.current.cleanup(); for (const a of aa) { a.pause(); a.currentTime = 0 } }
   }, [])
 
   // ─── Game Loop ────────────────────────────────────────────
@@ -474,7 +481,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       if (!r.started) { r.raf = requestAnimationFrame(step); return }
 
-      r.elapsed += dt; setTick(r.elapsed); fx.updateParticles()
+      r.elapsed += dt; setTick(r.elapsed); fxRef.current.updateParticles()
       if (r.elapsed >= TIMEOUT_MS) { setOver(true); finish(); r.raf = null; return }
 
       // Death pixel update
@@ -574,7 +581,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           if (!p.nearMissAwarded && nearMiss(r.charY, p)) {
             p.nearMissAwarded = true; ns += NM_BONUS
             sfx(A.current.nm, 0.5, 1.2)
-            fx.showScorePopup(NM_BONUS, CHAR_X, r.charY - 30, '#22d3ee')
+            fxRef.current.showScorePopup(NM_BONUS, CHAR_X, r.charY - 30, '#22d3ee')
             setNmShow(true)
             if (r.nmTimer) clearTimeout(r.nmTimer)
             r.nmTimer = setTimeout(() => setNmShow(false), 800)
@@ -584,8 +591,8 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           if (p.golden) {
             ns += GOLDEN_BONUS
             sfx(A.current.golden, 0.55, 1)
-            fx.showScorePopup(GOLDEN_BONUS, CHAR_X + 20, r.charY - 15, '#fbbf24')
-            fx.triggerFlash('rgba(251,191,36,.25)', 150)
+            fxRef.current.showScorePopup(GOLDEN_BONUS, CHAR_X + 20, r.charY - 15, '#fbbf24')
+            fxRef.current.triggerFlash('rgba(251,191,36,.25)', 150)
           }
 
           // Multiplier
@@ -594,17 +601,17 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
           if (ns > 0 && ns % MULTI_TRIGGER === 0 && r.multiLeft <= 0) {
             r.multiLeft = MULTI_DURATION; setMultiActive(true)
-            fx.triggerFlash('rgba(251,191,36,.35)', 100); sfx(A.current.fever, 0.55, 1)
+            fxRef.current.triggerFlash('rgba(251,191,36,.35)', 100); sfx(A.current.fever, 0.55, 1)
           }
 
           sfx(A.current.score, 0.4, 1 + ns * 0.01)
-          fx.comboHitBurst(CHAR_X + 25, r.charY - 25, ns, r.multiLeft > 0 ? MULTI_VALUE : 1)
+          fxRef.current.comboHitBurst(CHAR_X + 25, r.charY - 25, ns, r.multiLeft > 0 ? MULTI_VALUE : 1)
 
           // Streak sound
           const sl = streakLabel(nStreak)
           if (sl && !streakLabel(nStreak - 1)) {
             sfx(A.current.streak, 0.5, 1 + nStreak * 0.01)
-            fx.triggerFlash('rgba(249,115,22,.2)', 120)
+            fxRef.current.triggerFlash('rgba(249,115,22,.2)', 120)
           }
         }
       }
@@ -617,8 +624,8 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         if (c.x + COIN_R > cl && c.x - COIN_R < cr && c.y + COIN_R > ct && c.y - COIN_R < cb) {
           c.collected = true; ns += COIN_SCORE
           sfx(A.current.coin, 0.5, 1.3)
-          fx.showScorePopup(COIN_SCORE, CHAR_X + 15, r.charY - 20, '#fbbf24')
-          fx.spawnParticles(4, c.x, c.y)
+          fxRef.current.showScorePopup(COIN_SCORE, CHAR_X + 15, r.charY - 20, '#fbbf24')
+          fxRef.current.spawnParticles(4, c.x, c.y)
         }
       }
 
@@ -627,10 +634,10 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         if (pu.collected) continue
         if (pu.x + PU_SIZE > cl && pu.x - PU_SIZE < cr && pu.y + PU_SIZE > ct && pu.y - PU_SIZE < cb) {
           pu.collected = true; sfx(A.current.pu, 0.5, 1)
-          fx.triggerFlash(PU_COL[pu.type] + '40', 150); fx.spawnParticles(6, pu.x, pu.y)
+          fxRef.current.triggerFlash(PU_COL[pu.type] + '40', 150); fxRef.current.spawnParticles(6, pu.x, pu.y)
           if (pu.type === 'shield') { r.shieldEnd = now + SHIELD_DUR; setShieldOn(true) }
           else if (pu.type === 'magnet') { r.magnetEnd = now + MAGNET_DUR; setMagnetOn(true); sfx(A.current.mag, 0.4, 1) }
-          else { ns += STAR_PU_SCORE; fx.showScorePopup(STAR_PU_SCORE, pu.x, pu.y - 15, '#fbbf24') }
+          else { ns += STAR_PU_SCORE; fxRef.current.showScorePopup(STAR_PU_SCORE, pu.x, pu.y - 15, '#fbbf24') }
         }
       }
 
@@ -638,7 +645,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       for (const m of MILESTONES) {
         if (ns >= m && !r.msHit.has(m)) {
           r.msHit.add(m); sfx(A.current.ms, 0.6, 1)
-          fx.triggerFlash('rgba(251,191,36,.3)', 200); fx.triggerShake(8)
+          fxRef.current.triggerFlash('rgba(251,191,36,.3)', 200); fxRef.current.triggerShake(8)
           setMsTxt(`${m} SCORE!`); setTimeout(() => setMsTxt(null), 1200)
         }
       }
@@ -656,7 +663,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       if (hitTest(ny, r.pipes) && r.invEnd <= 0) {
         if (r.shieldEnd > 0) {
           r.shieldEnd = 0; setShieldOn(false)
-          fx.triggerFlash('rgba(59,130,246,.5)', 200); fx.triggerShake(6)
+          fxRef.current.triggerFlash('rgba(59,130,246,.5)', 200); fxRef.current.triggerShake(6)
           sfx(A.current.pu, 0.5, 0.8)
           r.vel = FLAP_VELOCITY * 0.7; setVel(FLAP_VELOCITY * 0.7)
         } else {
@@ -672,12 +679,12 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             }))
             r.deathPx = dpx; setDeathPx(dpx)
             setOver(true); sfx(A.current.crash, 0.65, 0.95)
-            fx.triggerShake(16); fx.triggerFlash('rgba(239,68,68,.5)')
+            fxRef.current.triggerShake(16); fxRef.current.triggerFlash('rgba(239,68,68,.5)')
             finish(); r.raf = null; return
           } else {
             // Damage but alive
             sfx(A.current.life, 0.55, 1)
-            fx.triggerShake(10); setDmgFlash(true)
+            fxRef.current.triggerShake(10); setDmgFlash(true)
             setTimeout(() => setDmgFlash(false), 300)
             r.invEnd = now + INVINCIBLE_MS; setInvincible(true)
             r.vel = FLAP_VELOCITY * 0.8; setVel(FLAP_VELOCITY * 0.8)
@@ -693,7 +700,8 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       R.current.lastFrame = null
       if (R.current.nmTimer) clearTimeout(R.current.nmTimer)
     }
-  }, [finish, sfx, fx])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const bestDisp = Math.max(bestScore, score)
   const combo = getComboLabel(score)
@@ -938,7 +946,7 @@ function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           <button className="fs-btn" type="button" onPointerDown={e => e.stopPropagation()}
             onClick={() => { sfx(A.current.score, 0.5, 1); finish() }}>FINISH</button>
           <button className="fs-btn ghost" type="button" onPointerDown={e => e.stopPropagation()}
-            onClick={onExit}>EXIT</button>
+            onClick={() => onExitRef.current()}>EXIT</button>
         </div>
       </div>
     </section>

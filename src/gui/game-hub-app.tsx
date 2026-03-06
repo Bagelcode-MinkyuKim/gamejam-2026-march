@@ -18,7 +18,6 @@ import lobbySameCharacterIcon from '../../assets/images/generated/lobby-icons/lo
 import lobbyGogunbuntuIcon from '../../assets/images/generated/lobby-icons/lobby-gogunbuntu.png'
 import lobbyComboFormulaIcon from '../../assets/images/generated/lobby-icons/lobby-combo-formula.png'
 import lobbyChamChamChamIcon from '../../assets/images/generated/lobby-icons/lobby-cham-cham-cham.png'
-import lobbyDungaDungaIcon from '../../assets/images/generated/lobby-icons/lobby-dunga-dunga.png'
 import lobbyIntenseCheerIcon from '../../assets/images/generated/lobby-icons/lobby-intense-cheer.png'
 import lobbyFierceCheerIcon from '../../assets/images/generated/lobby-icons/lobby-fierce-cheer.png'
 import lobbyStarCatchIcon from '../../assets/images/generated/lobby-icons/lobby-star-catch.png'
@@ -151,7 +150,6 @@ const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
   'combo-formula': lobbyComboFormulaIcon,
   'cham-cham-cham': lobbyChamChamChamIcon,
   'intense-cheer': lobbyIntenseCheerIcon,
-  'dunga-dunga': lobbyDungaDungaIcon,
   'fierce-cheer': lobbyFierceCheerIcon,
   'star-catch': lobbyStarCatchIcon,
   'number-sort': lobbyNumberSortIcon,
@@ -225,7 +223,6 @@ const COUNTDOWN_GUIDE_BY_GAME_ID: Partial<Record<MiniGameId, string>> = {
   'run-run': 'Time your left-right turns to stay on the course!',
   'cham-cham-cham': 'Attack: match direction. Defend: dodge fast. 3 HP!',
   'intense-cheer': 'Tap left/right to jump up! Dodge obstacles, collect hearts & coins!',
-  'dunga-dunga': 'Tap popping singers! Fill fever gauge for golden bonus!',
   'fierce-cheer': 'Bounce ball off walls to score! 20 second limit!',
   'light-speed': 'Tap lights fast! Avoid bombs, catch gold for fever mode!',
 }

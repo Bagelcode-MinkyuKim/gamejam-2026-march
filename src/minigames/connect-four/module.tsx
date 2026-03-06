@@ -205,6 +205,8 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map())
 
   const fx = useGameEffects({ maxParticles: 50 })
+  const fxRef = useRef(fx)
+  fxRef.current = fx
 
   const getAudio = useCallback((url: string) => {
     let a = audioPoolRef.current.get(url)
@@ -217,12 +219,17 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     void a.play().catch(() => {})
   }, [getAudio])
 
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
   const finish = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
     for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef]) { if (ref.current !== null) { window.clearTimeout(ref.current); ref.current = null } }
-    onFinish({ score: scoreRef.current, durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)) })
-  }, [onFinish])
+    onFinishRef.current({ score: scoreRef.current, durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)) })
+  }, [])
 
   const startNewRound = useCallback(() => {
     setBoard(createEmptyBoard())
@@ -264,17 +271,17 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       const rect = panelRef.current?.getBoundingClientRect()
       if (rect) {
-        fx.comboHitBurst(rect.width / 2, rect.height / 2, ns, added, WIN_EMOJIS)
-        fx.triggerShake(8, 250)
-        for (let i = 0; i < 3; i++) setTimeout(() => fx.spawnParticles(4, rect.width * Math.random(), rect.height * 0.3, WIN_EMOJIS, 'circle'), i * 100)
+        fxRef.current.comboHitBurst(rect.width / 2, rect.height / 2, ns, added, WIN_EMOJIS)
+        fxRef.current.triggerShake(8, 250)
+        for (let i = 0; i < 3; i++) setTimeout(() => fxRef.current.spawnParticles(4, rect.width * Math.random(), rect.height * 0.3, WIN_EMOJIS, 'circle'), i * 100)
       }
     } else if (result === 'lose') {
       winStreakRef.current = 0; setWinStreak(0); setIsFever(false)
       comboRef.current = 0; setComboCount(0); perfectRef.current = false
       setLosses(p => p + 1); setPhase('lose')
       sfx(loseSfxUrl, 0.5)
-      fx.triggerFlash('rgba(255,0,77,0.35)', 200)
-      fx.triggerShake(10, 200)
+      fxRef.current.triggerFlash('rgba(255,0,77,0.35)', 200)
+      fxRef.current.triggerShake(10, 200)
     } else {
       setDraws(p => p + 1); setPhase('draw')
       sfx(drawSfxUrl, 0.45)
@@ -285,7 +292,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
     if (dropTimerRef.current !== null) window.clearTimeout(dropTimerRef.current)
     dropTimerRef.current = window.setTimeout(() => { dropTimerRef.current = null; if (!finishedRef.current) startNewRound() }, 1500)
-  }, [sfx, startNewRound, fx])
+  }, [sfx, startNewRound])
 
   const placePiece = useCallback((cur: Board, col: number, player: CellValue): Board | null => {
     const row = getAvailableRow(cur, col)
@@ -297,7 +304,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     const rect = panelRef.current?.getBoundingClientRect()
     if (rect) {
       const cw = (rect.width - 20) / COLS
-      fx.spawnParticles(3, (rect.width - cw * COLS) / 2 + col * cw + cw / 2, rect.height * 0.22 + row * cw + cw / 2, undefined, 'circle')
+      fxRef.current.spawnParticles(3, (rect.width - cw * COLS) / 2 + col * cw + cw / 2, rect.height * 0.22 + row * cw + cw / 2, undefined, 'circle')
     }
 
     if (player === 2 && movesRef.current % THREAT_CHECK_INTERVAL === 0 && hasThreeInRow(next, 2)) {
@@ -309,7 +316,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     if (win) { setWinLine(win); resolveRound(player === 1 ? 'win' : 'lose'); return next }
     if (isBoardFull(next)) { resolveRound('draw'); return next }
     return next
-  }, [sfx, resolveRound, fx])
+  }, [sfx, resolveRound])
 
   const runAi = useCallback((cur: Board) => {
     if (finishedRef.current) return
@@ -344,7 +351,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     if (activePowerUp === null || phase !== 'player-turn') return
     if (activePowerUp === 'double-turn') { setDoubleTurnActive(true); sfx(feverSfxUrl, 0.4) }
     else if (activePowerUp === 'undo' && prevBoard) { setBoard(prevBoard); setPrevBoard(null); sfx(hintSfxUrl, 0.4) }
-    else if (activePowerUp === 'time-bonus') { remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + 10000); sfx(levelupSfxUrl, 0.5); fx.triggerFlash('rgba(0,228,54,0.2)', 100) }
+    else if (activePowerUp === 'time-bonus') { remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + 10000); sfx(levelupSfxUrl, 0.5); fxRef.current.triggerFlash('rgba(0,228,54,0.2)', 100) }
     else if (activePowerUp === 'column-clear') {
       const nb = cloneBoard(board)
       for (let r = 0; r < ROWS; r++) if (nb[r][3] === 2) nb[r][3] = 0
@@ -354,21 +361,21 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         for (let r = 0; r < ROWS; r++) nb[r][c] = 0
         for (let i = 0; i < pcs.length; i++) nb[ROWS - 1 - i][c] = pcs[i]
       }
-      setBoard(nb); sfx(comboSfxUrl, 0.5); fx.triggerFlash('rgba(41,173,255,0.3)', 120)
+      setBoard(nb); sfx(comboSfxUrl, 0.5); fxRef.current.triggerFlash('rgba(41,173,255,0.3)', 120)
     }
     setActivePowerUp(null)
-  }, [activePowerUp, phase, board, prevBoard, sfx, fx])
+  }, [activePowerUp, phase, board, prevBoard, sfx])
 
   useEffect(() => {
     const urls = [dropSfxUrl, winSfxUrl, loseSfxUrl, drawSfxUrl, comboSfxUrl, feverSfxUrl, hintSfxUrl, hoverSfxUrl, levelupSfxUrl, tickSfxUrl, threatSfxUrl]
     for (const u of urls) getAudio(u)
-    return () => { for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef]) if (ref.current !== null) window.clearTimeout(ref.current); fx.cleanup() }
-  }, [getAudio, fx])
+    return () => { for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef]) if (ref.current !== null) window.clearTimeout(ref.current); fxRef.current.cleanup() }
+  }, [getAudio])
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } else if (e.code === 'KeyH') useHint() }
+    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExitRef.current() } else if (e.code === 'KeyH') useHint() }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
-  }, [onExit, useHint])
+  }, [useHint])
 
   useEffect(() => {
     lastFrameRef.current = null
@@ -377,7 +384,7 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       if (lastFrameRef.current === null) lastFrameRef.current = now
       const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS); lastFrameRef.current = now
       remainingMsRef.current = Math.max(0, remainingMsRef.current - dt); setRemainingMs(remainingMsRef.current)
-      fx.updateParticles()
+      fxRef.current.updateParticles()
       if (remainingMsRef.current <= CRITICAL_TIME_MS && remainingMsRef.current > 0 && now - lastTickSfxRef.current > 1000) {
         sfx(tickSfxUrl, 0.2, 1.2); lastTickSfxRef.current = now
       }
@@ -386,7 +393,8 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     }
     rafRef.current = requestAnimationFrame(step)
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); lastFrameRef.current = null }
-  }, [finish, sfx, fx])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const isWinCell = useCallback((r: number, c: number) => winLine?.cells.some(cell => cell.row === r && cell.col === c) ?? false, [winLine])
   const isDrop = useCallback((r: number, c: number) => droppingCell?.row === r && droppingCell?.col === c, [droppingCell])
