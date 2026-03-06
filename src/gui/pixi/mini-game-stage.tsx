@@ -17,7 +17,7 @@ interface StageVisualConfig {
   readonly characterImageSrc: string
 }
 
-const STAGE_VISUAL_BY_GAME: Record<MiniGameId, StageVisualConfig> = {
+const STAGE_VISUAL_BY_GAME: Partial<Record<MiniGameId, StageVisualConfig>> = {
   'tap-dash': {
     backgroundColor: 0xeeece6,
     characterImageSrc: tapDashCharacter,
@@ -71,7 +71,7 @@ export interface MiniGameStageProps {
 }
 
 export function MiniGameStage({ gameId, title, transitionState }: MiniGameStageProps) {
-  const visual = STAGE_VISUAL_BY_GAME[gameId]
+  const visual = STAGE_VISUAL_BY_GAME[gameId] ?? { backgroundColor: 0xede9df, characterImageSrc: '' }
   const isFocusedMode = gameId === 'tap-dash'
   const stageHeight = isFocusedMode ? 280 : MINI_GAME_STAGE_HEIGHT
 

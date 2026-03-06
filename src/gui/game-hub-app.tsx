@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, MutableRefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties } from 'react'
+import { getAttendanceState, performCheckIn, DEFAULT_ATTENDANCE_CONFIG } from './attendance-manager'
+import type { CheckInReward } from './attendance-manager'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
@@ -56,10 +58,12 @@ import lobbySpaceDodgeIcon from '../../assets/images/generated/lobby-icons/lobby
 import lobbyFlappySingerIcon from '../../assets/images/generated/lobby-icons/lobby-flappy-singer.png'
 import lobbyColorFloodIcon from '../../assets/images/generated/lobby-icons/lobby-color-flood.png'
 import lobbyLavaFloorIcon from '../../assets/images/generated/lobby-icons/lobby-lava-floor.png'
+import lobbyWordChainIcon from '../../assets/images/generated/lobby-icons/lobby-word-chain.png'
 import lobbyRopeSwingIcon from '../../assets/images/generated/lobby-icons/lobby-rope-swing.png'
 import lobbyOddOneOutIcon from '../../assets/images/generated/lobby-icons/lobby-odd-one-out.png'
 import lobbyZombieRunIcon from '../../assets/images/generated/lobby-icons/lobby-zombie-run.png'
 import lobbyGravityFlipIcon from '../../assets/images/generated/lobby-icons/lobby-gravity-flip.png'
+import lobbyMusicMemoryIcon from '../../assets/images/generated/lobby-icons/lobby-music-memory.png'
 import lobbyTicTacProIcon from '../../assets/images/generated/lobby-icons/lobby-tic-tac-pro.png'
 import lobbyMusicHarmonyIcon from '../../assets/images/generated/lobby-icons/lobby-music-harmony.png'
 import lobbyMathBlitzIcon from '../../assets/images/generated/lobby-icons/lobby-math-blitz.png'
@@ -70,7 +74,14 @@ import seoTaijiCastSprite from '../../assets/images/same-character/seo-taiji.png
 import coinIconImg from '../../assets/images/generated/coin-icon.png'
 import lockIconImg from '../../assets/images/generated/lock-icon.png'
 import gameLogoImg from '../../assets/Title.png'
-import scoreBoardImg from '../../assets/Score Board.png'
+import {
+  playOneShotAudio,
+  playBackgroundAudio as smPlayBgm,
+  stopBackgroundAudio as smStopBgm,
+  getSoundSettings,
+  updateSoundSettings,
+  subscribeSoundSettings,
+} from './sound-manager'
 import lobbyBgmLoop from '../../assets/sounds/lobby-bgm-loop.mp3'
 import gameplayBgmLoop from '../../assets/sounds/gameplay-bgm-loop.mp3'
 import resultBgmLoop from '../../assets/sounds/result-bgm-loop.mp3'
@@ -170,6 +181,7 @@ const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
   'flappy-singer': lobbyFlappySingerIcon,
   'color-flood': lobbyColorFloodIcon,
   'lava-floor': lobbyLavaFloorIcon,
+  'word-chain': lobbyWordChainIcon,
   'rope-swing': lobbyRopeSwingIcon,
   'odd-one-out': lobbyOddOneOutIcon,
   'zombie-run': lobbyZombieRunIcon,
@@ -177,6 +189,7 @@ const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
   'tic-tac-pro': lobbyTicTacProIcon,
   'music-harmony': lobbyMusicHarmonyIcon,
   'math-blitz': lobbyMathBlitzIcon,
+  'music-memory': lobbyMusicMemoryIcon,
 }
 const FALLBACK_LOBBY_ICONS = [
   kimYeonjaCastSprite,
@@ -226,10 +239,12 @@ export function GameHubApp() {
 
   const countdownTimerRef = useRef<number | null>(null)
   const resultRollAnimationFrameRef = useRef<number | null>(null)
-  const newBestEffectTimerRef = useRef<number | null>(null)
-  const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
-  const bgmTrackRef = useRef<string | null>(null)
   const lastCountdownSoundStepRef = useRef<number | null>(null)
+
+  const soundSettings = useSyncExternalStore(subscribeSoundSettings, getSoundSettings)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isAttendanceOpen, setIsAttendanceOpen] = useState(false)
+  const [attendanceReward, setAttendanceReward] = useState<CheckInReward | null>(null)
 
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null)
   const [selectedGameId, setSelectedGameId] = useState<MiniGameId>(DEFAULT_SELECTED_GAME_ID)
@@ -240,7 +255,7 @@ export function GameHubApp() {
   const [rollingScore, setRollingScore] = useState(0)
   const [rollingCoins, setRollingCoins] = useState(0)
   const [isRollingDone, setIsRollingDone] = useState(false)
-  const [isNewBestEffectActive, setIsNewBestEffectActive] = useState(false)
+
   const [gameOverOverlay, setGameOverOverlay] = useState<GameOverOverlayState | null>(null)
   const [lastReward, setLastReward] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -281,24 +296,23 @@ export function GameHubApp() {
     return () => {
       clearCountdownTimer(countdownTimerRef)
       clearAnimationFrame(resultRollAnimationFrameRef)
-      clearTimeoutSafe(newBestEffectTimerRef)
-      stopBackgroundAudio(bgmAudioRef, bgmTrackRef)
+
+      smStopBgm()
     }
   }, [])
 
   useEffect(() => {
     if (resultGameId === null || settlement === null) {
       clearAnimationFrame(resultRollAnimationFrameRef)
-      clearTimeoutSafe(newBestEffectTimerRef)
+
       setRollingScore(0)
       setRollingCoins(0)
       setIsRollingDone(false)
-      setIsNewBestEffectActive(false)
+
       return
     }
 
     clearAnimationFrame(resultRollAnimationFrameRef)
-    clearTimeoutSafe(newBestEffectTimerRef)
     setIsRollingDone(false)
     setRollingScore(0)
     setRollingCoins(0)
@@ -329,21 +343,16 @@ export function GameHubApp() {
     }
 
     if (settlement.newBestScore) {
-      setIsNewBestEffectActive(true)
       if (isAudioReady) {
         playOneShotAudio(newRecordFanfareSfx, 0.8)
       }
-      newBestEffectTimerRef.current = window.setTimeout(() => {
-        setIsNewBestEffectActive(false)
-        newBestEffectTimerRef.current = null
-      }, 2600)
     } else {
-      setIsNewBestEffectActive(false)
+
     }
 
     return () => {
       clearAnimationFrame(resultRollAnimationFrameRef)
-      clearTimeoutSafe(newBestEffectTimerRef)
+
     }
   }, [isAudioReady, resultGameId, settlement])
 
@@ -383,13 +392,13 @@ export function GameHubApp() {
     const isModuleBgmLivePlay =
       activeGameId !== null && countdownStepIndex === null && IN_GAME_MODULE_BGM_IDS.has(activeGameId)
     if (isModuleBgmLivePlay) {
-      stopBackgroundAudio(bgmAudioRef, bgmTrackRef)
+      smStopBgm()
       return
     }
 
     const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : lobbyBgmLoop
     const nextVolume = activeGameId !== null ? 0.18 : resultGameId !== null ? 0.2 : 0.22
-    playBackgroundAudio(nextTrack, nextVolume, bgmAudioRef, bgmTrackRef)
+    smPlayBgm(nextTrack, nextVolume)
   }, [activeGameId, countdownStepIndex, isAudioReady, resultGameId])
 
   useEffect(() => {
@@ -620,10 +629,8 @@ export function GameHubApp() {
   const isCountdownActive = activeGameId !== null && countdownStepIndex !== null
   const countdownLabel = isCountdownActive ? GAME_START_COUNTDOWN_LABELS[countdownStepIndex] : null
   const countdownGuide = activeGameId ? (COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] ?? miniGameModuleById[activeGameId].manifest.description) : null
-  const resultTitle = settlement ? miniGameModuleById[settlement.gameId].manifest.title : 'Mini Game'
   const displayedSettlementScore = isRollingDone && settlement ? settlement.score : rollingScore
   const displayedSettlementCoins = isRollingDone && settlement ? settlement.earnedCoins : rollingCoins
-  const bestScoreGap = settlement ? Math.max(0, settlement.bestScore - settlement.score) : 0
 
   return (
     <main className={`game-shell ${isInGameView ? 'game-immersive' : ''}`}>
@@ -643,9 +650,28 @@ export function GameHubApp() {
               <div>
                 <img className="hub-logo" src={gameLogoImg} alt="PUNGAK" />
               </div>
-              <div className="coin-badge">
-                <img className="coin-badge-icon" src={coinIconImg} alt="coin" />
-                <span className="coin-badge-value">{uiModel ? uiModel.coinLabel : '...'}</span>
+              <div className="hub-header-right">
+                <div className="coin-badge">
+                  <img className="coin-badge-icon" src={coinIconImg} alt="coin" />
+                  <span className="coin-badge-value">{uiModel ? uiModel.coinLabel : '...'}</span>
+                </div>
+                <button
+                  className="attendance-toggle-btn"
+                  type="button"
+                  onClick={() => { activateAudio(); playUiClickSfx(); setIsAttendanceOpen(true); setAttendanceReward(null) }}
+                  aria-label="attendance"
+                >
+                  <CalendarIcon />
+                  {getAttendanceState().canCheckIn && <span className="attendance-badge-dot" />}
+                </button>
+                <button
+                  className="settings-toggle-btn"
+                  type="button"
+                  onClick={() => { activateAudio(); playUiClickSfx(); setIsSettingsOpen((v) => !v) }}
+                  aria-label="settings"
+                >
+                  <SettingsGearIcon />
+                </button>
               </div>
             </header>
           </>
@@ -694,8 +720,8 @@ export function GameHubApp() {
             )}
             {gameOverOverlay !== null ? (
               <section className="game-over-overlay" aria-live="polite" aria-label="game-over-overlay">
-                <p className="game-over-title">GAME OVER!!</p>
-                <p className="game-over-score" style={{ fontSize: adaptiveScoreFontSize(`FINAL SCORE ${gameOverOverlay.score.toLocaleString()}`, 20, 360) }}>FINAL SCORE {gameOverOverlay.score.toLocaleString()}</p>
+                <p className="game-over-title">GAME OVER</p>
+                <p className="game-over-score">{gameOverOverlay.score.toLocaleString()}</p>
               </section>
             ) : null}
           </section>
@@ -706,40 +732,17 @@ export function GameHubApp() {
                 className={`post-game-summary-panel ${settlement.newBestScore ? 'new-best' : ''}`}
                 aria-label="post-game-summary-panel"
               >
-                <p className="post-game-summary-eyebrow">ROUND RESULT</p>
-                <p className="post-game-summary-title">{resultTitle}</p>
-                <div className="scoreboard-wrap">
-                  <img className="scoreboard-bg" src={scoreBoardImg} alt="" />
-                  <p className="scoreboard-label">FINAL SCORE</p>
-                  <p className="scoreboard-value" style={{ fontSize: adaptiveScoreFontSize(displayedSettlementScore.toLocaleString(), 52, 320) }}>{displayedSettlementScore.toLocaleString()}</p>
-                </div>
-                <div className="post-game-summary-grid">
-                  <div className="post-game-summary-card">
-                    <span>Coins Earned</span>
-                    <strong>+{displayedSettlementCoins.toLocaleString()}</strong>
-                  </div>
-                  <div className="post-game-summary-card">
-                    <span>Best Score</span>
-                    <strong>{settlement.bestScore.toLocaleString()}</strong>
-                  </div>
-                  <div className="post-game-summary-card">
-                    <span>Play Time</span>
-                    <strong>{(settlement.durationMs / 1000).toFixed(1)}s</strong>
-                  </div>
-                </div>
+                <p className={`post-game-summary-score ${isRollingDone && settlement.newBestScore ? 'new-best-glow' : ''}`}>
+                  {displayedSettlementScore.toLocaleString()}
+                </p>
+                <p className="post-game-summary-coins">+{displayedSettlementCoins.toLocaleString()} COINS</p>
                 {settlement.newBestScore ? (
-                  <p className={`post-game-record-banner ${isNewBestEffectActive ? 'active' : ''}`}>NEW RECORD!</p>
-                ) : (
-                  <p className="post-game-record-banner keep">{bestScoreGap.toLocaleString()} to new record</p>
-                )}
-                {settlement.newBestScore ? (
-                  <div className={`post-game-record-burst ${isNewBestEffectActive ? 'active' : ''}`} aria-hidden>
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                    <span />
+                  <p className={`post-game-record-banner ${isRollingDone ? 'active' : ''}`}>NEW RECORD!</p>
+                ) : null}
+                {settlement.newBestScore && isRollingDone ? (
+                  <div className="post-game-record-burst active" aria-hidden>
+                    <span /><span /><span /><span /><span /><span />
+                    <span /><span /><span /><span /><span /><span />
                   </div>
                 ) : null}
               </section>
@@ -860,49 +863,92 @@ export function GameHubApp() {
           </>
         )}
       </section>
+
+      {isAttendanceOpen && (
+        <AttendancePopup
+          useCases={useCases}
+          selectedGameId={selectedGameId}
+          reward={attendanceReward}
+          onCheckIn={async () => {
+            const lockedIds = await useCases.getLockedGameIds()
+            const reward = performCheckIn(lockedIds)
+            if (reward === null) return
+            setAttendanceReward(reward)
+            playUiCoinSfx()
+            if (reward.unlockGameIds.length > 0) playUiUnlockSfx()
+            const next = await useCases.addCoinsAndUnlockGames(
+              reward.coins,
+              reward.unlockGameIds as any,
+              selectedGameId,
+            )
+            setSnapshot(next)
+          }}
+          onClose={() => { setIsAttendanceOpen(false); setAttendanceReward(null) }}
+        />
+      )}
+
+      {isSettingsOpen && (
+        <div className="settings-backdrop" onClick={() => setIsSettingsOpen(false)}>
+          <section className="settings-panel" onClick={(e) => e.stopPropagation()}>
+            <h3 className="settings-title">SETTINGS</h3>
+
+            <div className="settings-row">
+              <span className="settings-label">BGM</span>
+              <button
+                className={`settings-mute-btn ${soundSettings.bgmMuted ? 'muted' : ''}`}
+                type="button"
+                onClick={() => updateSoundSettings({ bgmMuted: !soundSettings.bgmMuted })}
+              >
+                {soundSettings.bgmMuted ? 'OFF' : 'ON'}
+              </button>
+              <input
+                className="settings-slider"
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(soundSettings.bgmVolume * 100)}
+                onChange={(e) => updateSoundSettings({ bgmVolume: Number(e.target.value) / 100 })}
+              />
+              <span className="settings-vol-label">{Math.round(soundSettings.bgmVolume * 100)}%</span>
+            </div>
+
+            <div className="settings-row">
+              <span className="settings-label">SFX</span>
+              <button
+                className={`settings-mute-btn ${soundSettings.sfxMuted ? 'muted' : ''}`}
+                type="button"
+                onClick={() => updateSoundSettings({ sfxMuted: !soundSettings.sfxMuted })}
+              >
+                {soundSettings.sfxMuted ? 'OFF' : 'ON'}
+              </button>
+              <input
+                className="settings-slider"
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(soundSettings.sfxVolume * 100)}
+                onChange={(e) => updateSoundSettings({ sfxVolume: Number(e.target.value) / 100 })}
+              />
+              <span className="settings-vol-label">{Math.round(soundSettings.sfxVolume * 100)}%</span>
+            </div>
+
+            <button className="settings-close-btn" type="button" onClick={() => setIsSettingsOpen(false)}>
+              CLOSE
+            </button>
+          </section>
+        </div>
+      )}
     </main>
   )
 }
 
-function playOneShotAudio(src: string, volume: number): void {
-  const sound = new Audio(src)
-  sound.preload = 'auto'
-  sound.volume = volume
-  void sound.play().catch(() => {})
-}
-
-function playBackgroundAudio(
-  src: string,
-  volume: number,
-  audioRef: MutableRefObject<HTMLAudioElement | null>,
-  trackRef: MutableRefObject<string | null>,
-): void {
-  if (trackRef.current === src && audioRef.current !== null) {
-    audioRef.current.volume = volume
-    return
-  }
-
-  stopBackgroundAudio(audioRef, trackRef)
-
-  const background = new Audio(src)
-  background.loop = true
-  background.preload = 'auto'
-  background.volume = volume
-  void background.play().catch(() => {})
-  audioRef.current = background
-  trackRef.current = src
-}
-
-function stopBackgroundAudio(
-  audioRef: MutableRefObject<HTMLAudioElement | null>,
-  trackRef: MutableRefObject<string | null>,
-): void {
-  if (audioRef.current !== null) {
-    audioRef.current.pause()
-    audioRef.current.currentTime = 0
-    audioRef.current = null
-  }
-  trackRef.current = null
+function SettingsGearIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
 }
 
 function clearCountdownTimer(timerRef: MutableRefObject<number | null>): void {
@@ -917,21 +963,6 @@ function clearAnimationFrame(frameRef: MutableRefObject<number | null>): void {
     window.cancelAnimationFrame(frameRef.current)
     frameRef.current = null
   }
-}
-
-function clearTimeoutSafe(timerRef: MutableRefObject<number | null>): void {
-  if (timerRef.current !== null) {
-    window.clearTimeout(timerRef.current)
-    timerRef.current = null
-  }
-}
-
-function adaptiveScoreFontSize(text: string, basePx: number, containerPx: number): string {
-  const charCount = text.length
-  const estimatedWidth = charCount * basePx * 0.62
-  if (estimatedWidth <= containerPx) return `${basePx}px`
-  const scale = containerPx / estimatedWidth
-  return `${Math.max(basePx * scale, basePx * 0.35)}px`
 }
 
 function easeOutCubic(value: number): number {

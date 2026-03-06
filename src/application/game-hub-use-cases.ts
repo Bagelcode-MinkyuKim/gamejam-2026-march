@@ -57,6 +57,30 @@ export class GameHubUseCases {
     }
   }
 
+  async addCoinsAndUnlockGames(
+    coinAmount: number,
+    gameIdsToUnlock: MiniGameId[],
+    selectedGameId: MiniGameId,
+  ): Promise<HubSnapshot> {
+    const progress = await this.loadOrCreateProgress()
+    const newUnlocked = new Set(progress.unlockedMiniGameIds)
+    for (const id of gameIdsToUnlock) newUnlocked.add(id)
+
+    const updated: PlayerProgress = {
+      ...progress,
+      coins: progress.coins + coinAmount,
+      unlockedMiniGameIds: [...newUnlocked],
+    }
+    await this.progressStore.save(updated)
+    return toHubSnapshot(updated, this.manifests, selectedGameId, null)
+  }
+
+  async getLockedGameIds(): Promise<MiniGameId[]> {
+    const progress = await this.loadOrCreateProgress()
+    const unlocked = new Set(progress.unlockedMiniGameIds)
+    return this.manifests.filter((m) => !unlocked.has(m.id)).map((m) => m.id)
+  }
+
   private async loadOrCreateProgress() {
     const loaded = await this.progressStore.load()
 
