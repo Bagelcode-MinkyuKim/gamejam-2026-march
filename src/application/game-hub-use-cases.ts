@@ -81,6 +81,16 @@ export class GameHubUseCases {
     return this.manifests.filter((m) => !unlocked.has(m.id)).map((m) => m.id)
   }
 
+  async getLockedGameNameMap(): Promise<Record<string, string>> {
+    const progress = await this.loadOrCreateProgress()
+    const unlocked = new Set(progress.unlockedMiniGameIds)
+    const map: Record<string, string> = {}
+    for (const m of this.manifests) {
+      if (!unlocked.has(m.id)) map[m.id] = m.title
+    }
+    return map
+  }
+
   private async loadOrCreateProgress() {
     const loaded = await this.progressStore.load()
 

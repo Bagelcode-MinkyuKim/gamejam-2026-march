@@ -1,19 +1,32 @@
 const STORAGE_KEY = 'pungak-attendance'
 
+// ── Reward Types (확장 가능) ──
+export type RewardItem =
+  | { type: 'coins'; amount: number }
+  | { type: 'unlock-random'; count: number }
+
+export interface DayRewardConfig {
+  day: number
+  rewards: RewardItem[]
+  label: string
+}
+
 export interface AttendanceConfig {
-  dailyCoinReward: number
-  dailyRandomUnlockCount: number
-  weekBonusCoinReward: number
-  weekBonusRandomUnlockCount: number
   cycleDays: number
+  dayRewards: DayRewardConfig[]
 }
 
 export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
-  dailyCoinReward: 100,
-  dailyRandomUnlockCount: 1,
-  weekBonusCoinReward: 300,
-  weekBonusRandomUnlockCount: 2,
   cycleDays: 7,
+  dayRewards: [
+    { day: 1, label: 'Day 1', rewards: [{ type: 'coins', amount: 100 }, { type: 'unlock-random', count: 1 }] },
+    { day: 2, label: 'Day 2', rewards: [{ type: 'coins', amount: 100 }, { type: 'unlock-random', count: 1 }] },
+    { day: 3, label: 'Day 3', rewards: [{ type: 'coins', amount: 100 }, { type: 'unlock-random', count: 1 }] },
+    { day: 4, label: 'Day 4', rewards: [{ type: 'coins', amount: 100 }, { type: 'unlock-random', count: 1 }] },
+    { day: 5, label: 'Day 5', rewards: [{ type: 'coins', amount: 100 }, { type: 'unlock-random', count: 1 }] },
+    { day: 6, label: 'Day 6', rewards: [{ type: 'coins', amount: 100 }, { type: 'unlock-random', count: 1 }] },
+    { day: 7, label: 'BONUS', rewards: [{ type: 'coins', amount: 400 }, { type: 'unlock-random', count: 3 }] },
+  ],
 }
 
 export interface AttendanceData {
@@ -23,9 +36,11 @@ export interface AttendanceData {
 }
 
 export interface CheckInReward {
-  coins: number
-  unlockGameIds: string[]
-  isWeekBonus: boolean
+  totalCoins: number
+  unlockedGameIds: string[]
+  unlockedGameNames: string[]
+  rewards: RewardItem[]
+  isBonus: boolean
   dayIndex: number
 }
 
@@ -80,8 +95,25 @@ export function getAttendanceState(config: AttendanceConfig = DEFAULT_ATTENDANCE
   return { data, canCheckIn, currentDayIndex }
 }
 
+export function resolveRewardsForDay(
+  dayIndex: number,
+  config: AttendanceConfig,
+): { totalCoins: number; totalUnlockCount: number; rewards: RewardItem[] } {
+  const dayConfig = config.dayRewards[dayIndex] ?? config.dayRewards[0]
+  let totalCoins = 0
+  let totalUnlockCount = 0
+
+  for (const r of dayConfig.rewards) {
+    if (r.type === 'coins') totalCoins += r.amount
+    if (r.type === 'unlock-random') totalUnlockCount += r.count
+  }
+
+  return { totalCoins, totalUnlockCount, rewards: dayConfig.rewards }
+}
+
 export function performCheckIn(
   lockedGameIds: string[],
+  lockedGameNames: Record<string, string>,
   config: AttendanceConfig = DEFAULT_ATTENDANCE_CONFIG,
 ): CheckInReward | null {
   const data = loadData()
@@ -92,18 +124,13 @@ export function performCheckIn(
   const isConsecutive = data.lastCheckInDate === yesterdayKey()
   const newStreak = isConsecutive ? data.streakCount + 1 : 1
   const dayIndex = (newStreak - 1) % config.cycleDays
-  const isWeekBonus = dayIndex === config.cycleDays - 1
+  const isBonus = dayIndex === config.cycleDays - 1
 
-  const coins = isWeekBonus
-    ? config.dailyCoinReward + config.weekBonusCoinReward
-    : config.dailyCoinReward
-
-  const unlockCount = isWeekBonus
-    ? config.dailyRandomUnlockCount + config.weekBonusRandomUnlockCount
-    : config.dailyRandomUnlockCount
+  const { totalCoins, totalUnlockCount, rewards } = resolveRewardsForDay(dayIndex, config)
 
   const shuffled = [...lockedGameIds].sort(() => Math.random() - 0.5)
-  const unlockGameIds = shuffled.slice(0, Math.min(unlockCount, shuffled.length))
+  const unlockedGameIds = shuffled.slice(0, Math.min(totalUnlockCount, shuffled.length))
+  const unlockedGameNames = unlockedGameIds.map((id) => lockedGameNames[id] ?? id)
 
   const newCheckedDays = isConsecutive ? [...data.checkedDays] : []
   while (newCheckedDays.length < config.cycleDays) newCheckedDays.push(false)
@@ -115,5 +142,5 @@ export function performCheckIn(
     checkedDays: newCheckedDays,
   })
 
-  return { coins, unlockGameIds, isWeekBonus, dayIndex }
+  return { totalCoins, unlockedGameIds, unlockedGameNames, rewards, isBonus, dayIndex }
 }

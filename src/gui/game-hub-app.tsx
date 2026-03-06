@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MutableRefObject } from 'react'
-import { getAttendanceState, performCheckIn, DEFAULT_ATTENDANCE_CONFIG } from './attendance-manager'
+import { getAttendanceState, performCheckIn, resolveRewardsForDay, DEFAULT_ATTENDANCE_CONFIG } from './attendance-manager'
 import type { CheckInReward } from './attendance-manager'
+import attendanceCalendarImg from '../../assets/images/generated/attendance-calendar.png'
+import attendanceCoinImg from '../../assets/images/generated/attendance-coin-reward.png'
+import attendanceCheckImg from '../../assets/images/generated/attendance-check.png'
+import attendanceBonusImg from '../../assets/images/generated/attendance-bonus.png'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
@@ -82,7 +86,16 @@ import {
   updateSoundSettings,
   subscribeSoundSettings,
 } from './sound-manager'
-import lobbyBgmLoop from '../../assets/sounds/lobby-bgm-loop.mp3'
+import lobbyBgm1 from '../../assets/sounds/lobby-bgm-1.mp3'
+import lobbyBgm2 from '../../assets/sounds/lobby-bgm-2.mp3'
+import lobbyBgm3 from '../../assets/sounds/lobby-bgm-3.mp3'
+import lobbyBgm4 from '../../assets/sounds/lobby-bgm-4.mp3'
+import lobbyBgm5 from '../../assets/sounds/lobby-bgm-5.mp3'
+
+const LOBBY_BGM_TRACKS = [lobbyBgm1, lobbyBgm2, lobbyBgm3, lobbyBgm4, lobbyBgm5]
+function pickRandomLobbyBgm(): string {
+  return LOBBY_BGM_TRACKS[Math.floor(Math.random() * LOBBY_BGM_TRACKS.length)]
+}
 import gameplayBgmLoop from '../../assets/sounds/gameplay-bgm-loop.mp3'
 import resultBgmLoop from '../../assets/sounds/result-bgm-loop.mp3'
 import countdownTickSfx from '../../assets/sounds/countdown-tick.mp3'
@@ -241,7 +254,8 @@ export function GameHubApp() {
   const resultRollAnimationFrameRef = useRef<number | null>(null)
   const lastCountdownSoundStepRef = useRef<number | null>(null)
 
-  const soundSettings = useSyncExternalStore(subscribeSoundSettings, getSoundSettings)
+  const [soundSettings, setSoundSettings] = useState(getSoundSettings)
+  useEffect(() => subscribeSoundSettings(() => setSoundSettings(getSoundSettings())), [])
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isAttendanceOpen, setIsAttendanceOpen] = useState(false)
   const [attendanceReward, setAttendanceReward] = useState<CheckInReward | null>(null)
@@ -396,7 +410,8 @@ export function GameHubApp() {
       return
     }
 
-    const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : lobbyBgmLoop
+    const lobbyBgm = activeGameId === null && resultGameId === null ? pickRandomLobbyBgm() : ''
+    const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : lobbyBgm
     const nextVolume = activeGameId !== null ? 0.18 : resultGameId !== null ? 0.2 : 0.22
     smPlayBgm(nextTrack, nextVolume)
   }, [activeGameId, countdownStepIndex, isAudioReady, resultGameId])
@@ -433,35 +448,12 @@ export function GameHubApp() {
     }
   }
 
-  const playUiClickSfx = () => {
-    if (!isAudioReady) return
-    playOneShotAudio(uiBtnClickSfx, 1)
-  }
-
-  const playUiCardSwipeSfx = () => {
-    if (!isAudioReady) return
-    playOneShotAudio(uiCardSwipeSfx, 0.95)
-  }
-
-  const playUiTabSwitchSfx = () => {
-    if (!isAudioReady) return
-    playOneShotAudio(uiTabSwitchSfx, 0.95)
-  }
-
-  const playUiCoinSfx = () => {
-    if (!isAudioReady) return
-    playOneShotAudio(uiCoinCollectSfx, 1)
-  }
-
-  const playUiUnlockSfx = () => {
-    if (!isAudioReady) return
-    playOneShotAudio(uiUnlockPopSfx, 1)
-  }
-
-  const playUiErrorSfx = () => {
-    if (!isAudioReady) return
-    playOneShotAudio(uiErrorBuzzSfx, 0.95)
-  }
+  const playUiClickSfx = () => { playOneShotAudio(uiBtnClickSfx, 1) }
+  const playUiCardSwipeSfx = () => { playOneShotAudio(uiCardSwipeSfx, 0.95) }
+  const playUiTabSwitchSfx = () => { playOneShotAudio(uiTabSwitchSfx, 0.95) }
+  const playUiCoinSfx = () => { playOneShotAudio(uiCoinCollectSfx, 1) }
+  const playUiUnlockSfx = () => { playOneShotAudio(uiUnlockPopSfx, 1) }
+  const playUiErrorSfx = () => { playOneShotAudio(uiErrorBuzzSfx, 0.95) }
 
   const selectGame = async (gameId: MiniGameId) => {
     activateAudio()
@@ -866,19 +858,20 @@ export function GameHubApp() {
 
       {isAttendanceOpen && (
         <AttendancePopup
-          useCases={useCases}
-          selectedGameId={selectedGameId}
           reward={attendanceReward}
           onCheckIn={async () => {
-            const lockedIds = await useCases.getLockedGameIds()
-            const reward = performCheckIn(lockedIds)
+            const [lockedIds, nameMap] = await Promise.all([
+              useCases.getLockedGameIds(),
+              useCases.getLockedGameNameMap(),
+            ])
+            const reward = performCheckIn(lockedIds, nameMap)
             if (reward === null) return
             setAttendanceReward(reward)
             playUiCoinSfx()
-            if (reward.unlockGameIds.length > 0) playUiUnlockSfx()
+            if (reward.unlockedGameIds.length > 0) playUiUnlockSfx()
             const next = await useCases.addCoinsAndUnlockGames(
-              reward.coins,
-              reward.unlockGameIds as any,
+              reward.totalCoins,
+              reward.unlockedGameIds as any,
               selectedGameId,
             )
             setSnapshot(next)
@@ -963,14 +956,10 @@ function CalendarIcon() {
 }
 
 function AttendancePopup({
-  useCases,
-  selectedGameId,
   reward,
   onCheckIn,
   onClose,
 }: {
-  useCases: GameHubUseCases
-  selectedGameId: MiniGameId
   reward: CheckInReward | null
   onCheckIn: () => void
   onClose: () => void
@@ -978,13 +967,13 @@ function AttendancePopup({
   const config = DEFAULT_ATTENDANCE_CONFIG
   const { data, canCheckIn, currentDayIndex } = getAttendanceState(config)
 
-  const dayLabels = Array.from({ length: config.cycleDays }, (_, i) => {
-    const isWeekBonus = i === config.cycleDays - 1
+  const dayLabels = config.dayRewards.map((dr, i) => {
+    const resolved = resolveRewardsForDay(i, config)
     return {
-      day: i + 1,
-      coins: isWeekBonus ? config.dailyCoinReward + config.weekBonusCoinReward : config.dailyCoinReward,
-      unlocks: isWeekBonus ? config.dailyRandomUnlockCount + config.weekBonusRandomUnlockCount : config.dailyRandomUnlockCount,
-      isWeekBonus,
+      ...dr,
+      totalCoins: resolved.totalCoins,
+      totalUnlocks: resolved.totalUnlockCount,
+      isBonus: i === config.cycleDays - 1,
       checked: data.checkedDays[i] === true,
       isCurrent: i === currentDayIndex && canCheckIn,
     }
@@ -993,29 +982,56 @@ function AttendancePopup({
   return (
     <div className="settings-backdrop" onClick={onClose}>
       <section className="attendance-panel" onClick={(e) => e.stopPropagation()}>
-        <h3 className="attendance-title">DAILY CHECK-IN</h3>
-        <p className="attendance-streak">Streak: {data.streakCount} days</p>
+        <div className="attendance-header">
+          <img className="attendance-header-icon" src={attendanceCalendarImg} alt="" />
+          <div>
+            <h3 className="attendance-title">DAILY CHECK-IN</h3>
+            <p className="attendance-streak">Streak: {data.streakCount} days</p>
+          </div>
+        </div>
 
         <div className="attendance-grid">
-          {dayLabels.map((d) => (
+          {dayLabels.map((d, i) => (
             <div
-              className={`attendance-day ${d.checked ? 'checked' : ''} ${d.isCurrent ? 'current' : ''} ${d.isWeekBonus ? 'bonus' : ''}`}
-              key={d.day}
+              className={`attendance-day ${d.checked ? 'checked' : ''} ${d.isCurrent ? 'current' : ''} ${d.isBonus ? 'bonus' : ''}`}
+              key={i}
             >
-              <span className="attendance-day-num">{d.isWeekBonus ? 'BONUS' : `Day ${d.day}`}</span>
-              <span className="attendance-day-reward">{d.coins}C</span>
-              <span className="attendance-day-unlock">+{d.unlocks} game</span>
-              {d.checked && <span className="attendance-check-mark">V</span>}
+              <img
+                className="attendance-day-icon"
+                src={d.isBonus ? attendanceBonusImg : attendanceCoinImg}
+                alt=""
+              />
+              <span className="attendance-day-num">{d.label}</span>
+              <span className="attendance-day-reward">{d.totalCoins}C</span>
+              {d.totalUnlocks > 0 && (
+                <span className="attendance-day-unlock">+{d.totalUnlocks} game</span>
+              )}
+              {d.checked && (
+                <img className="attendance-check-stamp" src={attendanceCheckImg} alt="checked" />
+              )}
             </div>
           ))}
         </div>
 
         {reward !== null ? (
           <div className="attendance-reward-result">
-            <p className="attendance-reward-coins">+{reward.coins} COINS!</p>
-            {reward.unlockGameIds.length > 0 && (
-              <p className="attendance-reward-unlock">{reward.unlockGameIds.length} game(s) unlocked!</p>
+            <p className="attendance-reward-coins">+{reward.totalCoins} COINS!</p>
+            {reward.unlockedGameNames.length > 0 && (
+              <div className="attendance-reward-unlocks">
+                <p className="attendance-reward-unlock-title">
+                  {reward.unlockedGameNames.length} game(s) unlocked!
+                </p>
+                <ul className="attendance-unlock-list">
+                  {reward.unlockedGameNames.map((name, i) => (
+                    <li key={i} className="attendance-unlock-item">
+                      <img className="attendance-unlock-item-icon" src={getLobbyIcon(reward.unlockedGameIds[i] as MiniGameId)} alt="" />
+                      <span>{name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
+            {reward.isBonus && <p className="attendance-bonus-tag">BONUS DAY!</p>}
           </div>
         ) : canCheckIn ? (
           <button className="attendance-checkin-btn" type="button" onClick={onCheckIn}>
