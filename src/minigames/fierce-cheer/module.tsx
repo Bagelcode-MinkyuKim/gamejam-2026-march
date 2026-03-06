@@ -27,10 +27,10 @@ const EDGE_THRESHOLD = 8
 const STAGE_FLOOR_Y = 370
 
 const PERFORMERS = [
-  { name: '김연자', src: kimYeonjaSprite, cx: 48, phase: 0 },
-  { name: '박완규', src: parkWankyuSprite, cx: 138, phase: 1 },
-  { name: '송창식', src: songChangsikSprite, cx: 228, phase: 2 },
-  { name: '박상민', src: parkSangminSprite, cx: 318, phase: 3 },
+  { name: 'Kim Yeonja', src: kimYeonjaSprite, cx: 48, phase: 0 },
+  { name: 'Park Wankyu', src: parkWankyuSprite, cx: 138, phase: 1 },
+  { name: 'Song Changsik', src: songChangsikSprite, cx: 228, phase: 2 },
+  { name: 'Park Sangmin', src: parkSangminSprite, cx: 318, phase: 3 },
 ] as const
 
 type WallSide = 'left' | 'right' | null
@@ -470,7 +470,7 @@ function FierceCheerGame({ onFinish, onExit }: MiniGameSessionProps) {
             {/* Instruction */}
             <text x={VIEWBOX_WIDTH / 2} y={VIEWBOX_HEIGHT - 16}
               textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="11"
-            >화면 아무 곳이나 좌우로 드래그!</text>
+            >Drag left or right anywhere!</text>
 
           </g>
         </svg>
@@ -478,7 +478,7 @@ function FierceCheerGame({ onFinish, onExit }: MiniGameSessionProps) {
         <div className="fierce-cheer-overlay-actions">
           <button className="run-run-action-button ghost" type="button"
             onPointerDown={(e) => e.stopPropagation()} onClick={onExit}
-          >나가기</button>
+          >EXIT</button>
         </div>
       </div>
     </section>
@@ -488,8 +488,8 @@ function FierceCheerGame({ onFinish, onExit }: MiniGameSessionProps) {
 export const fierceCheerModule: MiniGameModule = {
   manifest: {
     id: 'fierce-cheer',
-    title: '격렬한 응원',
-    description: '무대 위 공연을 응원하세요! 응원봉을 좌우 벽에 번갈아 닿게 하여 20초 안에 최고 점수를!',
+    title: 'Fierce Cheer',
+    description: 'Cheer the stage! Bounce stick off walls for max score in 20s!',
     unlockCost: 120,
     baseReward: 20,
     scoreRewardMultiplier: 0.7,

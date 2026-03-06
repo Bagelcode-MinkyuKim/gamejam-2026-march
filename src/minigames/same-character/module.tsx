@@ -37,12 +37,12 @@ const INCOMING_QUEUE_SIZE = 5
 const LOW_TIME_ALERT_THRESHOLD_MS = 10000
 
 const CHARACTER_POOL = [
-  { id: 'park-sangmin', name: '박상민', color: '#ef4444', imageSrc: parkSangminImage },
-  { id: 'song-changsik', name: '송창식', color: '#22c55e', imageSrc: songChangsikImage },
-  { id: 'tae-jina', name: '태진아', color: '#22d3ee', imageSrc: taeJinaImage },
-  { id: 'park-wankyu', name: '박완규', color: '#f59e0b', imageSrc: parkWankyuImage },
-  { id: 'kim-yeonja', name: '김연자', color: '#ec4899', imageSrc: kimYeonjaImage },
-  { id: 'seo-taiji', name: '서태지', color: '#8b5cf6', imageSrc: seoTaijiImage },
+  { id: 'park-sangmin', name: 'Park Sangmin', color: '#ef4444', imageSrc: parkSangminImage },
+  { id: 'song-changsik', name: 'Song Changsik', color: '#22c55e', imageSrc: songChangsikImage },
+  { id: 'tae-jina', name: 'Tae Jina', color: '#22d3ee', imageSrc: taeJinaImage },
+  { id: 'park-wankyu', name: 'Park Wankyu', color: '#f59e0b', imageSrc: parkWankyuImage },
+  { id: 'kim-yeonja', name: 'Kim Yeonja', color: '#ec4899', imageSrc: kimYeonjaImage },
+  { id: 'seo-taiji', name: 'Seo Taiji', color: '#8b5cf6', imageSrc: seoTaijiImage },
 ] as const
 
 type CharacterToken = (typeof CHARACTER_POOL)[number]
@@ -74,19 +74,19 @@ const FX_PRESET_CONFIG: Record<
   }
 > = {
   soft: {
-    label: '약',
+    label: 'Low',
     sfxGain: 0.76,
     burstDurationScale: 0.84,
     pitchBias: -0.02,
   },
   normal: {
-    label: '중',
+    label: 'Med',
     sfxGain: 1,
     burstDurationScale: 1,
     pitchBias: 0,
   },
   strong: {
-    label: '강',
+    label: 'High',
     sfxGain: 1.14,
     burstDurationScale: 1.2,
     pitchBias: 0.04,
@@ -337,7 +337,7 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
           setBurstText(`${nextCombo} COMBO!`)
           playSfx('comboMilestone', 0.9, 1 + Math.min(nextCombo / 120, 0.24))
         } else {
-          setBurstText('오옷!')
+          setBurstText('WOW!')
         }
       }
 
@@ -635,11 +635,7 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
         </button>
       </div>
 
-      <p className={`same-character-judge ${judge}`}>{judge === 'match' ? '오옷!' : judge === 'miss' ? '앗!' : ''}</p>
-
-      <button className="text-button" type="button" onClick={handleExit}>
-        허브로 돌아가기
-      </button>
+      <p className={`same-character-judge ${judge}`}>{judge === 'match' ? 'WOW!' : judge === 'miss' ? 'Oops!' : ''}</p>
     </section>
   )
 }
@@ -647,8 +643,8 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
 export const sameCharacterModule: MiniGameModule = {
   manifest: {
     id: 'same-character',
-    title: '니편내편',
-    description: '중앙 대기열 캐릭터가 차례로 전진할 때 좌우 이동으로 같은 줄을 맞추는 콤보 게임',
+    title: 'Connect Four',
+    description: 'Match queue characters to lanes with L/R moves for combos',
     unlockCost: 140,
     baseReward: 24,
     scoreRewardMultiplier: 0.7,

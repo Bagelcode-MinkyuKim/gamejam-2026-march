@@ -6,9 +6,10 @@ import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
 import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
-// ── View ──
-const VW = 162
-const VH = 288
+// ── View (pixel grid) ──
+const VW = 128
+const VH = 224
+const PX = 4  // pixel size unit
 
 // ── Physics ──
 const GRAVITY = 240
@@ -16,8 +17,10 @@ const BOOST_UP = -105
 const H_SPEED = 100
 const MAX_FALL = 180
 const H_DRAG = 0.93
-const PLAYER_SIZE = 22
-const PH = PLAYER_SIZE / 2
+const PLAYER_W = 12
+const PLAYER_H = 14
+const PH_X = PLAYER_W / 2
+const PH_Y = PLAYER_H / 2
 
 // ── Balance ──
 const HEART_DECAY = 2.8
@@ -28,12 +31,14 @@ const CAMERA_LERP = 0.14
 const FLOOR_Y = 0
 
 // ── World Gen ──
-const LAYER_H = 50
-const GEN_AHEAD = 800
-const OBS_SIZE = 12
-const WALL_THICKNESS = 6
-const MIN_GAP = 40
-const SPRING_SIZE = 16
+const LAYER_H = 40
+const GEN_AHEAD = 600
+const OBS_W = 10
+const OBS_H = 10
+const WALL_TH = PX
+const MIN_GAP = 32
+const SPRING_W = 14
+const SPRING_H = PX
 const SPRING_BOOST = -145
 
 // ── Object Types ──
@@ -52,33 +57,20 @@ interface WorldObj {
   collected: boolean
 }
 
-interface PlayerState {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  facingRight: boolean
-}
-
-interface HitFx {
-  readonly id: number
-  readonly x: number
-  readonly y: number
-  readonly text: string
-  readonly color: string
-  readonly createdAt: number
-}
+interface PlayerState { x: number; y: number; vx: number; vy: number; facingRight: boolean }
+interface HitFx { readonly id: number; readonly x: number; readonly y: number; readonly text: string; readonly color: string; readonly createdAt: number }
 
 let _id = 0
 function nid(): number { return _id++ }
 function rng(a: number, b: number): number { return a + Math.random() * (b - a) }
-function rint(a: number, b: number): number { return Math.floor(rng(a, b + 1)) }
 function clamp(v: number, lo: number, hi: number): number { return Math.min(hi, Math.max(lo, v)) }
+// Snap to pixel grid
+function snap(v: number): number { return Math.round(v / PX) * PX }
 
 function doesOverlap(objs: WorldObj[], x: number, y: number, w: number, h: number): boolean {
   for (const o of objs) {
     if (o.collected) continue
-    if (Math.abs(o.x - x) < (o.w + w) / 2 + 4 && Math.abs(o.y - y) < (o.h + h) / 2 + 4) return true
+    if (Math.abs(o.x - x) < (o.w + w) / 2 + PX && Math.abs(o.y - y) < (o.h + h) / 2 + PX) return true
   }
   return false
 }
@@ -87,116 +79,91 @@ function generateLayer(layerY: number): WorldObj[] {
   const objs: WorldObj[] = []
   const zone = Math.floor(-layerY / 400)
 
-  // Track wall gap so we don't block it with spikes
   let wallGapX = VW / 2
   let wallGapW = VW
   let wallY = -9999
   const hasWall = zone >= 1 && Math.random() < 0.2 + Math.min(zone * 0.04, 0.2)
 
-  // Wall segments (gaps to fly through) — gap never smaller than MIN_GAP
   if (hasWall) {
-    wallGapW = Math.max(MIN_GAP, 55 - Math.min(zone, 5) * 2)
-    wallGapX = rng(wallGapW / 2 + 8, VW - wallGapW / 2 - 8)
-    wallY = layerY + rng(12, LAYER_H - 12)
-    const leftEdge = wallGapX - wallGapW / 2
-    const rightEdge = wallGapX + wallGapW / 2
-    // Left wall
-    if (leftEdge > 5) {
-      objs.push({
-        id: nid(), kind: 'wall', x: leftEdge / 2, y: wallY,
-        w: leftEdge, h: WALL_THICKNESS, collected: false,
-      })
-    }
-    // Right wall
-    if (rightEdge < VW - 5) {
-      objs.push({
-        id: nid(), kind: 'wall', x: (rightEdge + VW) / 2, y: wallY,
-        w: VW - rightEdge, h: WALL_THICKNESS, collected: false,
-      })
-    }
+    wallGapW = Math.max(MIN_GAP, 48 - Math.min(zone, 5) * 2)
+    wallGapX = snap(rng(wallGapW / 2 + 8, VW - wallGapW / 2 - 8))
+    wallY = snap(layerY + rng(10, LAYER_H - 10))
+    const le = wallGapX - wallGapW / 2
+    const re = wallGapX + wallGapW / 2
+    if (le > PX) objs.push({ id: nid(), kind: 'wall', x: le / 2, y: wallY, w: le, h: WALL_TH, collected: false })
+    if (re < VW - PX) objs.push({ id: nid(), kind: 'wall', x: (re + VW) / 2, y: wallY, w: VW - re, h: WALL_TH, collected: false })
   }
 
-  // Helper: check if position is inside wall gap (protected zone)
-  const isInGapZone = (x: number, y: number) => {
+  const isInGap = (x: number, y: number) => {
     if (!hasWall) return false
-    return Math.abs(y - wallY) < WALL_THICKNESS + PH + 8 &&
-      x > wallGapX - wallGapW / 2 - 4 && x < wallGapX + wallGapW / 2 + 4
+    return Math.abs(y - wallY) < WALL_TH + PH_Y + 6 && x > wallGapX - wallGapW / 2 - PX && x < wallGapX + wallGapW / 2 + PX
   }
 
-  // Spikes — fewer, only 0-1 per layer
+  // Spike (0-1)
   if (Math.random() < 0.45) {
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const sx = rng(OBS_SIZE, VW - OBS_SIZE)
-      const sy = layerY + rng(5, LAYER_H - 5)
-      if (!doesOverlap(objs, sx, sy, OBS_SIZE, OBS_SIZE) && !isInGapZone(sx, sy)) {
-        objs.push({ id: nid(), kind: 'spike', x: sx, y: sy, w: OBS_SIZE, h: OBS_SIZE, collected: false })
+    for (let a = 0; a < 12; a++) {
+      const sx = snap(rng(OBS_W, VW - OBS_W))
+      const sy = snap(layerY + rng(4, LAYER_H - 4))
+      if (!doesOverlap(objs, sx, sy, OBS_W, OBS_H) && !isInGap(sx, sy)) {
+        objs.push({ id: nid(), kind: 'spike', x: sx, y: sy, w: OBS_W, h: OBS_H, collected: false })
         break
       }
     }
   }
 
-  // Pillars — vertical wall sticking out from left or right side (zone 1+)
+  // Pillar from side (zone 1+)
   if (!hasWall && zone >= 1 && Math.random() < 0.2) {
-    const fromLeft = Math.random() < 0.5
-    const pillarW = rng(25, 50)
-    const pillarH = 5
-    const px = fromLeft ? pillarW / 2 : VW - pillarW / 2
-    const py = layerY + rng(10, LAYER_H - 10)
-    objs.push({ id: nid(), kind: 'pillar', x: px, y: py, w: pillarW, h: pillarH, collected: false })
+    const left = Math.random() < 0.5
+    const pw = snap(rng(20, 44))
+    const py = snap(layerY + rng(8, LAYER_H - 8))
+    objs.push({ id: nid(), kind: 'pillar', x: left ? pw / 2 : VW - pw / 2, y: py, w: pw, h: PX, collected: false })
   }
 
-  // Zigzag walls — alternating left/right narrow walls (zone 2+)
+  // Zigzag wall (zone 2+)
   if (!hasWall && zone >= 2 && Math.random() < 0.15) {
-    const side = Math.random() < 0.5 ? 'left' : 'right'
-    const zzW = rng(35, 55)
-    const zzY = layerY + rng(10, LAYER_H - 10)
-    const zzX = side === 'left' ? zzW / 2 : VW - zzW / 2
-    objs.push({ id: nid(), kind: 'zigzag-wall', x: zzX, y: zzY, w: zzW, h: WALL_THICKNESS, collected: false })
+    const left = Math.random() < 0.5
+    const zw = snap(rng(28, 48))
+    const zy = snap(layerY + rng(8, LAYER_H - 8))
+    objs.push({ id: nid(), kind: 'zigzag-wall', x: left ? zw / 2 : VW - zw / 2, y: zy, w: zw, h: WALL_TH, collected: false })
   }
 
-  // Moving spikes (zone 3+, never with wall, rare)
+  // Moving spike (zone 3+)
   if (zone >= 3 && !hasWall && Math.random() < 0.1) {
-    const my = layerY + rng(10, LAYER_H - 10)
-    const range = rng(20, 35)
-    objs.push({
-      id: nid(), kind: 'moving-spike', x: VW / 2, y: my,
-      w: OBS_SIZE + 2, h: OBS_SIZE + 2,
-      moveRange: range, moveSpeed: rng(25, 40), movePhase: Math.random() * Math.PI * 2,
-      collected: false,
-    })
+    const my = snap(layerY + rng(8, LAYER_H - 8))
+    objs.push({ id: nid(), kind: 'moving-spike', x: VW / 2, y: my, w: OBS_W + 2, h: OBS_H + 2, moveRange: rng(16, 32), moveSpeed: rng(20, 36), movePhase: Math.random() * Math.PI * 2, collected: false })
   }
 
-  // Springs (bounce pads) — slightly more common
+  // Spring
   if (Math.random() < 0.18) {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const sx = rng(SPRING_SIZE, VW - SPRING_SIZE)
-      const sy = layerY + rng(10, LAYER_H - 10)
-      if (!doesOverlap(objs, sx, sy, SPRING_SIZE, 8)) {
-        objs.push({ id: nid(), kind: 'spring', x: sx, y: sy, w: SPRING_SIZE, h: 8, collected: false })
+    for (let a = 0; a < 6; a++) {
+      const sx = snap(rng(SPRING_W, VW - SPRING_W))
+      const sy = snap(layerY + rng(8, LAYER_H - 8))
+      if (!doesOverlap(objs, sx, sy, SPRING_W, SPRING_H + 4)) {
+        objs.push({ id: nid(), kind: 'spring', x: sx, y: sy, w: SPRING_W, h: SPRING_H, collected: false })
         break
       }
     }
   }
 
-  // Coins
+  // Coin
   if (Math.random() < 0.4) {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const cx = rng(12, VW - 12)
-      const cy = layerY + rng(8, LAYER_H - 8)
-      if (!doesOverlap(objs, cx, cy, 12, 12)) {
-        objs.push({ id: nid(), kind: 'coin', x: cx, y: cy, w: 11, h: 11, collected: false })
+    for (let a = 0; a < 6; a++) {
+      const cx = snap(rng(8, VW - 8))
+      const cy = snap(layerY + rng(6, LAYER_H - 6))
+      if (!doesOverlap(objs, cx, cy, 8, 8)) {
+        objs.push({ id: nid(), kind: 'coin', x: cx, y: cy, w: 8, h: 8, collected: false })
         break
       }
     }
   }
 
-  // Hearts — much more common now (was 7%, now 20%)
+  // Heart (20%)
   if (Math.random() < 0.20) {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const hx = rng(12, VW - 12)
-      const hy = layerY + rng(8, LAYER_H - 8)
-      if (!doesOverlap(objs, hx, hy, 12, 12)) {
-        objs.push({ id: nid(), kind: 'heart', x: hx, y: hy, w: 12, h: 12, collected: false })
+    for (let a = 0; a < 6; a++) {
+      const hx = snap(rng(8, VW - 8))
+      const hy = snap(layerY + rng(6, LAYER_H - 6))
+      if (!doesOverlap(objs, hx, hy, 8, 8)) {
+        objs.push({ id: nid(), kind: 'heart', x: hx, y: hy, w: 8, h: 8, collected: false })
         break
       }
     }
@@ -205,12 +172,50 @@ function generateLayer(layerY: number): WorldObj[] {
   return objs
 }
 
-// Height zone → sky color
-function skyColor(height: number): { top: string; mid: string; bot: string } {
-  if (height < 400) return { top: '#0b0b2e', mid: '#1a1a4e', bot: '#2d1b69' }
-  if (height < 1000) return { top: '#0b1e3e', mid: '#1a3a5e', bot: '#2d4b79' }
-  if (height < 2000) return { top: '#1a0a2e', mid: '#3a1a4e', bot: '#5d2b79' }
-  return { top: '#2e0b0b', mid: '#4e1a1a', bot: '#792d2d' }
+function skyColors(h: number): [string, string] {
+  if (h < 400) return ['#100820', '#1a1040']
+  if (h < 1000) return ['#081828', '#102848']
+  if (h < 2000) return ['#180828', '#301050']
+  return ['#280808', '#481010']
+}
+
+// ── Pixel art drawing helpers (SVG rects) ──
+function PixSpike({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <rect x={x - 4} y={y - 4} width={8} height={8} fill="#e03040" shapeRendering="crispEdges" />
+      <rect x={x - 2} y={y - 6} width={4} height={2} fill="#e03040" shapeRendering="crispEdges" />
+      <rect x={x - 1} y={y - 1} width={2} height={2} fill="#fff" shapeRendering="crispEdges" />
+    </g>
+  )
+}
+function PixCoin({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <rect x={x - 3} y={y - 3} width={6} height={6} fill="#f0c020" shapeRendering="crispEdges" />
+      <rect x={x - 1} y={y - 1} width={2} height={2} fill="#fff8d0" shapeRendering="crispEdges" />
+    </g>
+  )
+}
+function PixHeart({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <rect x={x - 3} y={y - 2} width={6} height={4} fill="#e04060" shapeRendering="crispEdges" />
+      <rect x={x - 4} y={y - 1} width={2} height={2} fill="#e04060" shapeRendering="crispEdges" />
+      <rect x={x + 2} y={y - 1} width={2} height={2} fill="#e04060" shapeRendering="crispEdges" />
+      <rect x={x - 1} y={y + 2} width={2} height={2} fill="#e04060" shapeRendering="crispEdges" />
+      <rect x={x - 1} y={y - 1} width={2} height={2} fill="#ff8090" shapeRendering="crispEdges" />
+    </g>
+  )
+}
+function PixSpring({ x, y, w }: { x: number; y: number; w: number }) {
+  return (
+    <g>
+      <rect x={x - w / 2} y={y - 2} width={w} height={4} fill="#40c060" shapeRendering="crispEdges" />
+      <rect x={x - w / 2 + 2} y={y - 4} width={2} height={2} fill="#40c060" shapeRendering="crispEdges" />
+      <rect x={x + w / 2 - 4} y={y - 4} width={2} height={2} fill="#40c060" shapeRendering="crispEdges" />
+    </g>
+  )
 }
 
 function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
@@ -221,7 +226,6 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [score, setScore] = useState(0)
   const [coins, setCoins] = useState(0)
   const [hitFxList, setHitFxList] = useState<HitFx[]>([])
-  const [statusText, setStatusText] = useState('좌/우 터치로 붕~')
 
   const pRef = useRef(player)
   const objRef = useRef<WorldObj[]>([])
@@ -235,6 +239,8 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const genR = useRef(0)
   const maxHR = useRef(0)
   const fxR = useRef<HitFx[]>([])
+  const objVersionR = useRef(0)
+  const lastObjVersionR = useRef(-1)
 
   const sfxJump = useRef<HTMLAudioElement | null>(null)
   const sfxCoin = useRef<HTMLAudioElement | null>(null)
@@ -245,15 +251,13 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   }, [])
 
   const addFx = useCallback((x: number, y: number, text: string, color: string) => {
-    const fx: HitFx = { id: nid(), x, y, text, color, createdAt: elR.current }
-    fxR.current = [...fxR.current, fx]
+    fxR.current = [...fxR.current, { id: nid(), x, y, text, color, createdAt: elR.current }]
   }, [])
 
   const finish = useCallback(() => {
     if (doneR.current) return
     doneR.current = true
-    const s = Math.floor(maxHR.current * 0.5 + coinR.current * COIN_BONUS)
-    onFinish({ score: s, durationMs: elR.current > 0 ? elR.current : 16 })
+    onFinish({ score: Math.floor(maxHR.current * 0.5 + coinR.current * COIN_BONUS), durationMs: elR.current > 0 ? elR.current : 16 })
   }, [onFinish])
 
   const doFloat = useCallback((dir: 'left' | 'right') => {
@@ -291,8 +295,9 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     lfR.current = null
     const init: WorldObj[] = []
     for (let ly = -LAYER_H * 2; ly > -GEN_AHEAD; ly -= LAYER_H) init.push(...generateLayer(ly))
-    objRef.current = init; genR.current = -GEN_AHEAD; setObjects([...init])
-    // Initialize camera to player start position so no jump
+    objRef.current = init; genR.current = -GEN_AHEAD
+    objVersionR.current++
+    setObjects([...init])
     camRef.current = FLOOR_Y - VH * 0.4
     setCamY(camRef.current)
 
@@ -301,45 +306,45 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (lfR.current === null) lfR.current = now
       const dMs = Math.min(now - lfR.current, MAX_FRAME_DELTA_MS)
       lfR.current = now; elR.current += dMs
-      const dt = dMs / 1000; const el = elR.current
+      const dt = dMs / 1000
 
       const p = { ...pRef.current }
       const w = objRef.current
       let hp = heartR.current; let cn = coinR.current
+      let objChanged = false
 
-      // Physics
       p.vy += GRAVITY * dt
       p.vy = Math.min(p.vy, MAX_FALL)
       p.vx *= Math.pow(H_DRAG, dt * 60)
       p.x += p.vx * dt; p.y += p.vy * dt
 
-      // Clamp X — no teleport wrap, just stop at edges
-      if (p.x < PH) { p.x = PH; p.vx = Math.abs(p.vx) * 0.3 }
-      if (p.x > VW - PH) { p.x = VW - PH; p.vx = -Math.abs(p.vx) * 0.3 }
-      // Floor
+      if (p.x < PH_X) { p.x = PH_X; p.vx = Math.abs(p.vx) * 0.3 }
+      if (p.x > VW - PH_X) { p.x = VW - PH_X; p.vx = -Math.abs(p.vx) * 0.3 }
       if (p.y > FLOOR_Y) { p.y = FLOOR_Y; p.vy = 0 }
 
       const h = -p.y
       if (h > maxHR.current) maxHR.current = h
 
-      // Camera — faster lerp when distance is large (prevents teleport feel)
       const tgt = p.y - VH * 0.4
-      const camDist = Math.abs(tgt - camRef.current)
-      const dynamicLerp = camDist > 80 ? 0.35 : camDist > 40 ? 0.22 : CAMERA_LERP
-      camRef.current += (tgt - camRef.current) * dynamicLerp
+      const cd = Math.abs(tgt - camRef.current)
+      const dl = cd > 60 ? 0.35 : cd > 30 ? 0.22 : CAMERA_LERP
+      camRef.current += (tgt - camRef.current) * dl
 
-      // Generate ahead
+      // Generate world ahead (only when needed)
       const genThr = camRef.current - GEN_AHEAD
-      while (genR.current > genThr) {
-        genR.current -= LAYER_H
-        w.push(...generateLayer(genR.current))
+      if (genR.current > genThr) {
+        while (genR.current > genThr) {
+          genR.current -= LAYER_H
+          w.push(...generateLayer(genR.current))
+        }
+        objChanged = true
       }
 
-      // Update moving objects
+      // Moving spikes
       for (const o of w) {
         if (o.kind === 'moving-spike' && o.moveRange && o.moveSpeed && o.movePhase !== undefined) {
           o.movePhase += o.moveSpeed * dt * 0.1
-          o.x = VW / 2 + Math.sin(o.movePhase) * o.moveRange
+          o.x = snap(VW / 2 + Math.sin(o.movePhase) * o.moveRange)
         }
       }
 
@@ -350,67 +355,71 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         const dy = Math.abs(p.y - o.y)
 
         if (o.kind === 'wall' || o.kind === 'pillar' || o.kind === 'zigzag-wall') {
-          const overlapX = (PH + o.w / 2) - dx
-          const overlapY = (PH + o.h / 2) - dy
-          if (overlapX > 0 && overlapY > 0) {
-            // Push out along the smallest overlap axis
-            if (overlapY < overlapX) {
-              // Push vertically
-              if (p.y < o.y) { p.y = o.y - o.h / 2 - PH; if (p.vy > 0) p.vy = 0 }
-              else { p.y = o.y + o.h / 2 + PH; if (p.vy < 0) p.vy = 0 }
+          const ox = (PH_X + o.w / 2) - dx
+          const oy = (PH_Y + o.h / 2) - dy
+          if (ox > 0 && oy > 0) {
+            if (oy < ox) {
+              if (p.y < o.y) { p.y = o.y - o.h / 2 - PH_Y; if (p.vy > 0) p.vy = 0 }
+              else { p.y = o.y + o.h / 2 + PH_Y; if (p.vy < 0) p.vy = 0 }
             } else {
-              // Push horizontally
-              if (p.x < o.x) { p.x = o.x - o.w / 2 - PH; p.vx = -Math.abs(p.vx) * 0.2 }
-              else { p.x = o.x + o.w / 2 + PH; p.vx = Math.abs(p.vx) * 0.2 }
+              if (p.x < o.x) { p.x = o.x - o.w / 2 - PH_X; p.vx = -Math.abs(p.vx) * 0.2 }
+              else { p.x = o.x + o.w / 2 + PH_X; p.vx = Math.abs(p.vx) * 0.2 }
             }
           }
           continue
         }
 
-        const hitW = o.kind === 'spring' ? (PH + o.w / 2) : o.kind === 'spike' || o.kind === 'moving-spike' ? (PH + o.w / 2) * 0.7 : PH + 6
-        const hitH = o.kind === 'spring' ? (PH + o.h / 2) : o.kind === 'spike' || o.kind === 'moving-spike' ? (PH + o.h / 2) * 0.7 : PH + 6
+        const hw = o.kind === 'spring' ? (PH_X + o.w / 2) : (o.kind === 'spike' || o.kind === 'moving-spike') ? (PH_X + o.w / 2) * 0.7 : PH_X + 4
+        const hh = o.kind === 'spring' ? (PH_Y + o.h / 2) : (o.kind === 'spike' || o.kind === 'moving-spike') ? (PH_Y + o.h / 2) * 0.7 : PH_Y + 4
 
-        if (dx < hitW && dy < hitH) {
+        if (dx < hw && dy < hh) {
           if (o.kind === 'spike' || o.kind === 'moving-spike') {
-            o.collected = true; hp -= 30
+            o.collected = true; hp -= 30; objChanged = true
             playSfx(sfxCrash.current, 0.5, 1)
-            addFx(o.x, o.y, '-30', '#ff4757')
+            addFx(o.x, o.y, '-30', '#e03040')
           } else if (o.kind === 'spring') {
             p.vy = SPRING_BOOST
             playSfx(sfxJump.current, 0.5, 1.5)
-            addFx(o.x, o.y, 'BOING!', '#4ade80')
+            addFx(o.x, o.y, 'BOING', '#40c060')
           } else if (o.kind === 'heart') {
-            o.collected = true; hp = Math.min(HEART_MAX, hp + HEART_PICKUP)
+            o.collected = true; hp = Math.min(HEART_MAX, hp + HEART_PICKUP); objChanged = true
             playSfx(sfxCoin.current, 0.4, 0.9)
-            addFx(o.x, o.y, '+HP', '#ff6b81')
+            addFx(o.x, o.y, '+HP', '#e04060')
           } else if (o.kind === 'coin') {
-            o.collected = true; cn++
+            o.collected = true; cn++; objChanged = true
             playSfx(sfxCoin.current, 0.5, 1.2)
-            addFx(o.x, o.y, '+$', '#ffd700')
+            addFx(o.x, o.y, '+$', '#f0c020')
           }
         }
       }
 
-      // Cleanup far objects
-      const cleanY = camRef.current + VH + 200
+      // Cleanup far below
+      const cleanY = camRef.current + VH + 150
+      const before = w.length
       objRef.current = w.filter((o) => o.y < cleanY)
+      if (objRef.current.length !== before) objChanged = true
 
-      // Heart decay
       hp -= HEART_DECAY * dt
-
-      // Cleanup old fx
-      fxR.current = fxR.current.filter((f) => el - f.createdAt < 700)
+      fxR.current = fxR.current.filter((f) => elR.current - f.createdAt < 700)
 
       const sc = Math.floor(maxHR.current * 0.5 + cn * COIN_BONUS)
 
       if (hp <= 0) {
-        setStatusText('하트가 다 떨어졌습니다!')
         playSfx(sfxCrash.current, 0.6, 0.9); finish(); return
       }
 
       pRef.current = p; heartR.current = hp; coinR.current = cn
-      setPlayer({ ...p }); setObjects([...objRef.current]); setCamY(camRef.current)
+      setPlayer({ ...p }); setCamY(camRef.current)
       setHeart(hp); setCoins(cn); setScore(sc); setHitFxList([...fxR.current])
+
+      // Only update objects state when something actually changed
+      if (objChanged) {
+        objVersionR.current++
+      }
+      if (lastObjVersionR.current !== objVersionR.current) {
+        lastObjVersionR.current = objVersionR.current
+        setObjects([...objRef.current])
+      }
 
       afR.current = window.requestAnimationFrame(step)
     }
@@ -423,147 +432,102 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const bestS = Math.max(bestScore, score)
   const hDisp = Math.floor(maxHR.current)
   const sy = (wy: number) => wy - camY
-  const visT = camY - 30; const visB = camY + VH + 30
-  const sky = skyColor(maxHR.current)
+  const visT = camY - 20; const visB = camY + VH + 20
+  const [skyTop, skyBot] = skyColors(maxHR.current)
 
   return (
     <section className="mini-game-panel intense-cheer-panel" aria-label="intense-cheer-game">
-      <div className="intense-cheer-board" onPointerDown={onPtrDown} role="presentation">
-        <svg className="intense-cheer-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMax meet">
+      <div className="intense-cheer-board" onPointerDown={onPtrDown} role="presentation"
+        style={{ imageRendering: 'pixelated' as const }}>
+        <svg className="intense-cheer-svg" viewBox={`0 0 ${VW} ${VH}`}
+          preserveAspectRatio="xMidYMid slice" shapeRendering="crispEdges"
+          style={{ imageRendering: 'pixelated' }}>
           <defs>
             <linearGradient id="ic-sky" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={sky.top} />
-              <stop offset="40%" stopColor={sky.mid} />
-              <stop offset="100%" stopColor={sky.bot} />
-            </linearGradient>
-            <linearGradient id="ic-heart" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#ff4757" />
-              <stop offset="100%" stopColor="#ff6b81" />
+              <stop offset="0%" stopColor={skyTop} />
+              <stop offset="100%" stopColor={skyBot} />
             </linearGradient>
           </defs>
 
           <rect x="0" y="0" width={VW} height={VH} fill="url(#ic-sky)" />
 
-          {/* Stars parallax */}
-          {[15, 45, 78, 110, 140, 30, 95, 125].map((sx, i) => (
-            <circle key={`s${i}`} cx={sx} cy={((20 + i * 35 - camY * 0.02) % VH + VH) % VH}
-              r={0.8 + (i % 3) * 0.4} fill="rgba(255,255,200,0.6)" opacity={0.3 + (i % 3) * 0.15} />
+          {/* Pixel stars */}
+          {[10, 30, 55, 80, 100, 120, 22, 68, 95, 110].map((sx, i) => (
+            <rect key={`s${i}`} x={sx} y={((16 + i * 22 - camY * 0.015) % VH + VH) % VH}
+              width={2} height={2} fill={i % 3 === 0 ? '#606080' : '#404060'} />
           ))}
 
           {/* Floor */}
-          {sy(FLOOR_Y) < VH + 10 && (
-            <line x1="0" y1={sy(FLOOR_Y)} x2={VW} y2={sy(FLOOR_Y)}
-              stroke="rgba(168,85,247,0.5)" strokeWidth="2" strokeDasharray="4 4" />
+          {sy(FLOOR_Y) < VH + 4 && (
+            <rect x="0" y={sy(FLOOR_Y)} width={VW} height={2} fill="#604080" />
           )}
 
-          {/* World objects */}
+          {/* World objects — all pixel art rects */}
           {objects.filter((o) => !o.collected && o.y > visT && o.y < visB).map((o) => {
             const ox = o.x; const oy = sy(o.y)
             switch (o.kind) {
-              case 'spike':
-                return (
-                  <g key={o.id}>
-                    <polygon points={`${ox},${oy - OBS_SIZE / 2} ${ox + OBS_SIZE / 2},${oy + OBS_SIZE / 2} ${ox - OBS_SIZE / 2},${oy + OBS_SIZE / 2}`}
-                      fill="#ff4757" stroke="#c0392b" strokeWidth="1" />
-                    <text x={ox} y={oy + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">!</text>
-                  </g>
-                )
-              case 'moving-spike':
-                return (
-                  <g key={o.id}>
-                    <polygon points={`${ox},${oy - (OBS_SIZE + 2) / 2} ${ox + (OBS_SIZE + 2) / 2},${oy + (OBS_SIZE + 2) / 2} ${ox - (OBS_SIZE + 2) / 2},${oy + (OBS_SIZE + 2) / 2}`}
-                      fill="#e74c3c" stroke="#c0392b" strokeWidth="1.2" />
-                    <text x={ox} y={oy + 3} textAnchor="middle" fill="#fff" fontSize="7" fontWeight="bold">~</text>
-                    {/* Motion trail */}
-                    <line x1={ox - 8} y1={oy} x2={ox - 14} y2={oy} stroke="rgba(231,76,60,0.4)" strokeWidth="1" />
-                    <line x1={ox + 8} y1={oy} x2={ox + 14} y2={oy} stroke="rgba(231,76,60,0.4)" strokeWidth="1" />
-                  </g>
-                )
+              case 'spike': return <PixSpike key={o.id} x={ox} y={oy} />
+              case 'moving-spike': return <PixSpike key={o.id} x={ox} y={oy} />
+              case 'coin': return <PixCoin key={o.id} x={ox} y={oy} />
+              case 'heart': return <PixHeart key={o.id} x={ox} y={oy} />
+              case 'spring': return <PixSpring key={o.id} x={ox} y={oy} w={o.w} />
               case 'wall':
-                return <rect key={o.id} x={ox - o.w / 2} y={oy - o.h / 2} width={o.w} height={o.h}
-                  rx="2" fill="rgba(168,85,247,0.6)" stroke="rgba(168,85,247,0.8)" strokeWidth="1" />
               case 'pillar':
-                return <rect key={o.id} x={ox - o.w / 2} y={oy - o.h / 2} width={o.w} height={o.h}
-                  rx="2" fill="rgba(139,92,246,0.5)" stroke="rgba(139,92,246,0.7)" strokeWidth="1" />
+                return <rect key={o.id} x={ox - o.w / 2} y={oy - o.h / 2} width={o.w} height={o.h} fill="#6040a0" />
               case 'zigzag-wall':
-                return (
-                  <g key={o.id}>
-                    <rect x={ox - o.w / 2} y={oy - o.h / 2} width={o.w} height={o.h}
-                      rx="1" fill="rgba(236,72,153,0.5)" stroke="rgba(236,72,153,0.7)" strokeWidth="1" />
-                    <line x1={ox - o.w / 2 + 3} y1={oy} x2={ox + o.w / 2 - 3} y2={oy}
-                      stroke="rgba(236,72,153,0.3)" strokeWidth="0.5" strokeDasharray="2 2" />
-                  </g>
-                )
-              case 'spring':
-                return (
-                  <g key={o.id}>
-                    <rect x={ox - SPRING_SIZE / 2} y={oy - 3} width={SPRING_SIZE} height={6} rx="2"
-                      fill="#4ade80" stroke="#22c55e" strokeWidth="1" />
-                    <text x={ox} y={oy + 2.5} textAnchor="middle" fill="#166534" fontSize="5" fontWeight="bold">^</text>
-                  </g>
-                )
-              case 'coin':
-                return (
-                  <g key={o.id}>
-                    <circle cx={ox} cy={oy} r="5" fill="#ffd700" stroke="#daa520" strokeWidth="1" />
-                    <text x={ox} y={oy + 2} textAnchor="middle" fill="#b8860b" fontSize="5" fontWeight="bold">$</text>
-                  </g>
-                )
-              case 'heart':
-                return (
-                  <g key={o.id}>
-                    <circle cx={ox} cy={oy} r="5.5" fill="url(#ic-heart)" opacity="0.9" />
-                    <text x={ox} y={oy + 2.5} textAnchor="middle" fill="white" fontSize="6">+</text>
-                  </g>
-                )
+                return <rect key={o.id} x={ox - o.w / 2} y={oy - o.h / 2} width={o.w} height={o.h} fill="#a04080" />
               default: return null
             }
           })}
 
-          {/* Hit effects */}
+          {/* Hit FX */}
           {hitFxList.map((fx) => {
             const age = elR.current - fx.createdAt
             const op = Math.max(0, 1 - age / 700)
-            const ofy = -18 * (age / 700)
             return (
-              <text key={fx.id} x={fx.x} y={sy(fx.y) + ofy}
-                textAnchor="middle" fill={fx.color} fontSize="8" fontWeight="bold" opacity={op}>
-                {fx.text}
-              </text>
+              <text key={fx.id} x={fx.x} y={sy(fx.y) - 14 * (age / 700)}
+                textAnchor="middle" fill={fx.color} fontSize="6" fontWeight="bold" opacity={op}
+                fontFamily="monospace">{fx.text}</text>
             )
           })}
 
-          {/* Player */}
-          <g transform={`translate(${player.x}, ${sy(player.y)})`}>
-            <ellipse cx="0" cy={PH + 2} rx={PH * 0.7} ry="3" fill="rgba(168,85,247,0.3)" />
-            <image href={kimYeonjaSprite} x={-PH} y={-PH} width={PLAYER_SIZE} height={PLAYER_SIZE}
-              transform={player.facingRight ? undefined : 'scale(-1,1)'} preserveAspectRatio="xMidYMid meet" />
+          {/* Player — pixel character */}
+          <g transform={`translate(${snap(player.x)}, ${snap(sy(player.y))})`}>
+            {/* Shadow */}
+            <rect x={-PH_X + 1} y={PH_Y} width={PLAYER_W - 2} height={2} fill="rgba(0,0,0,0.3)" />
+            {/* Body */}
+            <rect x={-PH_X} y={-PH_Y} width={PLAYER_W} height={PLAYER_H} fill="#d080f0" />
+            {/* Head highlight */}
+            <rect x={-PH_X + 2} y={-PH_Y + 2} width={4} height={4} fill="#f0b0ff" />
+            {/* Eyes */}
+            <rect x={player.facingRight ? 2 : -4} y={-PH_Y + 4} width={2} height={2} fill="#200030" />
+            {/* Character sprite overlay */}
+            <image href={kimYeonjaSprite} x={-PH_X} y={-PH_Y} width={PLAYER_W} height={PLAYER_H}
+              transform={player.facingRight ? undefined : 'scale(-1,1)'}
+              preserveAspectRatio="xMidYMid meet" style={{ imageRendering: 'pixelated' }} />
           </g>
 
-          {/* HUD: Heart gauge */}
-          <rect x="5" y="40" width="8" height="60" rx="4" fill="rgba(0,0,0,0.4)" />
-          <rect x="5" y={40 + 60 * (1 - hPct)} width="8" height={60 * hPct} rx="4" fill="url(#ic-heart)" />
-          <text x="9" y="36" textAnchor="middle" fill="#ff6b81" fontSize="9" fontWeight="bold">H</text>
+          {/* HUD: Heart bar */}
+          <rect x="3" y="24" width="6" height="48" fill="#200020" />
+          <rect x="3" y={24 + 48 * (1 - hPct)} width="6" height={48 * hPct} fill="#e04060" />
+          <rect x="3" y="20" width="6" height="4" fill="#e04060" />
 
           {/* HUD: Score */}
-          <text x={VW / 2} y="16" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" opacity="0.9">{score}</text>
-          <text x={VW / 2} y="26" textAnchor="middle" fill="white" fontSize="6" opacity="0.5">BEST {bestS}</text>
+          <text x={VW / 2} y="12" textAnchor="middle" fill="#fff" fontSize="10" fontWeight="bold" fontFamily="monospace">{score}</text>
+          <text x={VW / 2} y="20" textAnchor="middle" fill="#808090" fontSize="5" fontFamily="monospace">BEST {bestS}</text>
 
           {/* HUD: Coins + Height */}
-          <circle cx={VW - 10} cy="14" r="3.5" fill="#ffd700" stroke="#daa520" strokeWidth="0.5" />
-          <text x={VW - 18} y="17" textAnchor="end" fill="#ffd700" fontSize="8" fontWeight="bold">{coins}</text>
-          <text x={VW - 6} y="28" textAnchor="end" fill="white" fontSize="6" opacity="0.4">{hDisp}m</text>
+          <rect x={VW - 10} y="8" width="6" height="6" fill="#f0c020" />
+          <text x={VW - 14} y="14" textAnchor="end" fill="#f0c020" fontSize="6" fontFamily="monospace" fontWeight="bold">{coins}</text>
+          <text x={VW - 4} y="22" textAnchor="end" fill="#808090" fontSize="5" fontFamily="monospace">{hDisp}m</text>
         </svg>
-
-        <p className="intense-cheer-status">{statusText}</p>
-        <p className="intense-cheer-tap-hint">좌/우 터치로 붕~</p>
 
         <div className="intense-cheer-overlay-actions">
           <button className="run-run-action-button" type="button"
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => { playSfx(sfxCoin.current, 0.5, 1); finish() }}>종료</button>
+            onClick={() => { playSfx(sfxCoin.current, 0.5, 1); finish() }}>FINISH</button>
           <button className="run-run-action-button ghost" type="button"
-            onPointerDown={(e) => e.stopPropagation()} onClick={onExit}>나가기</button>
+            onPointerDown={(e) => e.stopPropagation()} onClick={onExit}>EXIT</button>
         </div>
       </div>
     </section>
@@ -573,8 +537,8 @@ function DungaDungaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 export const intenseCheerModule: MiniGameModule = {
   manifest: {
     id: 'intense-cheer',
-    title: '둥가둥가',
-    description: '터치로 붕~ 떠올라 장애물과 벽을 피하며 올라가세요! 스프링 패드와 코인을 노리세요.',
+    title: 'Dunga-Dunga',
+    description: 'Pixel bounce! Tap L/R to float up through walls & spikes.',
     unlockCost: 50,
     baseReward: 12,
     scoreRewardMultiplier: 0.6,

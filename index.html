@@ -3,9 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Bagel Mini Plaza</title>
+    <link rel="icon" type="image/png" href="/app-icon.png" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <title>PUNGAK</title>
   </head>
   <body>
+    <div id="loading-screen" style="position:fixed;inset:0;z-index:9999;background:#1c1917;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;">
+      <img src="./lobby-splash.png" alt="Loading" style="max-width:min(320px, 80vw);max-height:70svh;width:auto;height:auto;image-rendering:pixelated;object-fit:contain;border-radius:8px;" />
+      <p style="margin:0;font-family:'Press Start 2P',monospace;font-size:0.7rem;color:#fbbf24;letter-spacing:0.1em;animation:blink-loading 1s steps(2) infinite;">LOADING...</p>
+      <style>@keyframes blink-loading{50%{opacity:0.3}}</style>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

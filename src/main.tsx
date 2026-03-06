@@ -8,3 +8,16 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+const loadingScreen = document.getElementById('loading-screen')
+if (loadingScreen) {
+  const appReadyTime = performance.now()
+  const minDisplayMs = 2000
+  const elapsed = appReadyTime
+  const remaining = Math.max(0, minDisplayMs - elapsed)
+  setTimeout(() => {
+    loadingScreen.style.transition = 'opacity 400ms ease-out'
+    loadingScreen.style.opacity = '0'
+    setTimeout(() => loadingScreen.remove(), 400)
+  }, remaining)
+}

@@ -42,12 +42,12 @@ const OK_LOCK_SHAKE_DURATION_MS = 260
 const LOW_TIME_THRESHOLD_MS = 5000
 
 const CHARACTER_POOL = [
-  { id: 'park-sangmin', name: '박상민', color: '#ef4444', imageSrc: parkSangminImage },
-  { id: 'song-changsik', name: '송창식', color: '#22c55e', imageSrc: songChangsikImage },
-  { id: 'tae-jina', name: '태진아', color: '#22d3ee', imageSrc: taeJinaImage },
-  { id: 'park-wankyu', name: '박완규', color: '#f59e0b', imageSrc: parkWankyuImage },
-  { id: 'kim-yeonja', name: '김연자', color: '#ec4899', imageSrc: kimYeonjaImage },
-  { id: 'seo-taiji', name: '서태지', color: '#8b5cf6', imageSrc: seoTaijiImage },
+  { id: 'park-sangmin', name: 'Park Sangmin', color: '#ef4444', imageSrc: parkSangminImage },
+  { id: 'song-changsik', name: 'Song Changsik', color: '#22c55e', imageSrc: songChangsikImage },
+  { id: 'tae-jina', name: 'Tae Jina', color: '#22d3ee', imageSrc: taeJinaImage },
+  { id: 'park-wankyu', name: 'Park Wankyu', color: '#f59e0b', imageSrc: parkWankyuImage },
+  { id: 'kim-yeonja', name: 'Kim Yeonja', color: '#ec4899', imageSrc: kimYeonjaImage },
+  { id: 'seo-taiji', name: 'Seo Taiji', color: '#8b5cf6', imageSrc: seoTaijiImage },
 ] as const
 
 type CharacterToken = (typeof CHARACTER_POOL)[number]
@@ -540,7 +540,7 @@ function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const feverGaugePercent = clampNumber(feverGauge, 0, 100)
   const feverTimePercent = (feverRemainingMs / FEVER_DURATION_MS) * 100
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const difficultyLabel = `${recipe.length}칸`
+  const difficultyLabel = `${recipe.length}tiles`
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
 
   return (
@@ -556,10 +556,10 @@ function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           COMBO <strong>{combo}</strong>
         </p>
         <p className="combo-formula-multiplier">
-          배수 <strong>x{comboMultiplier}</strong>
+          Multi <strong>x{comboMultiplier}</strong>
         </p>
         <p className="combo-formula-difficulty">
-          조합 <strong>{difficultyLabel}</strong>
+          Combo <strong>{difficultyLabel}</strong>
         </p>
       </div>
 
@@ -570,7 +570,7 @@ function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             width: `${isFeverMode ? feverTimePercent : feverGaugePercent}%`,
           }}
         />
-        <p className="combo-formula-gauge-label">{isFeverMode ? `피버 ${Math.max(0, feverRemainingMs / 1000).toFixed(1)}s` : '피버 게이지'}</p>
+        <p className="combo-formula-gauge-label">{isFeverMode ? `Fever ${Math.max(0, feverRemainingMs / 1000).toFixed(1)}s` : 'FEVER GAUGE'}</p>
       </div>
 
       <div
@@ -613,7 +613,7 @@ function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       <div className="combo-formula-actions">
         <button className="combo-formula-reset" type="button" onClick={handleResetInput}>
-          입력 초기화
+          Reset Input
         </button>
         <button
           className={`combo-formula-ok ${isRecipeSolved ? 'open' : 'locked'} ${
@@ -623,13 +623,9 @@ function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           onClick={handleConfirm}
           aria-disabled={!isRecipeSolved}
         >
-          {isRecipeSolved ? `OK +${okRewardPreview}` : 'OK 잠김'}
+          {isRecipeSolved ? `OK +${okRewardPreview}` : 'OK locked'}
         </button>
       </div>
-
-      <button className="text-button" type="button" onClick={handleExit}>
-        허브로 돌아가기
-      </button>
     </section>
   )
 }
@@ -638,7 +634,7 @@ export const comboFormulaModule: MiniGameModule = {
   manifest: {
     id: 'combo-formula',
     title: 'Combine',
-    description: '제시된 캐릭터 조합을 순서대로 입력하고 OK로 확정해 콤보와 피버를 이어가는 게임',
+    description: 'Enter character combos in order and press OK for fever chains',
     unlockCost: 180,
     baseReward: 26,
     scoreRewardMultiplier: 0.85,

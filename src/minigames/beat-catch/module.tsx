@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
-import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
-import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
+import perfectSfx from '../../../assets/sounds/beat-catch-perfect.mp3'
+import goodSfx from '../../../assets/sounds/beat-catch-good.mp3'
+import missSfx from '../../../assets/sounds/beat-catch-miss.mp3'
+import comboSfx from '../../../assets/sounds/beat-catch-combo.mp3'
+import feverSfx from '../../../assets/sounds/beat-catch-fever.mp3'
+import reverseSfx from '../../../assets/sounds/beat-catch-reverse.mp3'
+import goldenSfx from '../../../assets/sounds/beat-catch-golden.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
-import characterImage from '../../../assets/images/same-character/tae-jina.png'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
-const ROUND_DURATION_MS = 30000
-const TRACK_RADIUS = 110
+// ─── Constants ──────────────────────────────────────────────────────
+const ROUND_DURATION_MS = 35000
 const DOT_RADIUS = 14
 const TARGET_ANGLE_DEG = 270
-const TARGET_HALF_ARC_DEG = 18
-const PERFECT_HALF_ARC_DEG = 6
-const GOOD_HALF_ARC_DEG = 18
-const INITIAL_SPEED_DEG_PER_SEC = 120
-const SPEED_INCREMENT_DEG = 20
+const TARGET_HALF_ARC_DEG = 20
+const PERFECT_HALF_ARC_DEG = 7
+const GOOD_HALF_ARC_DEG = 20
+const INITIAL_SPEED_DEG_PER_SEC = 110
+const SPEED_INCREMENT_DEG = 18
 const CATCHES_PER_SPEED_UP = 5
-const MAX_SPEED_DEG_PER_SEC = 480
+const MAX_SPEED_DEG_PER_SEC = 500
 const PERFECT_SCORE = 5
 const GOOD_SCORE = 2
 const LOW_TIME_THRESHOLD_MS = 5000
@@ -25,42 +29,52 @@ const FEVER_COMBO_THRESHOLD = 8
 const FEVER_DURATION_MS = 6000
 const FEVER_MULTIPLIER = 3
 const DIRECTION_CHANGE_INTERVAL = 7
-const GOLDEN_CATCH_CHANCE = 0.1
+const GOLDEN_CATCH_CHANCE = 0.12
 const GOLDEN_CATCH_MULTIPLIER = 3
 const PULSE_DURATION_MS = 300
 const SHAKE_DURATION_MS = 300
 const VIEWBOX_SIZE = 300
 const VIEWBOX_CENTER = VIEWBOX_SIZE / 2
+const TRACK_RADIUS = 115
+
+// Multi-target feature
+const MULTI_TARGET_THRESHOLD = 15 // catches before multi-target appears
+const MULTI_TARGET_DURATION_MS = 8000
+const MULTI_TARGET_BONUS = 2
+
+// Speed Rush feature
+const SPEED_RUSH_INTERVAL_MS = 12000
+const SPEED_RUSH_DURATION_MS = 3000
+const SPEED_RUSH_MULTIPLIER = 1.8
+
+// Shrink target feature
+const SHRINK_START_CATCHES = 20
+const MIN_TARGET_ARC_DEG = 10
 
 type JudgementKind = 'perfect' | 'good' | 'miss'
 
+interface MultiTarget {
+  angleDeg: number
+  collected: boolean
+}
+
 function normalizeAngle(angleDeg: number): number {
   let normalized = angleDeg % 360
-  if (normalized < 0) {
-    normalized += 360
-  }
+  if (normalized < 0) normalized += 360
   return normalized
 }
 
 function angleDifference(a: number, b: number): number {
   let diff = normalizeAngle(a) - normalizeAngle(b)
-  if (diff > 180) {
-    diff -= 360
-  }
-  if (diff < -180) {
-    diff += 360
-  }
+  if (diff > 180) diff -= 360
+  if (diff < -180) diff += 360
   return Math.abs(diff)
 }
 
-function judgeAngle(currentAngleDeg: number): JudgementKind {
+function judgeAngle(currentAngleDeg: number, targetArc: number, perfectArc: number): JudgementKind {
   const diff = angleDifference(currentAngleDeg, TARGET_ANGLE_DEG)
-  if (diff <= PERFECT_HALF_ARC_DEG) {
-    return 'perfect'
-  }
-  if (diff <= GOOD_HALF_ARC_DEG) {
-    return 'good'
-  }
+  if (diff <= perfectArc) return 'perfect'
+  if (diff <= targetArc) return 'good'
   return 'miss'
 }
 
@@ -89,6 +103,19 @@ function describeArc(startDeg: number, endDeg: number, radius: number): string {
   return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`
 }
 
+// Get dynamic target arc that shrinks as catches increase
+function getDynamicTargetArc(catchCount: number): number {
+  if (catchCount < SHRINK_START_CATCHES) return TARGET_HALF_ARC_DEG
+  const shrinkSteps = catchCount - SHRINK_START_CATCHES
+  return Math.max(MIN_TARGET_ARC_DEG, TARGET_HALF_ARC_DEG - shrinkSteps * 0.3)
+}
+
+function getDynamicPerfectArc(catchCount: number): number {
+  if (catchCount < SHRINK_START_CATCHES) return PERFECT_HALF_ARC_DEG
+  const shrinkSteps = catchCount - SHRINK_START_CATCHES
+  return Math.max(3, PERFECT_HALF_ARC_DEG - shrinkSteps * 0.15)
+}
+
 function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
@@ -102,6 +129,10 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
   const [isGoldenActive, setIsGoldenActive] = useState(false)
   const [directionSign, setDirectionSign] = useState(1)
+  const [isSpeedRush, setIsSpeedRush] = useState(false)
+  const [multiTargets, setMultiTargets] = useState<MultiTarget[]>([])
+  const [trailAngles, setTrailAngles] = useState<number[]>([])
+  const [perfectStreak, setPerfectStreak] = useState(0)
 
   const effects = useGameEffects()
 
@@ -121,9 +152,21 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const feverRemainingMsRef = useRef(0)
   const goldenActiveRef = useRef(false)
   const directionSignRef = useRef(1)
+  const speedRushRef = useRef(false)
+  const speedRushTimerRef = useRef(0)
+  const multiTargetsRef = useRef<MultiTarget[]>([])
+  const multiTargetTimerRef = useRef(0)
+  const trailAnglesRef = useRef<number[]>([])
+  const perfectStreakRef = useRef(0)
 
-  const tapHitAudioRef = useRef<HTMLAudioElement | null>(null)
-  const tapHitStrongAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Audio refs
+  const perfectAudioRef = useRef<HTMLAudioElement | null>(null)
+  const goodAudioRef = useRef<HTMLAudioElement | null>(null)
+  const missAudioRef = useRef<HTMLAudioElement | null>(null)
+  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
+  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const reverseAudioRef = useRef<HTMLAudioElement | null>(null)
+  const goldenAudioRef = useRef<HTMLAudioElement | null>(null)
   const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const clearTimeoutSafe = (timerRef: { current: number | null }) => {
@@ -136,12 +179,9 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const playAudio = useCallback(
     (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
       const audio = audioRef.current
-      if (audio === null) {
-        return
-      }
-
+      if (audio === null) return
       audio.currentTime = 0
-      audio.volume = volume
+      audio.volume = Math.min(1, volume)
       audio.playbackRate = playbackRate
       void audio.play().catch(() => {})
     },
@@ -149,20 +189,13 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   )
 
   const finishGame = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
-
+    if (finishedRef.current) return
     finishedRef.current = true
     clearTimeoutSafe(pulseTimerRef)
     clearTimeoutSafe(shakeTimerRef)
     clearTimeoutSafe(judgementTimerRef)
-
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
-    onFinish({
-      score: scoreRef.current,
-      durationMs: elapsedMs,
-    })
+    onFinish({ score: scoreRef.current, durationMs: elapsedMs })
   }, [onFinish])
 
   const triggerPulse = useCallback(() => {
@@ -183,14 +216,25 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     }, SHAKE_DURATION_MS)
   }, [])
 
-  const handleTap = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
+  // Check multi-target hits
+  const checkMultiTargetHit = useCallback((currentAngle: number): number => {
+    let bonus = 0
+    const updated = multiTargetsRef.current.map((t) => {
+      if (t.collected) return t
+      const diff = angleDifference(currentAngle, t.angleDeg)
+      if (diff <= 15) {
+        bonus += MULTI_TARGET_BONUS
+        return { ...t, collected: true }
+      }
+      return t
+    })
+    multiTargetsRef.current = updated
+    setMultiTargets(updated)
+    return bonus
+  }, [])
 
-    if (!canTapRef.current) {
-      return
-    }
+  const handleTap = useCallback(() => {
+    if (finishedRef.current || !canTapRef.current) return
 
     canTapRef.current = false
     clearTimeoutSafe(judgementTimerRef)
@@ -200,17 +244,27 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       setLastJudgement(null)
     }, 400)
 
-    const judgement = judgeAngle(angleDegRef.current)
+    const dynTargetArc = getDynamicTargetArc(catchCountRef.current)
+    const dynPerfectArc = getDynamicPerfectArc(catchCountRef.current)
+    const judgement = judgeAngle(angleDegRef.current, dynTargetArc, dynPerfectArc)
     setLastJudgement(judgement)
+
+    // Multi-target bonus
+    const multiBonus = checkMultiTargetHit(angleDegRef.current)
 
     if (judgement === 'perfect') {
       const nextCombo = comboRef.current + 1
       comboRef.current = nextCombo
       setCombo(nextCombo)
 
+      perfectStreakRef.current += 1
+      setPerfectStreak(perfectStreakRef.current)
+
       const goldenMult = goldenActiveRef.current ? GOLDEN_CATCH_MULTIPLIER : 1
       const feverMult = feverRef.current ? FEVER_MULTIPLIER : 1
-      const earned = PERFECT_SCORE * nextCombo * goldenMult * feverMult
+      const rushMult = speedRushRef.current ? 2 : 1
+      const streakBonus = perfectStreakRef.current >= 5 ? Math.floor(perfectStreakRef.current / 5) : 0
+      const earned = (PERFECT_SCORE * nextCombo + streakBonus + multiBonus) * goldenMult * feverMult * rushMult
       const nextScore = scoreRef.current + earned
       scoreRef.current = nextScore
       setScore(nextScore)
@@ -219,39 +273,53 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       catchCountRef.current = nextCatchCount
       setCatchCount(nextCatchCount)
 
-      // Activate fever at combo threshold
+      // Fever activation
       if (nextCombo >= FEVER_COMBO_THRESHOLD && !feverRef.current) {
         feverRef.current = true
         feverRemainingMsRef.current = FEVER_DURATION_MS
         setIsFever(true)
         setFeverRemainingMs(FEVER_DURATION_MS)
         effects.triggerFlash('rgba(250,204,21,0.5)')
+        playAudio(feverAudioRef, 0.7)
       }
 
-      // Direction reversal every N catches
+      // Direction reversal
       if (nextCatchCount % DIRECTION_CHANGE_INTERVAL === 0) {
         directionSignRef.current *= -1
         setDirectionSign(directionSignRef.current)
         effects.triggerFlash('rgba(147,51,234,0.3)')
+        playAudio(reverseAudioRef, 0.5)
       }
 
-      // Roll for next golden beat
+      // Golden roll
+      if (goldenActiveRef.current) {
+        playAudio(goldenAudioRef, 0.7)
+      }
       goldenActiveRef.current = Math.random() < GOLDEN_CATCH_CHANCE
       setIsGoldenActive(goldenActiveRef.current)
 
       triggerPulse()
-      playAudio(tapHitStrongAudioRef, 0.7, 1.0 + Math.min(nextCombo * 0.03, 0.3))
 
-      // Visual effects for perfect
-      effects.comboHitBurst(200, 180, nextCombo, earned)
+      // Sound: combo sound at milestone, otherwise perfect
+      if (nextCombo > 0 && nextCombo % 5 === 0) {
+        playAudio(comboAudioRef, 0.7, 1.0 + Math.min(nextCombo * 0.02, 0.4))
+      } else {
+        playAudio(perfectAudioRef, 0.7, 1.0 + Math.min(nextCombo * 0.03, 0.3))
+      }
+
+      effects.comboHitBurst(200, 180, nextCombo, earned, ['💥', '⚡', '🔥', '💫', '✨', '🌟', '🎯'])
+
     } else if (judgement === 'good') {
       const nextCombo = comboRef.current + 1
       comboRef.current = nextCombo
       setCombo(nextCombo)
 
+      perfectStreakRef.current = 0
+      setPerfectStreak(0)
+
       const goldenMult = goldenActiveRef.current ? GOLDEN_CATCH_MULTIPLIER : 1
       const feverMult = feverRef.current ? FEVER_MULTIPLIER : 1
-      const earned = GOOD_SCORE * nextCombo * goldenMult * feverMult
+      const earned = (GOOD_SCORE * nextCombo + multiBonus) * goldenMult * feverMult
       const nextScore = scoreRef.current + earned
       scoreRef.current = nextScore
       setScore(nextScore)
@@ -260,103 +328,86 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       catchCountRef.current = nextCatchCount
       setCatchCount(nextCatchCount)
 
-      // Roll for next golden beat
       goldenActiveRef.current = Math.random() < GOLDEN_CATCH_CHANCE
       setIsGoldenActive(goldenActiveRef.current)
 
-      playAudio(tapHitAudioRef, 0.5, 1.0 + Math.min(nextCombo * 0.02, 0.2))
-
-      // Visual effects for good
+      playAudio(goodAudioRef, 0.5, 1.0 + Math.min(nextCombo * 0.02, 0.2))
       effects.spawnParticles(4, 200, 180)
       effects.showScorePopup(earned, 200, 160)
       effects.triggerFlash('rgba(34,197,94,0.3)')
     } else {
       comboRef.current = 0
       setCombo(0)
+      perfectStreakRef.current = 0
+      setPerfectStreak(0)
 
-      // End fever on miss
       if (feverRef.current) {
         feverRef.current = false
         feverRemainingMsRef.current = 0
         setIsFever(false)
         setFeverRemainingMs(0)
       }
-
       goldenActiveRef.current = false
       setIsGoldenActive(false)
 
       triggerShake()
-      playAudio(tapHitAudioRef, 0.3, 0.7)
-
-      // Visual effects for miss
-      effects.triggerShake(5)
-      effects.triggerFlash('rgba(239,68,68,0.3)')
+      playAudio(missAudioRef, 0.5, 0.8)
+      effects.triggerShake(6)
+      effects.triggerFlash('rgba(239,68,68,0.4)')
     }
-  }, [playAudio, triggerPulse, triggerShake])
+  }, [playAudio, triggerPulse, triggerShake, checkMultiTargetHit])
 
+  // Audio setup
   useEffect(() => {
-    const tapHitAudio = new Audio(tapHitSfx)
-    tapHitAudio.preload = 'auto'
-    tapHitAudioRef.current = tapHitAudio
-
-    const tapHitStrongAudio = new Audio(tapHitStrongSfx)
-    tapHitStrongAudio.preload = 'auto'
-    tapHitStrongAudioRef.current = tapHitStrongAudio
-
-    const gameOverAudio = new Audio(gameOverHitSfx)
-    gameOverAudio.preload = 'auto'
-    gameOverAudioRef.current = gameOverAudio
-
+    const audios = [
+      { ref: perfectAudioRef, src: perfectSfx },
+      { ref: goodAudioRef, src: goodSfx },
+      { ref: missAudioRef, src: missSfx },
+      { ref: comboAudioRef, src: comboSfx },
+      { ref: feverAudioRef, src: feverSfx },
+      { ref: reverseAudioRef, src: reverseSfx },
+      { ref: goldenAudioRef, src: goldenSfx },
+      { ref: gameOverAudioRef, src: gameOverHitSfx },
+    ]
+    audios.forEach(({ ref, src }) => {
+      const a = new Audio(src)
+      a.preload = 'auto'
+      ref.current = a
+    })
     return () => {
       clearTimeoutSafe(pulseTimerRef)
       clearTimeoutSafe(shakeTimerRef)
       clearTimeoutSafe(judgementTimerRef)
-      tapHitAudioRef.current = null
-      tapHitStrongAudioRef.current = null
-      gameOverAudioRef.current = null
+      audios.forEach(({ ref }) => { ref.current = null })
       effects.cleanup()
     }
   }, [])
 
+  // Key handler
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        onExit()
-        return
-      }
-
-      if (event.code === 'Space' || event.code === 'Enter') {
-        event.preventDefault()
-        handleTap()
-      }
+      if (event.code === 'Escape') { event.preventDefault(); onExit(); return }
+      if (event.code === 'Space' || event.code === 'Enter') { event.preventDefault(); handleTap() }
     }
-
     window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
+    return () => { window.removeEventListener('keydown', handleKeyDown) }
   }, [handleTap, onExit])
 
+  // Game loop
   useEffect(() => {
     lastFrameAtRef.current = null
+    let elapsedSinceStart = 0
 
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
-
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
-
+      if (finishedRef.current) { animationFrameRef.current = null; return }
+      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
+      elapsedSinceStart += deltaMs
 
+      // Timer
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
-
       if (remainingMsRef.current <= 0) {
         playAudio(gameOverAudioRef, 0.64, 0.95)
         finishGame()
@@ -364,7 +415,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         return
       }
 
-      // Fever timer countdown
+      // Fever countdown
       if (feverRef.current) {
         feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
         setFeverRemainingMs(feverRemainingMsRef.current)
@@ -374,18 +425,62 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
       }
 
-      const speed = toCurrentSpeed(catchCountRef.current)
+      // Speed Rush timing
+      speedRushTimerRef.current += deltaMs
+      if (!speedRushRef.current && speedRushTimerRef.current >= SPEED_RUSH_INTERVAL_MS) {
+        speedRushRef.current = true
+        setIsSpeedRush(true)
+        speedRushTimerRef.current = 0
+      }
+      if (speedRushRef.current) {
+        if (speedRushTimerRef.current >= SPEED_RUSH_DURATION_MS) {
+          speedRushRef.current = false
+          setIsSpeedRush(false)
+          speedRushTimerRef.current = 0
+        }
+      }
+
+      // Multi-target spawning
+      if (catchCountRef.current >= MULTI_TARGET_THRESHOLD) {
+        multiTargetTimerRef.current += deltaMs
+        if (multiTargetsRef.current.length === 0 && multiTargetTimerRef.current >= MULTI_TARGET_DURATION_MS) {
+          const targets: MultiTarget[] = []
+          for (let i = 0; i < 2 + Math.floor(catchCountRef.current / 20); i++) {
+            targets.push({
+              angleDeg: normalizeAngle(Math.random() * 360),
+              collected: false,
+            })
+          }
+          multiTargetsRef.current = targets
+          setMultiTargets(targets)
+          multiTargetTimerRef.current = 0
+        }
+        // Clean collected targets
+        const allCollected = multiTargetsRef.current.length > 0 && multiTargetsRef.current.every((t) => t.collected)
+        if (allCollected) {
+          multiTargetsRef.current = []
+          setMultiTargets([])
+        }
+      }
+
+      // Move dot
+      const baseSpeed = toCurrentSpeed(catchCountRef.current)
+      const rushMult = speedRushRef.current ? SPEED_RUSH_MULTIPLIER : 1
+      const speed = baseSpeed * rushMult
       const angleDelta = speed * (deltaMs / 1000) * directionSignRef.current
       angleDegRef.current = normalizeAngle(angleDegRef.current + angleDelta)
       setCurrentAngleDeg(angleDegRef.current)
 
-      effects.updateParticles()
+      // Trail effect (keep last 8 positions)
+      const newTrail = [...trailAnglesRef.current, angleDegRef.current].slice(-8)
+      trailAnglesRef.current = newTrail
+      setTrailAngles(newTrail)
 
+      effects.updateParticles()
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
 
     animationFrameRef.current = window.requestAnimationFrame(step)
-
     return () => {
       if (animationFrameRef.current !== null) {
         window.cancelAnimationFrame(animationFrameRef.current)
@@ -395,55 +490,38 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     }
   }, [finishGame, playAudio])
 
+  // Derived state
   const speedLevel = toSpeedLevel(catchCount)
   const currentSpeed = toCurrentSpeed(catchCount)
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
+  const dynTargetArc = getDynamicTargetArc(catchCount)
+  const dynPerfectArc = getDynamicPerfectArc(catchCount)
 
   const dotPosition = angleToSvgCoords(currentAngleDeg, TRACK_RADIUS)
-
-  const targetArcStart = TARGET_ANGLE_DEG - TARGET_HALF_ARC_DEG
-  const targetArcEnd = TARGET_ANGLE_DEG + TARGET_HALF_ARC_DEG
-  const perfectArcStart = TARGET_ANGLE_DEG - PERFECT_HALF_ARC_DEG
-  const perfectArcEnd = TARGET_ANGLE_DEG + PERFECT_HALF_ARC_DEG
-
+  const targetArcStart = TARGET_ANGLE_DEG - dynTargetArc
+  const targetArcEnd = TARGET_ANGLE_DEG + dynTargetArc
+  const perfectArcStart = TARGET_ANGLE_DEG - dynPerfectArc
+  const perfectArcEnd = TARGET_ANGLE_DEG + dynPerfectArc
   const targetArcPath = describeArc(targetArcStart, targetArcEnd, TRACK_RADIUS)
   const perfectArcPath = describeArc(perfectArcStart, perfectArcEnd, TRACK_RADIUS)
-
   const targetMarkerPosition = angleToSvgCoords(TARGET_ANGLE_DEG, TRACK_RADIUS)
 
-  const judgementLabel =
-    lastJudgement === 'perfect'
-      ? 'PERFECT!'
-      : lastJudgement === 'good'
-        ? 'GOOD!'
-        : lastJudgement === 'miss'
-          ? 'MISS'
-          : null
+  const judgementLabel = lastJudgement === 'perfect' ? 'PERFECT!' : lastJudgement === 'good' ? 'GOOD!' : lastJudgement === 'miss' ? 'MISS' : null
+  const judgementClass = lastJudgement === 'perfect' ? 'bc-j-perfect' : lastJudgement === 'good' ? 'bc-j-good' : lastJudgement === 'miss' ? 'bc-j-miss' : ''
 
-  const judgementClass =
-    lastJudgement === 'perfect'
-      ? 'beat-catch-judgement-perfect'
-      : lastJudgement === 'good'
-        ? 'beat-catch-judgement-good'
-        : lastJudgement === 'miss'
-          ? 'beat-catch-judgement-miss'
-          : ''
-
-  const arenaClass = [
-    'beat-catch-arena',
-    isPulseActive ? 'pulse' : '',
-    isShakeActive ? 'shake' : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
+  const arenaClass = ['bc-arena', isPulseActive ? 'pulse' : '', isShakeActive ? 'shake' : ''].filter(Boolean).join(' ')
 
   return (
-    <section className="mini-game-panel beat-catch-panel" aria-label="beat-catch-game" style={{ ...effects.getShakeStyle() }}>
+    <section
+      className={`mini-game-panel bc-panel ${isFever ? 'bc-fever-mode' : ''} ${isSpeedRush ? 'bc-rush-mode' : ''}`}
+      aria-label="beat-catch-game"
+      style={{ ...effects.getShakeStyle() }}
+    >
       <style>{GAME_EFFECTS_CSS}{`
-        .beat-catch-panel {
+        .bc-panel {
           display: flex;
           flex-direction: column;
           height: 100%;
@@ -455,139 +533,163 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           overflow: hidden;
         }
 
-        .beat-catch-header {
+        .bc-fever-mode {
+          animation: bc-fever-bg 0.6s ease-in-out infinite alternate;
+        }
+
+        @keyframes bc-fever-bg {
+          from { background: linear-gradient(180deg, #2d1a00 0%, #1a0d00 40%, #2d1000 100%); }
+          to { background: linear-gradient(180deg, #1a0a12 0%, #0d0d1a 40%, #1a0510 100%); }
+        }
+
+        .bc-rush-mode::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border: 3px solid rgba(239,68,68,0.5);
+          pointer-events: none;
+          z-index: 10;
+          animation: bc-rush-border 0.3s ease-in-out infinite alternate;
+          border-radius: inherit;
+        }
+
+        @keyframes bc-rush-border {
+          from { border-color: rgba(239,68,68,0.3); }
+          to { border-color: rgba(239,68,68,0.8); }
+        }
+
+        /* ─── Header ─── */
+        .bc-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 12px 16px 8px;
-          background: linear-gradient(135deg, rgba(244,63,94,0.3) 0%, rgba(190,18,60,0.2) 100%);
-          border-bottom: 1px solid rgba(244,63,94,0.2);
+          padding: 10px 14px 6px;
+          background: linear-gradient(135deg, rgba(244,63,94,0.25) 0%, rgba(190,18,60,0.15) 100%);
+          border-bottom: 1px solid rgba(244,63,94,0.15);
           flex-shrink: 0;
         }
 
-        .beat-catch-header-left {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .beat-catch-avatar {
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          border: 2px solid #f43f5e;
-          object-fit: cover;
-          box-shadow: 0 0 12px rgba(244,63,94,0.5);
-        }
-
-        .beat-catch-header-info {
+        .bc-score-block {
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 1px;
         }
 
-        .beat-catch-score {
-          font-size: 26px;
-          font-weight: 800;
+        .bc-score {
+          font-size: clamp(28px, 7vw, 36px);
+          font-weight: 900;
           color: #fb7185;
           margin: 0;
           line-height: 1;
           text-shadow: 0 0 14px rgba(244,63,94,0.6);
         }
 
-        .beat-catch-best {
+        .bc-best {
           font-size: 10px;
           color: #fda4af;
           margin: 0;
-          opacity: 0.7;
+          opacity: 0.6;
         }
 
-        .beat-catch-header-right {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-          gap: 2px;
-        }
-
-        .beat-catch-time {
-          font-size: 18px;
-          font-weight: 700;
+        .bc-time {
+          font-size: clamp(20px, 5vw, 26px);
+          font-weight: 800;
           color: #e4e4e7;
           margin: 0;
           font-variant-numeric: tabular-nums;
           transition: color 0.3s ease;
         }
 
-        .beat-catch-time.low-time {
+        .bc-time.low-time {
           color: #ef4444;
-          animation: beat-catch-blink 0.5s ease-in-out infinite alternate;
+          animation: bc-blink 0.5s ease-in-out infinite alternate;
         }
 
-        @keyframes beat-catch-blink {
+        @keyframes bc-blink {
           from { opacity: 1; }
-          to { opacity: 0.4; }
+          to { opacity: 0.3; }
         }
 
-        .beat-catch-meta-row {
+        /* ─── Status Bar ─── */
+        .bc-status {
           display: flex;
           justify-content: center;
           align-items: center;
           flex-wrap: wrap;
-          gap: 12px;
-          padding: 6px 16px;
-          font-size: 12px;
+          gap: 10px;
+          padding: 4px 12px;
+          font-size: 11px;
           color: #fda4af;
           flex-shrink: 0;
         }
 
-        .beat-catch-meta-row p {
-          margin: 0;
-        }
+        .bc-status p { margin: 0; }
+        .bc-status strong { color: #e4e4e7; font-weight: 700; }
 
-        .beat-catch-meta-row strong {
-          color: #e4e4e7;
-          font-weight: 700;
-        }
-
-        .beat-catch-combo strong {
+        .bc-combo-value {
           color: #facc15 !important;
+          font-size: 13px;
         }
 
-        .beat-catch-game-area {
+        .bc-fever-badge {
+          color: #facc15;
+          font-weight: 800;
+          animation: bc-blink 0.3s ease-in-out infinite alternate;
+          text-shadow: 0 0 8px rgba(250,204,21,0.6);
+        }
+
+        .bc-rush-badge {
+          color: #ef4444;
+          font-weight: 800;
+          animation: bc-blink 0.25s ease-in-out infinite alternate;
+          text-shadow: 0 0 8px rgba(239,68,68,0.6);
+        }
+
+        .bc-golden-badge {
+          color: #fbbf24;
+          font-weight: 800;
+          text-shadow: 0 0 8px rgba(251,191,36,0.6);
+        }
+
+        .bc-streak-badge {
+          color: #c084fc;
+          font-weight: 700;
+          font-size: 10px;
+        }
+
+        /* ─── Game Area (fills remaining space) ─── */
+        .bc-game-area {
           flex: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 12px;
-          padding: 8px 16px;
+          padding: 4px 8px;
+          min-height: 0;
+          gap: 8px;
+        }
+
+        .bc-arena {
+          position: relative;
+          width: 100%;
+          max-width: 380px;
+          aspect-ratio: 1;
+          cursor: pointer;
+          transition: transform 0.15s ease;
+          flex-shrink: 1;
           min-height: 0;
         }
 
-        .beat-catch-arena {
-          position: relative;
-          width: 260px;
-          height: 260px;
-          cursor: pointer;
-          transition: transform 0.15s ease;
-          flex-shrink: 0;
-        }
+        .bc-arena.pulse { animation: bc-pulse 0.3s ease-out; }
+        .bc-arena.shake { animation: bc-shake 0.3s ease-out; }
 
-        .beat-catch-arena.pulse {
-          animation: beat-catch-pulse 0.3s ease-out;
-        }
-
-        .beat-catch-arena.shake {
-          animation: beat-catch-shake 0.3s ease-out;
-        }
-
-        @keyframes beat-catch-pulse {
+        @keyframes bc-pulse {
           0% { transform: scale(1); }
-          50% { transform: scale(1.06); }
+          50% { transform: scale(1.05); }
           100% { transform: scale(1); }
         }
 
-        @keyframes beat-catch-shake {
+        @keyframes bc-shake {
           0%, 100% { transform: translateX(0); }
           20% { transform: translateX(-6px); }
           40% { transform: translateX(6px); }
@@ -595,144 +697,163 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           80% { transform: translateX(4px); }
         }
 
-        .beat-catch-svg {
+        .bc-svg {
           width: 100%;
           height: 100%;
           filter: drop-shadow(0 0 20px rgba(244,63,94,0.15));
         }
 
-        .beat-catch-track {
+        .bc-track {
           fill: none;
           stroke: #3f3f46;
           stroke-width: 3;
         }
 
-        .beat-catch-target-arc {
-          stroke: rgba(250, 204, 21, 0.18);
+        .bc-track-glow {
+          fill: none;
+          stroke: rgba(244,63,94,0.08);
+          stroke-width: 16;
         }
 
-        .beat-catch-perfect-arc {
-          stroke: rgba(244, 63, 94, 0.35);
-        }
+        .bc-target-arc { stroke: rgba(250, 204, 21, 0.2); }
+        .bc-perfect-arc { stroke: rgba(244, 63, 94, 0.4); }
 
-        .beat-catch-target-marker {
+        .bc-target-marker {
           fill: #facc15;
-          filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.7));
+          filter: drop-shadow(0 0 8px rgba(250, 204, 21, 0.8));
         }
 
-        .beat-catch-dot {
+        .bc-dot {
           fill: #f43f5e;
-          filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.7));
+          filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.8));
           transition: fill 0.15s ease;
         }
 
-        .beat-catch-dot.perfect {
+        .bc-dot.perfect {
           fill: #facc15;
-          filter: drop-shadow(0 0 12px rgba(250, 204, 21, 0.9));
+          filter: drop-shadow(0 0 14px rgba(250, 204, 21, 1));
         }
 
-        .beat-catch-dot.good {
+        .bc-dot.good {
           fill: #22c55e;
-          filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.8));
+          filter: drop-shadow(0 0 12px rgba(34, 197, 94, 0.9));
         }
 
-        .beat-catch-center-ring {
-          fill: rgba(244, 63, 94, 0.12);
+        .bc-trail {
+          fill: #f43f5e;
+          opacity: 0.15;
+        }
+
+        .bc-multi-target {
+          fill: #8b5cf6;
+          filter: drop-shadow(0 0 6px rgba(139,92,246,0.8));
+          animation: bc-multi-pulse 0.8s ease-in-out infinite alternate;
+        }
+
+        .bc-multi-target.collected {
+          fill: #22c55e;
+          opacity: 0.5;
+        }
+
+        @keyframes bc-multi-pulse {
+          from { r: 6; opacity: 0.7; }
+          to { r: 9; opacity: 1; }
+        }
+
+        .bc-center-ring {
+          fill: rgba(244, 63, 94, 0.08);
           stroke: #f43f5e;
           stroke-width: 2;
         }
 
-        .beat-catch-center-text {
+        .bc-center-text {
           fill: #f43f5e;
-          font-size: 14px;
-          font-weight: 800;
-          letter-spacing: 1px;
+          font-size: 16px;
+          font-weight: 900;
+          letter-spacing: 2px;
         }
 
-        .beat-catch-judgement {
+        .bc-judgement {
           position: absolute;
-          top: 50%;
+          top: 42%;
           left: 50%;
           transform: translate(-50%, -50%);
-          font-size: 28px;
+          font-size: clamp(28px, 8vw, 40px);
           font-weight: 900;
           pointer-events: none;
-          animation: beat-catch-judgement-pop 0.4s ease-out forwards;
-          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+          animation: bc-judge-pop 0.4s ease-out forwards;
+          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
           margin: 0;
+          z-index: 5;
         }
 
-        .beat-catch-judgement-perfect {
-          color: #facc15;
+        .bc-j-perfect { color: #facc15; }
+        .bc-j-good { color: #22c55e; }
+        .bc-j-miss { color: #ef4444; }
+
+        @keyframes bc-judge-pop {
+          0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+          30% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+          100% { opacity: 0; transform: translate(-50%, -70%) scale(1); }
         }
 
-        .beat-catch-judgement-good {
-          color: #22c55e;
-        }
-
-        .beat-catch-judgement-miss {
-          color: #ef4444;
-        }
-
-        @keyframes beat-catch-judgement-pop {
-          0% {
-            opacity: 0;
-            transform: translate(-50%, -50%) scale(0.5);
-          }
-          30% {
-            opacity: 1;
-            transform: translate(-50%, -50%) scale(1.2);
-          }
-          100% {
-            opacity: 0;
-            transform: translate(-50%, -70%) scale(1);
-          }
-        }
-
-        .beat-catch-tap-button {
+        /* ─── Tap Button ─── */
+        .bc-tap-btn {
           width: 100%;
-          max-width: 260px;
-          padding: 16px 0;
+          max-width: 360px;
+          padding: clamp(14px, 4vw, 20px) 0;
           border: none;
-          border-radius: 16px;
+          border-radius: 18px;
           background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
           color: #fff;
-          font-size: 20px;
-          font-weight: 800;
-          letter-spacing: 2px;
+          font-size: clamp(20px, 5vw, 26px);
+          font-weight: 900;
+          letter-spacing: 3px;
           cursor: pointer;
           transition: transform 0.1s ease, box-shadow 0.1s ease;
-          box-shadow: 0 4px 18px rgba(244, 63, 94, 0.45), 0 0 30px rgba(244,63,94,0.15);
+          box-shadow: 0 4px 20px rgba(244, 63, 94, 0.5), 0 0 40px rgba(244,63,94,0.15);
           flex-shrink: 0;
         }
 
-        .beat-catch-tap-button:active {
-          transform: scale(0.95);
+        .bc-tap-btn:active {
+          transform: scale(0.94);
           box-shadow: 0 2px 10px rgba(244, 63, 94, 0.3);
         }
 
-        .beat-catch-footer {
+        /* ─── Combo Overlay ─── */
+        .bc-combo-overlay {
+          position: absolute;
+          top: 12%;
+          left: 50%;
+          transform: translateX(-50%);
+          font-size: clamp(14px, 4vw, 18px);
+          font-weight: 800;
+          color: #facc15;
+          text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+          pointer-events: none;
+          z-index: 5;
+          animation: bc-combo-bounce 0.3s ease-out;
+        }
+
+        @keyframes bc-combo-bounce {
+          0% { transform: translateX(-50%) scale(0.5); opacity: 0; }
+          60% { transform: translateX(-50%) scale(1.2); opacity: 1; }
+          100% { transform: translateX(-50%) scale(1); opacity: 1; }
+        }
+
+        /* ─── Speed indicator ring ─── */
+        .bc-speed-ring {
+          fill: none;
+          stroke-linecap: round;
+          transition: stroke-dashoffset 0.3s ease;
+        }
+
+        /* ─── Footer ─── */
+        .bc-footer {
           display: flex;
           justify-content: center;
-          padding: 8px 16px 14px;
+          padding: 6px 16px 10px;
           flex-shrink: 0;
-        }
-
-        .beat-catch-exit-btn {
-          padding: 7px 22px;
-          border-radius: 20px;
-          border: 1px solid rgba(244,63,94,0.3);
-          background: rgba(244,63,94,0.1);
-          color: #fda4af;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.15s, transform 0.1s;
-        }
-
-        .beat-catch-exit-btn:active {
-          transform: scale(0.95);
-          background: rgba(244,63,94,0.2);
         }
       `}</style>
 
@@ -740,117 +861,128 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
-      <div className="beat-catch-header">
-        <div className="beat-catch-header-left">
-          <img className="beat-catch-avatar" src={characterImage} alt="character" />
-          <div className="beat-catch-header-info">
-            <p className="beat-catch-score">{score.toLocaleString()}</p>
-            <p className="beat-catch-best">BEST {displayedBestScore.toLocaleString()}</p>
-          </div>
+      {/* Header */}
+      <div className="bc-header">
+        <div className="bc-score-block">
+          <p className="bc-score">{score.toLocaleString()}</p>
+          <p className="bc-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
-        <div className="beat-catch-header-right">
-          <p className={`beat-catch-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
-        </div>
+        <p className={`bc-time ${isLowTime ? 'low-time' : ''}`}>
+          {(remainingMs / 1000).toFixed(1)}s
+        </p>
       </div>
 
-      <div className="beat-catch-meta-row">
-        <p className="beat-catch-combo">
-          COMBO <strong>{combo}</strong>
+      {/* Status */}
+      <div className="bc-status">
+        <p>
+          COMBO <strong className="bc-combo-value">{combo}</strong>
           {comboLabel && (
             <span className="ge-combo-label" style={{ color: comboColor, marginLeft: 4, fontSize: 11 }}>{comboLabel}</span>
           )}
         </p>
-        <p className="beat-catch-speed-level">
-          SPEED <strong>Lv.{speedLevel + 1}</strong>
-        </p>
-        <p className="beat-catch-speed-value">{currentSpeed.toFixed(0)} deg/s {directionSign < 0 ? '(REV)' : ''}</p>
-        {isGoldenActive && (
-          <p style={{ color: '#fbbf24', fontSize: 11, fontWeight: 800, margin: 0, textShadow: '0 0 8px rgba(251,191,36,0.6)' }}>GOLDEN!</p>
-        )}
-        {isFever && (
-          <p style={{ color: '#facc15', fontSize: 11, fontWeight: 800, margin: 0, animation: 'beat-catch-blink 0.3s ease-in-out infinite alternate' }}>
-            FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s
-          </p>
-        )}
+        <p>Lv.<strong>{speedLevel + 1}</strong></p>
+        {directionSign < 0 && <p style={{ color: '#a78bfa' }}>REV</p>}
+        {isGoldenActive && <p className="bc-golden-badge">GOLDEN</p>}
+        {isFever && <p className="bc-fever-badge">FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s</p>}
+        {isSpeedRush && <p className="bc-rush-badge">RUSH!</p>}
+        {perfectStreak >= 5 && <p className="bc-streak-badge">STREAK x{perfectStreak}</p>}
       </div>
 
-      <div className="beat-catch-game-area">
+      {/* Game Area */}
+      <div className="bc-game-area">
         <div className={arenaClass} onClick={handleTap} role="button" tabIndex={0} aria-label="tap-area">
-          <svg
-            className="beat-catch-svg"
-            viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`}
-            preserveAspectRatio="xMidYMid meet"
-          >
+          <svg className="bc-svg" viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`} preserveAspectRatio="xMidYMid meet">
+
+            {/* Track glow */}
+            <circle className="bc-track-glow" cx={VIEWBOX_CENTER} cy={VIEWBOX_CENTER} r={TRACK_RADIUS} />
+
+            {/* Speed indicator ring */}
             <circle
-              className="beat-catch-track"
+              className="bc-speed-ring"
               cx={VIEWBOX_CENTER}
               cy={VIEWBOX_CENTER}
-              r={TRACK_RADIUS}
+              r={TRACK_RADIUS + 12}
+              stroke={isFever ? 'rgba(250,204,21,0.3)' : 'rgba(244,63,94,0.15)'}
+              strokeWidth="3"
+              strokeDasharray={`${2 * Math.PI * (TRACK_RADIUS + 12)}`}
+              strokeDashoffset={`${2 * Math.PI * (TRACK_RADIUS + 12) * (1 - currentSpeed / MAX_SPEED_DEG_PER_SEC)}`}
             />
 
-            <path
-              className="beat-catch-target-arc"
-              d={targetArcPath}
-              fill="none"
-              strokeWidth="22"
-              strokeLinecap="round"
-            />
+            {/* Main track */}
+            <circle className="bc-track" cx={VIEWBOX_CENTER} cy={VIEWBOX_CENTER} r={TRACK_RADIUS} />
 
-            <path
-              className="beat-catch-perfect-arc"
-              d={perfectArcPath}
-              fill="none"
-              strokeWidth="22"
-              strokeLinecap="round"
-            />
+            {/* Target arcs */}
+            <path className="bc-target-arc" d={targetArcPath} fill="none" strokeWidth="24" strokeLinecap="round" />
+            <path className="bc-perfect-arc" d={perfectArcPath} fill="none" strokeWidth="24" strokeLinecap="round" />
 
+            {/* Target marker */}
+            <circle className="bc-target-marker" cx={targetMarkerPosition.x} cy={targetMarkerPosition.y} r="7" />
+
+            {/* Multi-targets */}
+            {multiTargets.map((t, i) => {
+              const pos = angleToSvgCoords(t.angleDeg, TRACK_RADIUS)
+              return (
+                <circle
+                  key={i}
+                  className={`bc-multi-target ${t.collected ? 'collected' : ''}`}
+                  cx={pos.x}
+                  cy={pos.y}
+                  r="7"
+                />
+              )
+            })}
+
+            {/* Trail */}
+            {trailAngles.map((angle, i) => {
+              const pos = angleToSvgCoords(angle, TRACK_RADIUS)
+              const opacity = (i + 1) / trailAngles.length * 0.2
+              return (
+                <circle
+                  key={i}
+                  className="bc-trail"
+                  cx={pos.x}
+                  cy={pos.y}
+                  r={DOT_RADIUS * 0.6}
+                  style={{ opacity }}
+                />
+              )
+            })}
+
+            {/* Main dot */}
             <circle
-              className="beat-catch-target-marker"
-              cx={targetMarkerPosition.x}
-              cy={targetMarkerPosition.y}
-              r="6"
-            />
-
-            <circle
-              className={`beat-catch-dot ${lastJudgement === 'perfect' ? 'perfect' : lastJudgement === 'good' ? 'good' : ''}`}
+              className={`bc-dot ${lastJudgement === 'perfect' ? 'perfect' : lastJudgement === 'good' ? 'good' : ''}`}
               cx={dotPosition.x}
               cy={dotPosition.y}
-              r={isGoldenActive ? DOT_RADIUS + 4 : DOT_RADIUS}
-              style={isGoldenActive ? { fill: '#fbbf24', filter: 'drop-shadow(0 0 10px rgba(251, 191, 36, 0.9))' } : undefined}
+              r={isGoldenActive ? DOT_RADIUS + 5 : DOT_RADIUS}
+              style={isGoldenActive ? { fill: '#fbbf24', filter: 'drop-shadow(0 0 12px rgba(251, 191, 36, 1))' } : undefined}
             />
 
-            <circle
-              className="beat-catch-center-ring"
-              cx={VIEWBOX_CENTER}
-              cy={VIEWBOX_CENTER}
-              r="28"
-            />
-            <text
-              className="beat-catch-center-text"
-              x={VIEWBOX_CENTER}
-              y={VIEWBOX_CENTER + 2}
-              textAnchor="middle"
-              dominantBaseline="middle"
-            >
+            {/* Center ring */}
+            <circle className="bc-center-ring" cx={VIEWBOX_CENTER} cy={VIEWBOX_CENTER} r="30" />
+            <text className="bc-center-text" x={VIEWBOX_CENTER} y={VIEWBOX_CENTER + 2} textAnchor="middle" dominantBaseline="middle">
               TAP
             </text>
           </svg>
 
+          {/* Combo overlay */}
+          {combo >= 3 && (
+            <p className="bc-combo-overlay" key={combo}>
+              {combo}x COMBO
+            </p>
+          )}
+
+          {/* Judgement popup */}
           {judgementLabel !== null && (
-            <p className={`beat-catch-judgement ${judgementClass}`}>{judgementLabel}</p>
+            <p className={`bc-judgement ${judgementClass}`}>{judgementLabel}</p>
           )}
         </div>
 
-        <button className="beat-catch-tap-button" type="button" onClick={handleTap}>
+        <button className="bc-tap-btn" type="button" onClick={handleTap}>
           CATCH!
         </button>
       </div>
 
-      <div className="beat-catch-footer">
-        <button className="beat-catch-exit-btn" type="button" onClick={onExit}>
-          허브로 돌아가기
-        </button>
-      </div>
+      <div className="bc-footer" />
     </section>
   )
 }
@@ -859,7 +991,7 @@ export const beatCatchModule: MiniGameModule = {
   manifest: {
     id: 'beat-catch',
     title: 'Beat Catch',
-    description: '회전하는 공이 타겟에 올 때 정확히 탭! 타이밍 게임!',
+    description: 'Tap when the spinning ball hits the target! Timing game!',
     unlockCost: 30,
     baseReward: 12,
     scoreRewardMultiplier: 1.1,

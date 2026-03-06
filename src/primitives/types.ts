@@ -58,6 +58,7 @@ export const MINI_GAME_IDS = [
   'paint-mix',
   'card-flip-speed',
   'emoji-match',
+  'music-harmony',
 ] as const
 
 export type MiniGameId = (typeof MINI_GAME_IDS)[number]

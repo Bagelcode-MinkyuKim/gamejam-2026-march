@@ -59,6 +59,7 @@ import { cookingRushModule } from './cooking-rush/module'
 import { paintMixModule } from './paint-mix/module'
 import { cardFlipSpeedModule } from './card-flip-speed/module'
 import { emojiMatchModule } from './emoji-match/module'
+import { musicHarmonyModule } from './music-harmony/module'
 
 export const miniGameModules: MiniGameModule[] = [
   tapDashModule,
@@ -120,6 +121,7 @@ export const miniGameModules: MiniGameModule[] = [
   paintMixModule,
   cardFlipSpeedModule,
   emojiMatchModule,
+  musicHarmonyModule,
 ]
 
 export const miniGameManifests: MiniGameManifest[] = miniGameModules.map((module) => module.manifest)
@@ -184,4 +186,5 @@ export const miniGameModuleById: Record<MiniGameId, MiniGameModule> = {
   'paint-mix': paintMixModule,
   'card-flip-speed': cardFlipSpeedModule,
   'emoji-match': emojiMatchModule,
+  'music-harmony': musicHarmonyModule,
 }

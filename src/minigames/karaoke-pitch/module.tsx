@@ -1,45 +1,85 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
-import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
 import characterImage from '../../../assets/images/same-character/song-changsik.png'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
 
-const ROUND_DURATION_MS = 30000
-const PITCH_BAR_HEIGHT = 320
-const TARGET_RADIUS = 18
-const PLAYER_INDICATOR_RADIUS = 14
+import perfectSfx from '../../../assets/sounds/karaoke-perfect.mp3'
+import goodSfx from '../../../assets/sounds/karaoke-good.mp3'
+import missSfx from '../../../assets/sounds/karaoke-miss.mp3'
+import feverSfx from '../../../assets/sounds/karaoke-fever.mp3'
+import comboSfx from '../../../assets/sounds/karaoke-combo.mp3'
+import timeWarningSfx from '../../../assets/sounds/karaoke-time-warning.mp3'
+import gameOverSfx from '../../../assets/sounds/karaoke-game-over.mp3'
+
+// ─── Game Constants ─────────────────────────────────────────────────
+const ROUND_DURATION_MS = 35000
+const PITCH_BAR_WIDTH = 64
+const TARGET_RADIUS = 20
+const PLAYER_INDICATOR_RADIUS = 16
+
+// Accuracy thresholds
 const ACCURACY_PERFECT_THRESHOLD = 0.04
 const ACCURACY_GOOD_THRESHOLD = 0.12
 const ACCURACY_OK_THRESHOLD = 0.25
-const SCORE_PER_SECOND_PERFECT = 120
-const SCORE_PER_SECOND_GOOD = 60
-const SCORE_PER_SECOND_OK = 25
+
+// Scoring
+const SCORE_PER_SECOND_PERFECT = 150
+const SCORE_PER_SECOND_GOOD = 70
+const SCORE_PER_SECOND_OK = 30
+
+// Time
 const LOW_TIME_THRESHOLD_MS = 5000
 
-const PERFECT_STREAK_THRESHOLD_MS = 2000
+// Streak & Fever
+const PERFECT_STREAK_THRESHOLD_MS = 1500
 const FEVER_TRIGGER_STREAKS = 3
 const FEVER_DURATION_MS = 8000
-const FEVER_SCORE_MULTIPLIER = 2
-const STREAK_MILESTONE_BONUS = 50
+const FEVER_SCORE_MULTIPLIER = 3
+const STREAK_MILESTONE_BONUS = 80
 
-const SINE_BASE_PERIOD_MS = 3200
-const SINE_MIN_PERIOD_MS = 1600
-const SINE_PERIOD_DECAY_PER_MS = 0.04
-const SINE_SECONDARY_AMPLITUDE = 0.18
+// Combo
+const COMBO_DECAY_MS = 600
+const COMBO_BONUS_BASE = 10
+
+// Difficulty phases
+const PHASE_EASY_MS = 8000
+const PHASE_MEDIUM_MS = 20000
+
+// Pitch movement
+const SINE_BASE_PERIOD_MS = 3500
+const SINE_MIN_PERIOD_MS = 1200
+const SINE_PERIOD_DECAY_PER_MS = 0.06
+const SINE_SECONDARY_AMPLITUDE = 0.22
 const SINE_SECONDARY_PERIOD_RATIO = 2.73
+
+// Bonus notes
+const BONUS_NOTE_INTERVAL_MS = 4000
+const BONUS_NOTE_DURATION_MS = 2000
+const BONUS_NOTE_SCORE = 200
+const BONUS_NOTE_RADIUS = 0.08
+
+// Visual
+const NOTE_EMOJIS = ['🎵', '🎶', '🎤', '🎼', '🎹', '🎸', '🎺', '🎻'] as const
+const PERFECT_EMOJIS = ['✨', '💫', '⭐', '🌟'] as const
+
+// ─── Helpers ────────────────────────────────────────────────────────
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
 function computeTargetPosition(elapsedMs: number): number {
+  const difficultyFactor = elapsedMs < PHASE_EASY_MS ? 0.7
+    : elapsedMs < PHASE_MEDIUM_MS ? 1.0 : 1.3
   const currentPeriod = Math.max(SINE_MIN_PERIOD_MS, SINE_BASE_PERIOD_MS - elapsedMs * SINE_PERIOD_DECAY_PER_MS)
   const primaryPhase = (elapsedMs / currentPeriod) * Math.PI * 2
   const secondaryPhase = (elapsedMs / (currentPeriod * SINE_SECONDARY_PERIOD_RATIO)) * Math.PI * 2
+  const tertiaryPhase = (elapsedMs / (currentPeriod * 0.37)) * Math.PI * 2
   const primary = Math.sin(primaryPhase)
-  const secondary = Math.sin(secondaryPhase) * SINE_SECONDARY_AMPLITUDE
-  return clampNumber((primary + secondary) * 0.5 + 0.5, 0, 1)
+  const secondary = Math.sin(secondaryPhase) * SINE_SECONDARY_AMPLITUDE * difficultyFactor
+  const tertiary = Math.sin(tertiaryPhase) * 0.08 * difficultyFactor
+  return clampNumber((primary + secondary + tertiary) * 0.5 + 0.5, 0.02, 0.98)
 }
 
 function computeAccuracy(targetNormalized: number, playerNormalized: number): number {
@@ -67,6 +107,29 @@ function accuracyToScoreRate(distance: number): number {
   return 0
 }
 
+function getDifficultyLabel(elapsedMs: number): string {
+  if (elapsedMs < PHASE_EASY_MS) return 'EASY'
+  if (elapsedMs < PHASE_MEDIUM_MS) return 'NORMAL'
+  return 'HARD'
+}
+
+function getDifficultyColor(elapsedMs: number): string {
+  if (elapsedMs < PHASE_EASY_MS) return '#22c55e'
+  if (elapsedMs < PHASE_MEDIUM_MS) return '#facc15'
+  return '#ef4444'
+}
+
+// ─── Bonus Note Type ────────────────────────────────────────────────
+
+interface BonusNote {
+  id: number
+  position: number
+  spawnedAt: number
+  collected: boolean
+}
+
+// ─── Main Component ─────────────────────────────────────────────────
+
 function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
@@ -78,6 +141,11 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
   const [perfectStreakCount, setPerfectStreakCount] = useState(0)
+  const [combo, setCombo] = useState(0)
+  const [maxCombo, setMaxCombo] = useState(0)
+  const [bonusNotes, setBonusNotes] = useState<BonusNote[]>([])
+  const [elapsedDisplay, setElapsedDisplay] = useState(0)
+  const [vignette, setVignette] = useState(false)
 
   const effects = useGameEffects()
 
@@ -92,7 +160,6 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const totalAccuracySamplesRef = useRef(0)
   const isDraggingRef = useRef(false)
   const pitchBarRef = useRef<HTMLDivElement | null>(null)
-  const tapAudioRef = useRef<HTMLAudioElement | null>(null)
   const lastFeedbackSoundMsRef = useRef(0)
   const lastPerfectParticleMsRef = useRef(0)
   const feverRef = useRef(false)
@@ -100,13 +167,29 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const perfectStreakMsRef = useRef(0)
   const perfectStreakCountRef = useRef(0)
   const lastMilestoneMsRef = useRef(0)
+  const comboRef = useRef(0)
+  const maxComboRef = useRef(0)
+  const lastComboTickMsRef = useRef(0)
+  const bonusNotesRef = useRef<BonusNote[]>([])
+  const bonusNoteIdRef = useRef(0)
+  const lastBonusSpawnMsRef = useRef(0)
+  const lastTimeWarnMsRef = useRef(0)
+
+  // Audio refs
+  const perfectAudioRef = useRef<HTMLAudioElement | null>(null)
+  const goodAudioRef = useRef<HTMLAudioElement | null>(null)
+  const missAudioRef = useRef<HTMLAudioElement | null>(null)
+  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
+  const timeWarningAudioRef = useRef<HTMLAudioElement | null>(null)
+  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const playAudio = useCallback(
     (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
       const audio = audioRef.current
       if (audio === null) return
       audio.currentTime = 0
-      audio.volume = volume
+      audio.volume = clampNumber(volume, 0, 1)
       audio.playbackRate = playbackRate
       void audio.play().catch(() => {})
     },
@@ -116,18 +199,18 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
+    playAudio(gameOverAudioRef, 0.5)
 
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     onFinish({
       score: scoreRef.current,
       durationMs: elapsedMs,
     })
-  }, [onFinish])
+  }, [onFinish, playAudio])
 
   const updatePlayerFromClientY = useCallback((clientY: number) => {
     const barElement = pitchBarRef.current
     if (barElement === null) return
-
     const rect = barElement.getBoundingClientRect()
     const relativeY = clientY - rect.top
     const normalized = clampNumber(1 - relativeY / rect.height, 0, 1)
@@ -163,6 +246,29 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     onExit()
   }, [onExit])
 
+  // Setup audio
+  useEffect(() => {
+    perfectAudioRef.current = new Audio(perfectSfx)
+    goodAudioRef.current = new Audio(goodSfx)
+    missAudioRef.current = new Audio(missSfx)
+    feverAudioRef.current = new Audio(feverSfx)
+    comboAudioRef.current = new Audio(comboSfx)
+    timeWarningAudioRef.current = new Audio(timeWarningSfx)
+    gameOverAudioRef.current = new Audio(gameOverSfx)
+
+    const allAudios = [
+      perfectAudioRef, goodAudioRef, missAudioRef, feverAudioRef,
+      comboAudioRef, timeWarningAudioRef, gameOverAudioRef,
+    ]
+    allAudios.forEach(ref => { if (ref.current) ref.current.preload = 'auto' })
+
+    return () => {
+      allAudios.forEach(ref => { ref.current = null })
+      effects.cleanup()
+    }
+  }, [])
+
+  // Keyboard
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'Escape') {
@@ -170,37 +276,20 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         handleExit()
       }
     }
-
     window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleExit])
 
-  useEffect(() => {
-    const tapAudio = new Audio(tapHitSfx)
-    tapAudio.preload = 'auto'
-    tapAudioRef.current = tapAudio
-
-    return () => {
-      tapAudioRef.current = null
-      effects.cleanup()
-    }
-  }, [])
-
+  // Prevent scroll on touch
   useEffect(() => {
     const handleTouchMove = (event: TouchEvent) => {
-      if (isDraggingRef.current) {
-        event.preventDefault()
-      }
+      if (isDraggingRef.current) event.preventDefault()
     }
-
     window.addEventListener('touchmove', handleTouchMove, { passive: false })
-    return () => {
-      window.removeEventListener('touchmove', handleTouchMove)
-    }
+    return () => window.removeEventListener('touchmove', handleTouchMove)
   }, [])
 
+  // Main game loop
   useEffect(() => {
     lastFrameAtRef.current = null
 
@@ -220,6 +309,7 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
+      setElapsedDisplay(elapsedMsRef.current)
 
       const currentTarget = computeTargetPosition(elapsedMsRef.current)
       setTargetPosition(currentTarget)
@@ -227,7 +317,22 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       const distance = computeAccuracy(currentTarget, playerPositionRef.current)
       setAccuracyDistance(distance)
 
-      // Fever timer countdown
+      // ─── Combo system ───
+      if (distance <= ACCURACY_GOOD_THRESHOLD) {
+        lastComboTickMsRef.current = elapsedMsRef.current
+        comboRef.current += 1
+        if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current
+      } else if (elapsedMsRef.current - lastComboTickMsRef.current > COMBO_DECAY_MS) {
+        if (comboRef.current > 0) {
+          comboRef.current = 0
+          setVignette(true)
+          setTimeout(() => setVignette(false), 200)
+        }
+      }
+      setCombo(comboRef.current)
+      setMaxCombo(maxComboRef.current)
+
+      // ─── Fever timer countdown ───
       if (feverRef.current) {
         feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
         setFeverRemainingMs(feverRemainingMsRef.current)
@@ -237,7 +342,7 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         }
       }
 
-      // Track perfect streaks
+      // ─── Track perfect streaks ───
       if (distance <= ACCURACY_PERFECT_THRESHOLD) {
         perfectStreakMsRef.current += deltaMs
         if (perfectStreakMsRef.current >= PERFECT_STREAK_THRESHOLD_MS) {
@@ -245,30 +350,36 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           perfectStreakCountRef.current += 1
           setPerfectStreakCount(perfectStreakCountRef.current)
 
-          // Milestone bonus every streak
           if (elapsedMsRef.current - lastMilestoneMsRef.current > 500) {
             lastMilestoneMsRef.current = elapsedMsRef.current
-            scoreRef.current += STREAK_MILESTONE_BONUS
-            effects.showScorePopup(STREAK_MILESTONE_BONUS, 36, 160 * (1 - playerPositionRef.current) + 20)
+            const bonus = STREAK_MILESTONE_BONUS + comboRef.current * 2
+            scoreRef.current += bonus
+            effects.showScorePopup(bonus, 50, 100)
+            playAudio(comboAudioRef, 0.4, 1.0 + perfectStreakCountRef.current * 0.05)
+            effects.spawnParticles(4, 50, 100, PERFECT_EMOJIS)
           }
 
-          // Activate fever after N perfect streaks
           if (perfectStreakCountRef.current >= FEVER_TRIGGER_STREAKS && !feverRef.current) {
             feverRef.current = true
             feverRemainingMsRef.current = FEVER_DURATION_MS
             setIsFever(true)
             setFeverRemainingMs(FEVER_DURATION_MS)
-            effects.triggerFlash('rgba(250,204,21,0.5)')
+            effects.triggerFlash('rgba(250,204,21,0.6)')
+            effects.triggerShake(8, 300)
+            playAudio(feverAudioRef, 0.6)
           }
         }
       } else {
         perfectStreakMsRef.current = 0
       }
 
+      // ─── Scoring ───
       const feverMult = feverRef.current ? FEVER_SCORE_MULTIPLIER : 1
+      const comboMult = 1 + Math.min(comboRef.current * 0.02, 1.0)
       const scoreRate = accuracyToScoreRate(distance)
-      const scoreGain = scoreRate * (deltaMs / 1000) * feverMult
-      scoreRef.current += scoreGain
+      const scoreGain = scoreRate * (deltaMs / 1000) * feverMult * comboMult
+      const comboBonus = comboRef.current > 5 ? COMBO_BONUS_BASE * (deltaMs / 1000) * (comboRef.current / 10) : 0
+      scoreRef.current += scoreGain + comboBonus
       setScore(Math.floor(scoreRef.current))
 
       totalAccuracySumRef.current += 1 - distance
@@ -276,17 +387,66 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       setTotalAccuracySum(totalAccuracySumRef.current)
       setTotalAccuracySamples(totalAccuracySamplesRef.current)
 
-      if (distance <= ACCURACY_GOOD_THRESHOLD && elapsedMsRef.current - lastFeedbackSoundMsRef.current > 400) {
-        lastFeedbackSoundMsRef.current = elapsedMsRef.current
-        const pitchRate = 0.8 + currentTarget * 0.6
-        playAudio(tapAudioRef, 0.2, pitchRate)
+      // ─── Sound feedback ───
+      if (elapsedMsRef.current - lastFeedbackSoundMsRef.current > 500) {
+        if (distance <= ACCURACY_PERFECT_THRESHOLD) {
+          lastFeedbackSoundMsRef.current = elapsedMsRef.current
+          playAudio(perfectAudioRef, 0.25, 0.8 + currentTarget * 0.4)
+        } else if (distance <= ACCURACY_GOOD_THRESHOLD) {
+          lastFeedbackSoundMsRef.current = elapsedMsRef.current
+          playAudio(goodAudioRef, 0.2, 0.9 + currentTarget * 0.3)
+        } else if (distance > ACCURACY_OK_THRESHOLD && elapsedMsRef.current - lastFeedbackSoundMsRef.current > 1200) {
+          lastFeedbackSoundMsRef.current = elapsedMsRef.current
+          playAudio(missAudioRef, 0.15)
+        }
       }
 
-      // Periodic particle effects when tracking perfectly
-      if (distance <= ACCURACY_PERFECT_THRESHOLD && elapsedMsRef.current - lastPerfectParticleMsRef.current > 800) {
+      // ─── Particle effects ───
+      if (distance <= ACCURACY_PERFECT_THRESHOLD && elapsedMsRef.current - lastPerfectParticleMsRef.current > 600) {
         lastPerfectParticleMsRef.current = elapsedMsRef.current
-        effects.spawnParticles(3, 36, 160 * (1 - playerPositionRef.current) + 20)
-        effects.triggerFlash('rgba(34,197,94,0.15)')
+        effects.spawnParticles(3, 40, 200 * (1 - playerPositionRef.current) + 60, NOTE_EMOJIS)
+        effects.triggerFlash('rgba(34,197,94,0.12)')
+      }
+
+      // ─── Bonus notes ───
+      if (elapsedMsRef.current - lastBonusSpawnMsRef.current > BONUS_NOTE_INTERVAL_MS && elapsedMsRef.current > 3000) {
+        lastBonusSpawnMsRef.current = elapsedMsRef.current
+        bonusNoteIdRef.current += 1
+        const newNote: BonusNote = {
+          id: bonusNoteIdRef.current,
+          position: 0.1 + Math.random() * 0.8,
+          spawnedAt: elapsedMsRef.current,
+          collected: false,
+        }
+        bonusNotesRef.current = [...bonusNotesRef.current, newNote]
+      }
+
+      // Check bonus note collection
+      const updatedNotes = bonusNotesRef.current.map(note => {
+        if (note.collected) return note
+        const noteAge = elapsedMsRef.current - note.spawnedAt
+        if (noteAge > BONUS_NOTE_DURATION_MS) return { ...note, collected: true }
+        if (Math.abs(playerPositionRef.current - note.position) < BONUS_NOTE_RADIUS) {
+          scoreRef.current += BONUS_NOTE_SCORE * feverMult
+          effects.comboHitBurst(50, 200 * (1 - note.position) + 60, 5, BONUS_NOTE_SCORE, NOTE_EMOJIS)
+          playAudio(perfectAudioRef, 0.4, 1.5)
+          return { ...note, collected: true }
+        }
+        return note
+      }).filter(note => {
+        if (note.collected) return (elapsedMsRef.current - note.spawnedAt) < BONUS_NOTE_DURATION_MS + 500
+        return true
+      })
+      bonusNotesRef.current = updatedNotes
+      setBonusNotes([...updatedNotes])
+
+      // ─── Time warning ───
+      if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && remainingMsRef.current > 0) {
+        if (elapsedMsRef.current - lastTimeWarnMsRef.current > 1000) {
+          lastTimeWarnMsRef.current = elapsedMsRef.current
+          playAudio(timeWarningAudioRef, 0.3)
+          effects.triggerShake(2, 100)
+        }
       }
 
       effects.updateParticles()
@@ -309,32 +469,33 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       }
       lastFrameAtRef.current = null
     }
-  }, [finishGame, playAudio])
+  }, [finishGame, playAudio, effects])
 
   const accuracyLabel = accuracyToLabel(accuracyDistance)
   const accuracyColor = accuracyToColor(accuracyDistance)
   const overallAccuracyPercent = totalAccuracySamples > 0 ? (totalAccuracySum / totalAccuracySamples) * 100 : 0
   const displayedBestScore = useMemo(() => Math.max(bestScore, Math.floor(scoreRef.current)), [bestScore, score])
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
+  const diffLabel = getDifficultyLabel(elapsedDisplay)
+  const diffColor = getDifficultyColor(elapsedDisplay)
 
   const targetTopPercent = (1 - targetPosition) * 100
   const playerTopPercent = (1 - playerPosition) * 100
+  const timePercent = (remainingMs / ROUND_DURATION_MS) * 100
 
   const trailSegments = useMemo(() => {
-    const segments: { top: number; height: number; color: string }[] = []
     const tPos = (1 - targetPosition) * 100
     const pPos = (1 - playerPosition) * 100
     const minPos = Math.min(tPos, pPos)
     const maxPos = Math.max(tPos, pPos)
     const height = maxPos - minPos
-    segments.push({ top: minPos, height: Math.max(height, 0.5), color: accuracyColor })
-    return segments
+    return [{ top: minPos, height: Math.max(height, 0.5), color: accuracyColor }]
   }, [targetPosition, playerPosition, accuracyColor])
 
   return (
-    <section className="mini-game-panel karaoke-pitch-panel" aria-label="karaoke-pitch-game" style={{ ...effects.getShakeStyle() }}>
+    <section className="mini-game-panel kp-panel" aria-label="karaoke-pitch-game" style={{ ...effects.getShakeStyle() }}>
       <style>{GAME_EFFECTS_CSS}{`
-        .karaoke-pitch-panel {
+        .kp-panel {
           display: flex;
           flex-direction: column;
           height: 100%;
@@ -346,120 +507,178 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           overflow: hidden;
         }
 
-        .karaoke-pitch-header {
+        .kp-vignette {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 12;
+          box-shadow: inset 0 0 60px rgba(239,68,68,0.5);
+          animation: kp-vignette-fade 0.3s ease-out forwards;
+        }
+
+        @keyframes kp-vignette-fade {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+
+        .kp-fever-bg {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 1;
+          background: linear-gradient(180deg, rgba(250,204,21,0.08) 0%, transparent 30%, transparent 70%, rgba(250,204,21,0.08) 100%);
+          animation: kp-fever-pulse 0.8s ease-in-out infinite alternate;
+        }
+
+        @keyframes kp-fever-pulse {
+          from { opacity: 0.5; }
+          to { opacity: 1; }
+        }
+
+        .kp-time-bar {
+          height: 4px;
+          background: #27272a;
+          flex-shrink: 0;
+          position: relative;
+          z-index: 2;
+        }
+
+        .kp-time-bar-fill {
+          height: 100%;
+          transition: width 0.1s linear;
+          border-radius: 0 2px 2px 0;
+        }
+
+        .kp-hud {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 12px 16px 8px;
-          background: linear-gradient(135deg, rgba(217,70,239,0.3) 0%, rgba(147,51,234,0.2) 100%);
-          border-bottom: 1px solid rgba(217,70,239,0.2);
+          padding: 8px 12px 4px;
           flex-shrink: 0;
+          z-index: 2;
         }
 
-        .karaoke-pitch-header-left {
+        .kp-hud-left {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
         }
 
-        .karaoke-pitch-avatar {
-          width: 44px;
-          height: 44px;
+        .kp-avatar {
+          width: 36px;
+          height: 36px;
           border-radius: 50%;
           border: 2px solid #d946ef;
           object-fit: cover;
-          box-shadow: 0 0 12px rgba(217,70,239,0.5);
+          box-shadow: 0 0 10px rgba(217,70,239,0.5);
         }
 
-        .karaoke-pitch-header-info {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-
-        .karaoke-pitch-score {
-          font-size: 26px;
-          font-weight: 800;
+        .kp-score {
+          font-size: 28px;
+          font-weight: 900;
           color: #e879f9;
           margin: 0;
           line-height: 1;
-          letter-spacing: -0.5px;
-          text-shadow: 0 0 14px rgba(217,70,239,0.6);
+          text-shadow: 0 0 16px rgba(217,70,239,0.6);
+          font-variant-numeric: tabular-nums;
         }
 
-        .karaoke-pitch-best {
-          font-size: 10px;
+        .kp-best {
+          font-size: 9px;
           color: #d8b4fe;
           margin: 0;
-          opacity: 0.7;
+          opacity: 0.6;
         }
 
-        .karaoke-pitch-header-right {
+        .kp-hud-right {
           display: flex;
           flex-direction: column;
           align-items: flex-end;
           gap: 2px;
         }
 
-        .karaoke-pitch-time {
-          font-size: 18px;
-          font-weight: 700;
+        .kp-time {
+          font-size: 20px;
+          font-weight: 800;
           color: #e4e4e7;
           margin: 0;
           font-variant-numeric: tabular-nums;
         }
 
-        .karaoke-pitch-time.low-time {
+        .kp-time.low-time {
           color: #ef4444;
-          animation: karaoke-pitch-pulse 0.5s ease-in-out infinite alternate;
+          animation: kp-pulse 0.5s ease-in-out infinite alternate;
         }
 
-        @keyframes karaoke-pitch-pulse {
-          from { opacity: 1; }
-          to { opacity: 0.5; }
+        @keyframes kp-pulse {
+          from { opacity: 1; transform: scale(1); }
+          to { opacity: 0.6; transform: scale(1.05); }
         }
 
-        .karaoke-pitch-meta-row {
+        .kp-status-row {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 14px;
-          padding: 6px 16px;
+          gap: 10px;
+          padding: 2px 12px 4px;
           flex-shrink: 0;
+          z-index: 2;
         }
 
-        .karaoke-pitch-accuracy-label {
-          font-size: 18px;
+        .kp-accuracy-label {
+          font-size: 22px;
+          font-weight: 900;
+          margin: 0;
+          letter-spacing: 2px;
+          text-shadow: 0 0 14px currentColor;
+          transition: color 0.12s ease;
+        }
+
+        .kp-combo-badge {
+          font-size: 13px;
           font-weight: 800;
-          margin: 0;
-          letter-spacing: 1px;
-          transition: color 0.15s ease;
-          text-shadow: 0 0 10px currentColor;
+          padding: 2px 8px;
+          border-radius: 10px;
+          background: rgba(217,70,239,0.2);
+          border: 1px solid rgba(217,70,239,0.4);
+          color: #e879f9;
         }
 
-        .karaoke-pitch-accuracy-percent {
-          font-size: 12px;
-          color: #d8b4fe;
-          margin: 0;
+        .kp-fever-badge {
+          font-size: 13px;
+          font-weight: 900;
+          padding: 2px 10px;
+          border-radius: 10px;
+          background: rgba(250,204,21,0.2);
+          border: 1px solid rgba(250,204,21,0.5);
+          color: #facc15;
+          animation: kp-pulse 0.3s ease-in-out infinite alternate;
+          text-shadow: 0 0 8px rgba(250,204,21,0.6);
         }
 
-        .karaoke-pitch-accuracy-percent strong {
-          color: #e4e4e7;
+        .kp-diff-badge {
+          font-size: 10px;
+          font-weight: 700;
+          padding: 1px 6px;
+          border-radius: 6px;
+          border: 1px solid;
+          opacity: 0.8;
         }
 
-        .karaoke-pitch-arena {
+        .kp-arena {
           display: flex;
           flex-direction: row;
           align-items: stretch;
-          gap: 10px;
+          gap: 8px;
           flex: 1;
-          padding: 0 12px;
+          padding: 4px 10px 6px;
           min-height: 0;
           overflow: hidden;
+          z-index: 2;
         }
 
-        .karaoke-pitch-bar-container {
-          width: 72px;
+        .kp-bar-container {
+          width: ${PITCH_BAR_WIDTH}px;
           flex-shrink: 0;
           position: relative;
           cursor: grab;
@@ -470,28 +689,33 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
         }
 
-        .karaoke-pitch-bar-container:active {
+        .kp-bar-container:active {
           cursor: grabbing;
           border-color: rgba(217,70,239,0.4);
-          box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 12px rgba(217,70,239,0.2);
+          box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 16px rgba(217,70,239,0.3);
         }
 
-        .karaoke-pitch-bar-track {
+        .kp-bar-container.fever-active {
+          border-color: rgba(250,204,21,0.4);
+          box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 16px rgba(250,204,21,0.3);
+        }
+
+        .kp-bar-track {
           position: absolute;
-          inset: 12px 8px;
+          inset: 8px 6px;
           border-radius: 8px;
           background: linear-gradient(to bottom, #312e81, #1e1b4b, #0f172a, #1e1b4b, #312e81);
         }
 
-        .karaoke-pitch-trail {
+        .kp-trail {
           position: absolute;
           left: 0;
           right: 0;
           border-radius: 4px;
-          transition: background-color 0.15s ease;
+          transition: background-color 0.12s ease;
         }
 
-        .karaoke-pitch-target-zone {
+        .kp-target-zone {
           position: absolute;
           left: 50%;
           transform: translate(-50%, -50%);
@@ -499,20 +723,24 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           height: ${TARGET_RADIUS * 2}px;
           border-radius: 50%;
           border: 3px solid;
-          transition: top 0.05s linear, border-color 0.15s ease;
+          transition: top 0.05s linear, border-color 0.12s ease;
           display: flex;
           align-items: center;
           justify-content: center;
         }
 
-        .karaoke-pitch-target-dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          transition: background-color 0.15s ease;
+        .kp-target-zone.fever-target {
+          box-shadow: 0 0 20px rgba(250,204,21,0.6);
         }
 
-        .karaoke-pitch-player-indicator {
+        .kp-target-dot {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          transition: background-color 0.12s ease;
+        }
+
+        .kp-player-indicator {
           position: absolute;
           left: 50%;
           transform: translate(-50%, -50%);
@@ -520,25 +748,40 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           height: ${PLAYER_INDICATOR_RADIUS * 2}px;
           border-radius: 50%;
           border: 2px solid #ffffffcc;
-          transition: background-color 0.15s ease, box-shadow 0.15s ease;
+          transition: background-color 0.12s ease, box-shadow 0.12s ease;
         }
 
-        .karaoke-pitch-scale-marks {
+        .kp-bonus-note {
+          position: absolute;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 24px;
+          animation: kp-bonus-float 0.5s ease-in-out infinite alternate;
+          filter: drop-shadow(0 0 8px rgba(250,204,21,0.8));
+          pointer-events: none;
+          z-index: 3;
+        }
+
+        @keyframes kp-bonus-float {
+          from { transform: translate(-50%, -50%) scale(1); }
+          to { transform: translate(-50%, -50%) scale(1.15); }
+        }
+
+        .kp-scale-marks {
           position: absolute;
           inset: 0;
           pointer-events: none;
         }
 
-        .karaoke-pitch-scale-mark {
+        .kp-scale-mark {
           position: absolute;
           left: 0;
           right: 0;
           height: 1px;
-          background: #ffffff18;
-          transform: translateY(-0.5px);
+          background: #ffffff12;
         }
 
-        .karaoke-pitch-waveform {
+        .kp-waveform {
           flex: 1;
           min-width: 0;
           position: relative;
@@ -549,43 +792,46 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
         }
 
-        .karaoke-pitch-waveform canvas {
+        .kp-waveform.fever-wave {
+          border-color: rgba(250,204,21,0.3);
+        }
+
+        .kp-waveform canvas {
           width: 100%;
           height: 100%;
           display: block;
         }
 
-        .karaoke-pitch-footer {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 6px;
-          flex-shrink: 0;
-          padding: 8px 16px 14px;
+        .kp-glow-ring {
+          position: absolute;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: ${TARGET_RADIUS * 3}px;
+          height: ${TARGET_RADIUS * 3}px;
+          border-radius: 50%;
+          border: 2px solid;
+          opacity: 0.3;
+          pointer-events: none;
+          animation: kp-glow-expand 1s ease-out infinite;
         }
 
-        .karaoke-pitch-hint {
-          font-size: 12px;
-          color: #71717a;
-          margin: 0;
-          text-align: center;
+        @keyframes kp-glow-expand {
+          from { transform: translate(-50%, -50%) scale(0.6); opacity: 0.5; }
+          to { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
         }
 
-        .karaoke-pitch-exit-btn {
-          padding: 7px 22px;
-          border-radius: 20px;
-          border: 1px solid rgba(217,70,239,0.3);
-          background: rgba(217,70,239,0.1);
-          color: #d8b4fe;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.15s, transform 0.1s;
+        .kp-accuracy-bar {
+          height: 3px;
+          background: #27272a;
+          border-radius: 2px;
+          overflow: hidden;
+          width: 60px;
         }
 
-        .karaoke-pitch-exit-btn:active {
-          transform: scale(0.95);
-          background: rgba(217,70,239,0.2);
+        .kp-accuracy-bar-fill {
+          height: 100%;
+          border-radius: 2px;
+          transition: width 0.3s ease, background-color 0.3s ease;
         }
       `}</style>
 
@@ -593,43 +839,78 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
-      <div className="karaoke-pitch-header">
-        <div className="karaoke-pitch-header-left">
-          <img className="karaoke-pitch-avatar" src={characterImage} alt="character" />
-          <div className="karaoke-pitch-header-info">
-            <p className="karaoke-pitch-score">{Math.floor(score).toLocaleString()}</p>
-            <p className="karaoke-pitch-best">BEST {displayedBestScore.toLocaleString()}</p>
+      {vignette && <div className="kp-vignette" />}
+      {isFever && <div className="kp-fever-bg" />}
+
+      {/* Time bar */}
+      <div className="kp-time-bar">
+        <div
+          className="kp-time-bar-fill"
+          style={{
+            width: `${timePercent}%`,
+            background: isLowTime
+              ? 'linear-gradient(90deg, #ef4444, #f97316)'
+              : isFever
+                ? 'linear-gradient(90deg, #facc15, #f59e0b)'
+                : 'linear-gradient(90deg, #d946ef, #a855f7)',
+          }}
+        />
+      </div>
+
+      {/* HUD */}
+      <div className="kp-hud">
+        <div className="kp-hud-left">
+          <img className="kp-avatar" src={characterImage} alt="" />
+          <div>
+            <p className="kp-score">{Math.floor(score).toLocaleString()}</p>
+            <p className="kp-best">BEST {displayedBestScore.toLocaleString()}</p>
           </div>
         </div>
-        <div className="karaoke-pitch-header-right">
-          <p className={`karaoke-pitch-time ${isLowTime ? 'low-time' : ''}`}>
+        <div className="kp-hud-right">
+          <p className={`kp-time ${isLowTime ? 'low-time' : ''}`}>
             {(remainingMs / 1000).toFixed(1)}s
           </p>
+          <div className="kp-accuracy-bar">
+            <div
+              className="kp-accuracy-bar-fill"
+              style={{
+                width: `${overallAccuracyPercent}%`,
+                backgroundColor: overallAccuracyPercent > 80 ? '#22c55e' : overallAccuracyPercent > 50 ? '#facc15' : '#ef4444',
+              }}
+            />
+          </div>
         </div>
       </div>
 
-      <div className="karaoke-pitch-meta-row">
-        <p className="karaoke-pitch-accuracy-label" style={{ color: accuracyColor }}>
+      {/* Status row */}
+      <div className="kp-status-row">
+        <p className="kp-accuracy-label" style={{ color: accuracyColor }}>
           {accuracyLabel}
         </p>
-        <p className="karaoke-pitch-accuracy-percent">
-          Accuracy <strong>{overallAccuracyPercent.toFixed(1)}%</strong>
-        </p>
+        {combo >= 3 && (
+          <span className="kp-combo-badge">
+            {combo}x COMBO
+          </span>
+        )}
         {perfectStreakCount > 0 && (
-          <p style={{ color: '#22c55e', fontSize: 12, fontWeight: 700, margin: 0, textShadow: '0 0 6px rgba(34,197,94,0.4)' }}>
+          <span style={{ color: '#22c55e', fontSize: 11, fontWeight: 800, textShadow: '0 0 6px rgba(34,197,94,0.4)' }}>
             STREAK {perfectStreakCount}
-          </p>
+          </span>
         )}
         {isFever && (
-          <p style={{ color: '#facc15', fontSize: 12, fontWeight: 800, margin: 0, animation: 'karaoke-pitch-pulse 0.3s ease-in-out infinite alternate' }}>
-            FEVER x{FEVER_SCORE_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s
-          </p>
+          <span className="kp-fever-badge">
+            FEVER x{FEVER_SCORE_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(0)}s
+          </span>
         )}
+        <span className="kp-diff-badge" style={{ color: diffColor, borderColor: diffColor }}>
+          {diffLabel}
+        </span>
       </div>
 
-      <div className="karaoke-pitch-arena">
+      {/* Arena */}
+      <div className="kp-arena">
         <div
-          className="karaoke-pitch-bar-container"
+          className={`kp-bar-container ${isFever ? 'fever-active' : ''}`}
           ref={pitchBarRef}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -641,88 +922,114 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           aria-valuemax={100}
           aria-valuenow={Math.round(playerPosition * 100)}
         >
-          <div className="karaoke-pitch-bar-track">
+          <div className="kp-bar-track">
             {trailSegments.map((seg, i) => (
               <div
                 key={i}
-                className="karaoke-pitch-trail"
+                className="kp-trail"
                 style={{
                   top: `${seg.top}%`,
                   height: `${seg.height}%`,
                   backgroundColor: seg.color,
-                  opacity: 0.35,
+                  opacity: isFever ? 0.55 : 0.35,
                 }}
               />
             ))}
 
+            {/* Bonus notes on bar */}
+            {bonusNotes.filter(n => !n.collected).map(note => {
+              const noteAge = elapsedDisplay - note.spawnedAt
+              const opacity = noteAge > BONUS_NOTE_DURATION_MS * 0.7 ? 0.4 : 1
+              return (
+                <div
+                  key={note.id}
+                  className="kp-bonus-note"
+                  style={{
+                    top: `${(1 - note.position) * 100}%`,
+                    opacity,
+                  }}
+                >
+                  🎵
+                </div>
+              )
+            })}
+
+            {/* Glow ring around target */}
+            {accuracyDistance <= ACCURACY_PERFECT_THRESHOLD && (
+              <div
+                className="kp-glow-ring"
+                style={{
+                  top: `${targetTopPercent}%`,
+                  borderColor: '#22c55e',
+                }}
+              />
+            )}
+
             <div
-              className="karaoke-pitch-target-zone"
+              className={`kp-target-zone ${isFever ? 'fever-target' : ''}`}
               style={{
                 top: `${targetTopPercent}%`,
-                borderColor: accuracyColor,
+                borderColor: isFever ? '#facc15' : accuracyColor,
               }}
             >
               <div
-                className="karaoke-pitch-target-dot"
-                style={{ backgroundColor: accuracyColor }}
+                className="kp-target-dot"
+                style={{ backgroundColor: isFever ? '#facc15' : accuracyColor }}
               />
             </div>
 
             <div
-              className="karaoke-pitch-player-indicator"
+              className="kp-player-indicator"
               style={{
                 top: `${playerTopPercent}%`,
                 backgroundColor: accuracyColor,
-                boxShadow: `0 0 12px ${accuracyColor}88`,
+                boxShadow: `0 0 14px ${accuracyColor}88, 0 0 28px ${accuracyColor}44`,
               }}
             />
 
-            <div className="karaoke-pitch-scale-marks">
-              {[0, 25, 50, 75, 100].map((mark) => (
-                <div
-                  key={mark}
-                  className="karaoke-pitch-scale-mark"
-                  style={{ top: `${mark}%` }}
-                />
+            <div className="kp-scale-marks">
+              {[0, 20, 40, 60, 80, 100].map((mark) => (
+                <div key={mark} className="kp-scale-mark" style={{ top: `${mark}%` }} />
               ))}
             </div>
           </div>
         </div>
 
-        <div className="karaoke-pitch-waveform">
+        <div className={`kp-waveform ${isFever ? 'fever-wave' : ''}`}>
           <KaraokePitchWaveform
             targetPosition={targetPosition}
             playerPosition={playerPosition}
             accuracyColor={accuracyColor}
-            elapsedMs={elapsedMsRef.current}
+            elapsedMs={elapsedDisplay}
+            isFever={isFever}
+            combo={combo}
           />
         </div>
-      </div>
-
-      <div className="karaoke-pitch-footer">
-        <p className="karaoke-pitch-hint">슬라이더를 드래그하여 음정을 맞추세요!</p>
-        <button className="karaoke-pitch-exit-btn" type="button" onClick={handleExit}>
-          허브로 돌아가기
-        </button>
       </div>
     </section>
   )
 }
+
+// ─── Waveform Canvas ────────────────────────────────────────────────
 
 function KaraokePitchWaveform({
   targetPosition,
   playerPosition,
   accuracyColor,
   elapsedMs,
+  isFever,
+  combo,
 }: {
   targetPosition: number
   playerPosition: number
   accuracyColor: string
   elapsedMs: number
+  isFever: boolean
+  combo: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const historyRef = useRef<{ target: number; player: number; color: string }[]>([])
-  const MAX_HISTORY = 200
+  const MAX_HISTORY = 250
 
   useEffect(() => {
     historyRef.current.push({
@@ -756,15 +1063,29 @@ function KaraokePitchWaveform({
     const len = history.length
     if (len < 2) return
 
-    const padding = 12 * dpr
+    const padding = 10 * dpr
     const drawWidth = width - padding * 2
     const drawHeight = height - padding * 2
 
-    ctx.lineWidth = 2 * dpr
+    // Grid lines
+    ctx.strokeStyle = '#ffffff08'
+    ctx.lineWidth = 1 * dpr
+    for (let i = 0; i <= 4; i++) {
+      const y = padding + (i / 4) * drawHeight
+      ctx.beginPath()
+      ctx.moveTo(padding, y)
+      ctx.lineTo(padding + drawWidth, y)
+      ctx.stroke()
+    }
+
+    // Target line (glow)
+    ctx.lineWidth = 3 * dpr
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
 
-    ctx.strokeStyle = '#d946ef55'
+    // Target glow
+    ctx.strokeStyle = isFever ? '#facc1540' : '#d946ef30'
+    ctx.lineWidth = 6 * dpr
     ctx.beginPath()
     for (let i = 0; i < len; i++) {
       const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
@@ -774,7 +1095,32 @@ function KaraokePitchWaveform({
     }
     ctx.stroke()
 
-    ctx.strokeStyle = '#ffffff88'
+    // Target line
+    ctx.strokeStyle = isFever ? '#facc1588' : '#d946ef66'
+    ctx.lineWidth = 2.5 * dpr
+    ctx.beginPath()
+    for (let i = 0; i < len; i++) {
+      const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
+      const y = padding + (1 - history[i].target) * drawHeight
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+
+    // Player line glow
+    ctx.strokeStyle = accuracyColor + '30'
+    ctx.lineWidth = 6 * dpr
+    ctx.beginPath()
+    for (let i = 0; i < len; i++) {
+      const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
+      const y = padding + (1 - history[i].player) * drawHeight
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+
+    // Player line
+    ctx.strokeStyle = '#ffffffaa'
     ctx.lineWidth = 2.5 * dpr
     ctx.beginPath()
     for (let i = 0; i < len; i++) {
@@ -785,14 +1131,35 @@ function KaraokePitchWaveform({
     }
     ctx.stroke()
 
+    // Current position dots
     const lastEntry = history[len - 1]
     const lastX = padding + ((len - 1) / (MAX_HISTORY - 1)) * drawWidth
     const lastTargetY = padding + (1 - lastEntry.target) * drawHeight
     const lastPlayerY = padding + (1 - lastEntry.player) * drawHeight
 
-    ctx.fillStyle = '#d946ef'
+    // Target dot glow
+    const targetGlowSize = isFever ? 12 : 8
+    const gradient = ctx.createRadialGradient(lastX, lastTargetY, 0, lastX, lastTargetY, targetGlowSize * dpr)
+    gradient.addColorStop(0, isFever ? '#facc15' : '#d946ef')
+    gradient.addColorStop(1, 'transparent')
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.arc(lastX, lastTargetY, targetGlowSize * dpr, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = isFever ? '#facc15' : '#d946ef'
     ctx.beginPath()
     ctx.arc(lastX, lastTargetY, 4 * dpr, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Player dot glow
+    const playerGlowSize = combo > 10 ? 14 : 10
+    const pGradient = ctx.createRadialGradient(lastX, lastPlayerY, 0, lastX, lastPlayerY, playerGlowSize * dpr)
+    pGradient.addColorStop(0, lastEntry.color)
+    pGradient.addColorStop(1, 'transparent')
+    ctx.fillStyle = pGradient
+    ctx.beginPath()
+    ctx.arc(lastX, lastPlayerY, playerGlowSize * dpr, 0, Math.PI * 2)
     ctx.fill()
 
     ctx.fillStyle = lastEntry.color
@@ -800,6 +1167,7 @@ function KaraokePitchWaveform({
     ctx.arc(lastX, lastPlayerY, 5 * dpr, 0, Math.PI * 2)
     ctx.fill()
 
+    // Distance line
     ctx.strokeStyle = lastEntry.color + '44'
     ctx.lineWidth = 1 * dpr
     ctx.setLineDash([4 * dpr, 4 * dpr])
@@ -808,16 +1176,26 @@ function KaraokePitchWaveform({
     ctx.lineTo(lastX, lastPlayerY)
     ctx.stroke()
     ctx.setLineDash([])
-  }, [targetPosition, playerPosition, accuracyColor, elapsedMs])
+
+    // Combo display in waveform
+    if (combo >= 5) {
+      ctx.fillStyle = '#ffffff'
+      ctx.font = `bold ${16 * dpr}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.fillText(`${combo}x`, width / 2, padding + 20 * dpr)
+    }
+  }, [targetPosition, playerPosition, accuracyColor, elapsedMs, isFever, combo])
 
   return <canvas ref={canvasRef} />
 }
+
+// ─── Module Export ───────────────────────────────────────────────────
 
 export const karaokePitchModule: MiniGameModule = {
   manifest: {
     id: 'karaoke-pitch',
     title: 'Karaoke Pitch',
-    description: '움직이는 음정 바를 따라가라! 정확한 음정 트래킹!',
+    description: 'Match the pitch! Track targets for combos & fever!',
     unlockCost: 40,
     baseReward: 14,
     scoreRewardMultiplier: 1.15,

@@ -4,7 +4,6 @@ import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants
 import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
 import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
-import parkWankyuImg from '../../../assets/images/same-character/park-wankyu.png'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
 
 const ROUND_DURATION_MS = 30000
@@ -19,7 +18,7 @@ const WRONG_FLASH_DURATION_MS = 200
 const CORRECT_ANIM_DURATION_MS = 300
 const LOW_TIME_THRESHOLD_MS = 5000
 const GAME_AREA_PADDING = 12
-const NUMBER_BUTTON_SIZE = 56
+const NUMBER_BUTTON_SIZE = 68
 const PLACEMENT_ATTEMPTS = 80
 
 interface NumberTile {
@@ -361,7 +360,7 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   )
 
   return (
-    <section className="mini-game-panel number-sort-panel" aria-label="number-sort-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
+    <section className="mini-game-panel number-sort-panel" aria-label="number-sort-game" style={{ maxWidth: '432px', margin: '0 auto', overflow: 'hidden', position: 'relative', height: '100%' }}>
       <div className="number-sort-score-strip">
         <p className="number-sort-score">{score.toLocaleString()}</p>
         <p className="number-sort-best">BEST {displayedBestScore.toLocaleString()}</p>
@@ -378,7 +377,7 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           NEXT <strong>{nextTarget > numberCount ? 'CLEAR!' : nextTarget}</strong>
         </p>
         <p className="number-sort-count">
-          {numberCount}개
+          {numberCount}pcs
         </p>
       </div>
 
@@ -387,10 +386,9 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         ref={gameAreaRef}
       >
         {tiles.map((tile) => {
-          const isCurrent = tile.value === nextTarget
           return (
             <button
-              className={`number-sort-tile ${isCurrent ? 'current' : ''}`}
+              className="number-sort-tile"
               key={tile.id}
               type="button"
               style={{
@@ -422,53 +420,54 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         ))}
       </div>
 
-      <div className="number-sort-character-row">
-        <img src={parkWankyuImg} alt="박완규" className="number-sort-character" draggable={false} />
-      </div>
-
       <style>{GAME_EFFECTS_CSS}
       {`
         .number-sort-panel {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 6px;
-          padding: 8px;
+          gap: 0;
+          padding: 0;
           width: 100%;
+          height: 100%;
           user-select: none;
           -webkit-user-select: none;
           position: relative;
+          background: #f5f4ef;
         }
 
         .number-sort-score-strip {
           display: flex;
           justify-content: space-between;
-          align-items: baseline;
+          align-items: center;
           width: 100%;
-          padding: 0 4px;
+          padding: 12px 16px 4px;
+          box-sizing: border-box;
+          flex-shrink: 0;
         }
 
         .number-sort-score {
-          font-size: 28px;
-          font-weight: 800;
+          font-size: clamp(36px, 10vw, 48px);
+          font-weight: 900;
           color: #10b981;
           margin: 0;
           line-height: 1;
         }
 
         .number-sort-best {
-          font-size: 12px;
+          font-size: 13px;
           font-weight: 600;
-          color: #94a3b8;
+          color: #9ca3af;
           margin: 0;
         }
 
         .number-sort-time {
-          font-size: 18px;
-          font-weight: 700;
-          color: #e2e8f0;
+          font-size: clamp(24px, 7vw, 32px);
+          font-weight: 900;
+          color: #374151;
           margin: 0;
           transition: color 0.2s;
+          font-variant-numeric: tabular-nums;
         }
 
         .number-sort-time.low-time {
@@ -484,17 +483,18 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .number-sort-meta-row {
           display: flex;
           justify-content: center;
-          gap: 16px;
+          gap: 20px;
           width: 100%;
-          padding: 2px 0;
+          padding: 4px 16px;
+          flex-shrink: 0;
         }
 
         .number-sort-round,
         .number-sort-target,
         .number-sort-count {
-          font-size: 13px;
-          font-weight: 600;
-          color: #94a3b8;
+          font-size: clamp(14px, 4vw, 17px);
+          font-weight: 700;
+          color: #6b7280;
           margin: 0;
         }
 
@@ -507,11 +507,13 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .number-sort-arena {
           position: relative;
           width: 100%;
-          aspect-ratio: 1;
-          max-height: 360px;
-          background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-          border-radius: 12px;
+          flex: 1;
+          min-height: 0;
+          background: linear-gradient(180deg, #ede9df 0%, #e8e5dc 100%);
+          border-radius: 16px;
           overflow: hidden;
+          margin: 4px 12px 8px;
+          box-sizing: border-box;
         }
 
         .number-sort-arena.miss {
@@ -526,11 +528,11 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .number-sort-tile {
           position: absolute;
           border-radius: 50%;
-          border: 3px solid #334155;
-          background: linear-gradient(135deg, #1e293b, #334155);
-          color: #e2e8f0;
-          font-size: 22px;
-          font-weight: 800;
+          border: 3px solid #d1d5db;
+          background: linear-gradient(135deg, #fff, #f3f4f6);
+          color: #374151;
+          font-size: clamp(26px, 7vw, 34px);
+          font-weight: 900;
           cursor: pointer;
           display: flex;
           align-items: center;
@@ -538,16 +540,11 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           transition: transform 0.1s, border-color 0.15s, box-shadow 0.15s;
           font-family: inherit;
           padding: 0;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
 
         .number-sort-tile:active {
           transform: scale(0.9);
-        }
-
-        .number-sort-tile.current {
-          border-color: #10b981;
-          box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
-          color: #10b981;
         }
 
         .number-sort-tile-cleared {
@@ -555,8 +552,8 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           border-radius: 50%;
           background: #22c55e;
           color: #fff;
-          font-size: 22px;
-          font-weight: 800;
+          font-size: clamp(26px, 7vw, 34px);
+          font-weight: 900;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -570,29 +567,10 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           100% { opacity: 0; transform: scale(0.5); }
         }
 
-        .number-sort-character-row {
-          display: flex;
-          justify-content: center;
-          padding: 4px 0;
-        }
-
-        .number-sort-character {
-          width: 80px;
-          height: 80px;
-          object-fit: contain;
-          border-radius: 50%;
-          border: 2px solid #10b981;
-          background: rgba(16, 185, 129, 0.1);
-          opacity: 0.9;
-        }
       `}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
-
-      <button className="text-button" type="button" onClick={handleExit}>
-        허브로 돌아가기
-      </button>
     </section>
   )
 }
@@ -601,7 +579,7 @@ export const numberSortModule: MiniGameModule = {
   manifest: {
     id: 'number-sort',
     title: 'Number Sort',
-    description: '흩어진 숫자를 1부터 순서대로 터치! 빨리 클리어하면 타임보너스!',
+    description: 'Tap numbers 1-N in order! Fast clear = time bonus!',
     unlockCost: 30,
     baseReward: 12,
     scoreRewardMultiplier: 1.1,

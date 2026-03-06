@@ -77,7 +77,7 @@ const EFFECT_PRESET_CONFIG: Record<
   }
 > = {
   low: {
-    label: '약',
+    label: 'Low',
     impactScale: 0.82,
     tapStrongVolumeScale: 0.9,
     tapLayerVolumeScale: 0.74,
@@ -86,7 +86,7 @@ const EFFECT_PRESET_CONFIG: Record<
     zoneHitDurationMs: 88,
   },
   medium: {
-    label: '중',
+    label: 'Med',
     impactScale: 1,
     tapStrongVolumeScale: 1,
     tapLayerVolumeScale: 0.84,
@@ -95,7 +95,7 @@ const EFFECT_PRESET_CONFIG: Record<
     zoneHitDurationMs: 110,
   },
   high: {
-    label: '강',
+    label: 'High',
     impactScale: 1.22,
     tapStrongVolumeScale: 1.14,
     tapLayerVolumeScale: 0.98,
@@ -191,7 +191,7 @@ function createHeartPickup(heartId: number): HeartPickup {
 }
 
 function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const [effectPresetId, setEffectPresetId] = useState<EffectPresetId>('medium')
+  const [effectPresetId] = useState<EffectPresetId>('medium')
   const [currentScore, setCurrentScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [currentCombo, setCurrentCombo] = useState(0)
@@ -912,31 +912,6 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
             />
           </div>
         </div>
-        <div className="tap-dash-effects-toggle" role="radiogroup" aria-label="effects-intensity-toggle">
-          {EFFECT_PRESET_IDS.map((presetId) => {
-            const isActive = effectPresetId === presetId
-            return (
-              <button
-                key={presetId}
-                className={`tap-dash-effects-button ${isActive ? 'active' : ''}`}
-                type="button"
-                role="radio"
-                aria-checked={isActive}
-                onPointerDown={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                }}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  setEffectPresetId(presetId)
-                }}
-              >
-                {EFFECT_PRESET_CONFIG[presetId].label}
-              </button>
-            )
-          })}
-        </div>
 
         {timeBoostText ? (
           <p key={timeBoostPulseId} className={`tap-dash-time-boost-pop ${isSuperFeverActive ? 'super' : ''}`} aria-live="polite">
@@ -968,7 +943,7 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
         {isSuperFeverActive ? (
           <div className="tap-dash-super-fever-overlay" aria-live="polite">
             <p className="tap-dash-super-fever-title">SUPER FEVER MODE</p>
-            <p className="tap-dash-super-fever-subtitle">중앙 고정 + 시간 정지 {superFeverRemainingSecondsText}s</p>
+            <p className="tap-dash-super-fever-subtitle">Center lock + Time freeze {superFeverRemainingSecondsText}s</p>
           </div>
         ) : null}
 
@@ -1069,7 +1044,7 @@ export const tapDashModule: MiniGameModule = {
   manifest: {
     id: 'tap-dash',
     title: 'Tap Dash',
-    description: '30초 동안 랜덤 타겟에 등장하는 캐릭터를 탭해 점수를 쌓는 미니게임',
+    description: 'Tap characters on random targets for 30 seconds!',
     unlockCost: 0,
     baseReward: 8,
     scoreRewardMultiplier: 1.2,

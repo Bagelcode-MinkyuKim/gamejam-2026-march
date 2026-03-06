@@ -44,12 +44,12 @@ const ROLE_SWITCH_MS = 600
 const CHANT_STEP_MS = 150
 
 const OPPONENT_CHARS = [
-  { src: kimYeonjaSprite, name: '김연자' },
-  { src: parkSangminSprite, name: '박상민' },
-  { src: parkWankyuSprite, name: '박완규' },
-  { src: seoTaijiSprite, name: '서태지' },
-  { src: songChangsikSprite, name: '송창식' },
-  { src: taeJinaSprite, name: '태진아' },
+  { src: kimYeonjaSprite, name: 'Kim Yeonja' },
+  { src: parkSangminSprite, name: 'Park Sangmin' },
+  { src: parkWankyuSprite, name: 'Park Wankyu' },
+  { src: seoTaijiSprite, name: 'Seo Taiji' },
+  { src: songChangsikSprite, name: 'Song Changsik' },
+  { src: taeJinaSprite, name: 'Tae Jina' },
 ] as const
 
 type AudioKey = 'hit' | 'miss' | 'damage' | 'dodge' | 'voice' | 'roleSwitch'
@@ -96,7 +96,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     hit: null, miss: null, damage: null, dodge: null, voice: null, roleSwitch: null,
   })
 
-  const playSfx = useCallback((key: AudioKey, vol = 0.7, rate = 1) => {
+  const playSfx = useCallback((key: AudioKey, vol = 0.9, rate = 1) => {
     const a = sfxRefs.current[key]
     if (!a) return
     const c = a.cloneNode(true) as HTMLAudioElement
@@ -133,12 +133,12 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleExit = useCallback(() => { playSfx('miss', 0.4); onExit() }, [onExit, playSfx])
+  const handleExit = useCallback(() => { playSfx('miss', 0.7); onExit() }, [onExit, playSfx])
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') handleExit() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [handleExit])
 
   const playChant = useCallback((done: () => void) => {
     clearChantTimer()
-    playSfx('voice', 0.65)
+    playSfx('voice', 0.88)
     const anims: Array<'idle' | 'chant'> = ['idle', 'chant', 'idle', 'chant', 'idle']
     let i = 0
     setCharAnim(anims[0])
@@ -192,7 +192,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       triggerFlash('success'); triggerEffect('dodge'); playSfx('dodge', 0.7, 1.06)
       setPhase('defense-resolve')
       phaseTimerRef.current = window.setTimeout(() => {
-        phaseTimerRef.current = null; setRoleText('ATTACK!'); setPhase('role-switch'); playSfx('roleSwitch', 0.6)
+        phaseTimerRef.current = null; setRoleText('ATTACK!'); setPhase('role-switch'); playSfx('roleSwitch', 0.85)
         phaseTimerRef.current = window.setTimeout(() => { phaseTimerRef.current = null; setRoleText(null); startAttackTurn() }, ROLE_SWITCH_MS)
       }, RESOLVE_DISPLAY_MS)
     }
@@ -219,7 +219,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         phaseTimerRef.current = window.setTimeout(() => { phaseTimerRef.current = null; startAttackTurn() }, RESOLVE_DISPLAY_MS)
       } else {
         phaseTimerRef.current = window.setTimeout(() => {
-          phaseTimerRef.current = null; setRoleText('DEFENSE!'); setPhase('role-switch'); playSfx('roleSwitch', 0.6)
+          phaseTimerRef.current = null; setRoleText('DEFENSE!'); setPhase('role-switch'); playSfx('roleSwitch', 0.85)
           phaseTimerRef.current = window.setTimeout(() => { phaseTimerRef.current = null; setRoleText(null); startDefenseTurn() }, ROLE_SWITCH_MS)
         }, RESOLVE_DISPLAY_MS)
       }
@@ -255,7 +255,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const showOpDir = (phase === 'defense-choose' || phase === 'defense-resolve') && opponentChoice !== null
 
   const msg = resolved ? (resolveResult === 'hit' ? `+${combo}!` : resolveResult === 'miss' ? 'MISS!' : resolveResult === 'dodged' ? 'DODGE!' : 'HIT!') : null
-  const guide = phase === 'attack-choose' ? '참! 참! 참!' : (phase === 'attack-resolve' && !resolved) ? '참참참...' : phase === 'defense-incoming' ? '상대의 참참참...' : phase === 'defense-choose' ? '피해라!' : phase === 'role-switch' ? (roleText ?? '') : phase === 'game-over' ? 'GAME OVER' : ''
+  const guide = phase === 'attack-choose' ? 'Cham! Cham! Cham!' : (phase === 'attack-resolve' && !resolved) ? 'Cham-cham-cham...' : phase === 'defense-incoming' ? "Opponent's cham..." : phase === 'defense-choose' ? 'Dodge!' : phase === 'role-switch' ? (roleText ?? '') : phase === 'game-over' ? 'GAME OVER' : ''
 
   const handStyle: CSSProperties | null = playerChoice ? {
     backgroundImage: `url(${playerHandSheet})`,
@@ -338,8 +338,8 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 export const chamChamChamModule: MiniGameModule = {
   manifest: {
     id: 'cham-cham-cham',
-    title: '참참참',
-    description: '공수를 번갈아 참참참! 공격은 방향 맞추기, 수비는 피하기. 체력 0이면 게임오버!',
+    title: 'Cham-Cham-Cham',
+    description: 'Take turns: attack to match, defend to dodge. 0 HP = Game Over!',
     unlockCost: 80,
     baseReward: 16,
     scoreRewardMultiplier: 1.5,

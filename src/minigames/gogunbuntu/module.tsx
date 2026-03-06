@@ -49,10 +49,6 @@ const HOOK_PULL_ACCEL = 280
 const HOOK_MAX_SPEED = 480
 const CHAIN_COMBO_WINDOW_MS = 2050
 
-const MIN_SEGMENT_LENGTH = 220
-const MAX_SEGMENT_LENGTH = 420
-const MIN_GAP_LENGTH = 90
-const MAX_GAP_LENGTH = 248
 const GROUND_MIN_HEIGHT = 0
 const GROUND_MAX_HEIGHT = 128
 
@@ -83,11 +79,11 @@ const SCORE_TRICK_BONUS = 34
 
 const GOGUNBUNTU_PLAYER_SKINS = [
   {
-    name: '김연자',
+    name: 'Kim Yeonja',
     imageSrc: kimYeonjaDotCharacter,
   },
   {
-    name: '박상민',
+    name: 'Park Sangmin',
     imageSrc: parkSangminDotCharacter,
   },
 ] as const
@@ -208,6 +204,7 @@ interface RenderState {
   readonly playerY: number
   readonly playerVx: number
   readonly playerVy: number
+  readonly grounded: boolean
   readonly cameraX: number
   readonly speed: number
   readonly elapsedMs: number
@@ -297,8 +294,9 @@ function getRunProgress(playerX: number): number {
 
 function createInitialModel(): WorldModel {
   const initialSegments: GroundSegment[] = [
-    { id: 0, startX: -240, endX: 420, y: 0, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
-    { id: 1, startX: 500, endX: 880, y: 12, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
+    { id: 0, startX: -240, endX: 520, y: 0, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
+    { id: 1, startX: 600, endX: 1000, y: 0, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
+    { id: 2, startX: 1080, endX: 1400, y: 16, gimmick: 'normal', crumbleTimer: 0, crumbleActive: false },
   ]
 
   return {
@@ -334,14 +332,14 @@ function createInitialModel(): WorldModel {
       extending: false,
       currentLength: 0,
     },
-    statusText: '점프와 훅으로 지형을 돌파하세요.',
-    nextGroundId: 2,
+    statusText: 'Jump and hook through terrain.',
+    nextGroundId: 3,
     nextAnchorId: 0,
     nextObstacleId: 0,
     nextCoinId: 0,
     nextFxId: 0,
     lastTrailSpawnMs: 0,
-    lastGeneratedX: 880,
+    lastGeneratedX: 1400,
     groundSegments: initialSegments,
     anchors: [],
     obstacles: [],
@@ -356,6 +354,7 @@ function buildRenderState(model: WorldModel): RenderState {
     playerY: model.playerY,
     playerVx: model.playerVx,
     playerVy: model.playerVy,
+    grounded: model.grounded,
     cameraX: model.cameraX,
     speed: model.speed,
     elapsedMs: model.elapsedMs,
@@ -388,55 +387,114 @@ function pushBurst(model: WorldModel, kind: EffectKind, x: number, y: number): v
   model.nextFxId += 1
 }
 
+function pickGimmick(runProgress: number): SegmentGimmick {
+  if (runProgress < 0.08) return 'normal'
+
+  const pool: { gimmick: SegmentGimmick; weight: number; minProgress: number }[] = [
+    { gimmick: 'spring', weight: 12, minProgress: 0.08 },
+    { gimmick: 'conveyor', weight: 10, minProgress: 0.1 },
+    { gimmick: 'boost', weight: 8, minProgress: 0.12 },
+    { gimmick: 'trampoline', weight: 10, minProgress: 0.15 },
+    { gimmick: 'ice', weight: 8, minProgress: 0.2 },
+    { gimmick: 'crumble', weight: 10, minProgress: 0.25 },
+    { gimmick: 'moving', weight: 8, minProgress: 0.3 },
+    { gimmick: 'narrow', weight: 6, minProgress: 0.35 },
+    { gimmick: 'gravity', weight: 5, minProgress: 0.4 },
+    { gimmick: 'vanish', weight: 5, minProgress: 0.5 },
+  ]
+
+  const gimmickChance = lerpNumber(0.15, 0.55, runProgress)
+  if (Math.random() > gimmickChance) return 'normal'
+
+  const eligible = pool.filter((entry) => runProgress >= entry.minProgress)
+  const totalWeight = eligible.reduce((sum, entry) => sum + entry.weight, 0)
+  let roll = Math.random() * totalWeight
+  for (const entry of eligible) {
+    roll -= entry.weight
+    if (roll <= 0) return entry.gimmick
+  }
+  return 'normal'
+}
+
+function getMaxJumpDistance(speed: number): number {
+  const airTime = JUMP_VELOCITY / Math.abs(GRAVITY_UP) + JUMP_VELOCITY / Math.abs(GRAVITY_DOWN)
+  return speed * airTime * 0.85
+}
+
+function addAnchorForGap(model: WorldModel, prevEndX: number, prevY: number, nextStartX: number, nextY: number): void {
+  const gapCenterX = (prevEndX + nextStartX) * 0.5 + randomBetween(-12, 12)
+  const anchorY = Math.max(prevY, nextY) + randomBetween(ANCHOR_MIN_HEIGHT * 0.7, ANCHOR_MAX_HEIGHT * 0.8)
+  model.anchors = [...model.anchors, { id: model.nextAnchorId, x: gapCenterX, y: anchorY }]
+  model.nextAnchorId += 1
+}
+
+function generateStairPattern(model: WorldModel, count: number, startX: number, baseY: number, stepUp: boolean): void {
+  const stepWidth = randomBetween(70, 110)
+  const stepGap = randomBetween(30, 50)
+  const stepHeight = randomBetween(14, 24)
+  let curX = startX
+  let curY = baseY
+  for (let i = 0; i < count; i += 1) {
+    curY = clampNumber(stepUp ? curY + stepHeight : curY - stepHeight, GROUND_MIN_HEIGHT, GROUND_MAX_HEIGHT)
+    const gimmick = i === count - 1 && Math.random() < 0.3 ? pickGimmick(0.3) : 'normal'
+    const seg: GroundSegment = {
+      id: model.nextGroundId,
+      startX: curX,
+      endX: curX + stepWidth,
+      y: curY,
+      gimmick,
+      crumbleTimer: 0,
+      crumbleActive: false,
+    }
+    model.groundSegments = [...model.groundSegments, seg]
+    model.nextGroundId += 1
+    if (i > 0 && stepGap > 40) {
+      addAnchorForGap(model, curX - stepGap, curY, curX, curY)
+    }
+    curX += stepWidth + stepGap
+  }
+  model.lastGeneratedX = curX - stepGap
+}
+
 function extendWorld(model: WorldModel, minAheadX: number): void {
   while (model.lastGeneratedX < minAheadX) {
     const previous = model.groundSegments[model.groundSegments.length - 1]
     const segmentIndex = model.nextGroundId
     const runProgress = getRunProgress(model.playerX)
+    const maxJump = getMaxJumpDistance(model.speed)
+
+    const patternRoll = Math.random()
+    if (runProgress > 0.15 && patternRoll < 0.12) {
+      const stairGap = randomBetween(60, 90)
+      const stairStartX = previous.endX + stairGap
+      const stairCount = Math.floor(randomBetween(3, 5))
+      generateStairPattern(model, stairCount, stairStartX, previous.y, Math.random() > 0.4)
+      continue
+    }
+
     const segmentLength = randomBetween(
-      MIN_SEGMENT_LENGTH + 16 * (1 - runProgress),
-      MAX_SEGMENT_LENGTH - 44 * runProgress,
+      lerpNumber(260, 150, runProgress),
+      lerpNumber(400, 250, runProgress),
     )
 
-    const speedRatio = model.speed / BASE_RUN_SPEED
-    const speedScale = clampNumber(speedRatio * speedRatio, 1, 4)
-    const adaptiveGapMin = MIN_GAP_LENGTH * lerpNumber(0.7, 1.2, runProgress) * speedScale
-    const adaptiveGapMax = MAX_GAP_LENGTH * lerpNumber(0.65, 1.1, runProgress) * speedScale
-    const gapLength = randomBetween(adaptiveGapMin, adaptiveGapMax)
+    const minGap = lerpNumber(60, 80, runProgress)
+    const maxGap = Math.min(maxJump * 0.9, lerpNumber(120, 200, runProgress))
+    const gapLength = randomBetween(minGap, Math.max(minGap + 20, maxGap))
+
+    const needsHook = gapLength > maxJump * 0.6
 
     const nextStartX = previous.endX + gapLength
     const nextEndX = nextStartX + segmentLength
-    const fallVariance = lerpNumber(18, 36, runProgress)
-    const climbVariance = lerpNumber(34, 56, runProgress)
-    const nextY = clampNumber(previous.y + randomBetween(-fallVariance, climbVariance), GROUND_MIN_HEIGHT, GROUND_MAX_HEIGHT)
 
-    const gimmickRoll = Math.random()
-    let gimmick: SegmentGimmick = 'normal'
-    if (runProgress > 0.1) {
-      if (gimmickRoll < 0.10 * runProgress) {
-        gimmick = 'crumble'
-      } else if (gimmickRoll < 0.18 * runProgress) {
-        gimmick = 'spring'
-      } else if (gimmickRoll < 0.26 * runProgress) {
-        gimmick = 'ice'
-      } else if (gimmickRoll < 0.34 * runProgress) {
-        gimmick = 'conveyor'
-      } else if (gimmickRoll < 0.44 * runProgress) {
-        gimmick = 'moving'
-      } else if (gimmickRoll < 0.52 * runProgress) {
-        gimmick = 'narrow'
-      } else if (gimmickRoll < 0.58 * runProgress) {
-        gimmick = 'boost'
-      } else if (gimmickRoll < 0.64 * runProgress) {
-        gimmick = 'gravity'
-      } else if (gimmickRoll < 0.72 * runProgress) {
-        gimmick = 'vanish'
-      } else if (gimmickRoll < 0.78 * runProgress) {
-        gimmick = 'trampoline'
-      }
-    }
+    const heightRange = lerpNumber(15, 50, runProgress)
+    const nextY = clampNumber(
+      previous.y + randomBetween(-heightRange, heightRange * 0.5),
+      GROUND_MIN_HEIGHT,
+      GROUND_MAX_HEIGHT,
+    )
 
-    const finalEndX = gimmick === 'narrow' ? nextStartX + Math.min(segmentLength, 90) : nextEndX
+    const gimmick = pickGimmick(runProgress)
+    const finalEndX = gimmick === 'narrow' ? nextStartX + Math.min(segmentLength, 80) : nextEndX
     const nextSegment: GroundSegment = {
       id: segmentIndex,
       startX: nextStartX,
@@ -451,20 +509,9 @@ function extendWorld(model: WorldModel, minAheadX: number): void {
     model.nextGroundId += 1
     model.lastGeneratedX = finalEndX
 
-    const gapCenterX = previous.endX + gapLength * 0.5 + randomBetween(-18, 18)
-    const earlyAnchorLowering = lerpNumber(32, 0, runProgress)
-    const anchorY =
-      Math.max(previous.y, nextY) +
-      randomBetween(ANCHOR_MIN_HEIGHT - earlyAnchorLowering, ANCHOR_MAX_HEIGHT - earlyAnchorLowering * 0.36)
-    model.anchors = [
-      ...model.anchors,
-      {
-        id: model.nextAnchorId,
-        x: gapCenterX,
-        y: anchorY,
-      },
-    ]
-    model.nextAnchorId += 1
+    if (needsHook || Math.random() < 0.7) {
+      addAnchorForGap(model, previous.endX, previous.y, nextStartX, nextY)
+    }
 
     const obstacleChance = lerpNumber(0.12, 0.56, runProgress)
     if (Math.random() < obstacleChance) {
@@ -526,12 +573,13 @@ function extendWorld(model: WorldModel, minAheadX: number): void {
     }
 
     if (Math.random() < lerpNumber(0.54, 0.34, runProgress)) {
+      const gapMidX = (previous.endX + nextStartX) * 0.5
       model.coins = [
         ...model.coins,
         {
           id: model.nextCoinId,
-          x: gapCenterX,
-          y: anchorY - randomBetween(30, 70),
+          x: gapMidX,
+          y: Math.max(previous.y, nextY) + randomBetween(80, 160),
         },
       ]
       model.nextCoinId += 1
@@ -559,7 +607,7 @@ function performJump(model: WorldModel): boolean {
   model.coyoteMs = 0
   model.jumpStartMs = model.elapsedMs
   model.jumpBufferMs = 0
-  model.statusText = '점프!'
+  model.statusText = 'Jump!'
   return true
 }
 
@@ -583,7 +631,7 @@ function tryAttachHook(model: WorldModel): boolean {
     .filter((candidate): candidate is { anchor: AnchorPoint; distance: number; score: number } => candidate !== null)
 
   if (candidates.length === 0) {
-    model.statusText = '훅 실패! 닿는 앵커가 없습니다.'
+    model.statusText = 'Hook failed! No anchor in range.'
     return false
   }
 
@@ -608,9 +656,9 @@ function tryAttachHook(model: WorldModel): boolean {
   if (model.comboChain >= 2) {
     const comboAttachBonus = (model.comboChain - 1) * 6
     model.trickPoints += comboAttachBonus
-    model.statusText = `훅 체인 x${model.comboChain} +${comboAttachBonus}`
+    model.statusText = `Hook Chain x${model.comboChain} +${comboAttachBonus}`
   } else {
-    model.statusText = '훅 부착!'
+    model.statusText = 'Hook attached!'
   }
   pushBurst(model, 'spark', chosen.anchor.x, chosen.anchor.y)
   return true
@@ -647,9 +695,9 @@ function releaseHook(model: WorldModel): void {
   if (releaseSpeed >= 580) {
     const releaseBonus = SCORE_TRICK_BONUS + comboReleaseBonus
     model.trickPoints += releaseBonus
-    model.statusText = `릴리즈 보너스 +${releaseBonus}`
+    model.statusText = `Release bonus +${releaseBonus}`
   } else {
-    model.statusText = '릴리즈!'
+    model.statusText = 'Release!'
   }
 
   model.rope = {
@@ -1000,29 +1048,31 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           const normalX = deltaX / distance
           const normalY = deltaY / distance
 
-          if (distance > activeLength) {
+          if (!currentModel.rope.extending && distance > activeLength) {
             currentModel.playerX = currentModel.rope.anchorX + normalX * activeLength
             currentModel.playerY = currentModel.rope.anchorY + normalY * activeLength
           }
 
-          const radialVelocity = currentModel.playerVx * normalX + currentModel.playerVy * normalY
-          currentModel.playerVx -= normalX * radialVelocity
-          currentModel.playerVy -= normalY * radialVelocity
+          if (!currentModel.rope.extending) {
+            const radialVelocity = currentModel.playerVx * normalX + currentModel.playerVy * normalY
+            currentModel.playerVx -= normalX * radialVelocity
+            currentModel.playerVy -= normalY * radialVelocity
 
-          let tangentX = -normalY
-          let tangentY = normalX
-          if (tangentX < 0) {
-            tangentX *= -1
-            tangentY *= -1
-          }
-          currentModel.playerVx += tangentX * HOOK_PULL_ACCEL * deltaSec
-          currentModel.playerVy += tangentY * HOOK_PULL_ACCEL * deltaSec
+            let tangentX = -normalY
+            let tangentY = normalX
+            if (tangentX < 0) {
+              tangentX *= -1
+              tangentY *= -1
+            }
+            currentModel.playerVx += tangentX * HOOK_PULL_ACCEL * deltaSec
+            currentModel.playerVy += tangentY * HOOK_PULL_ACCEL * deltaSec
 
-          const ropeSpeed = Math.hypot(currentModel.playerVx, currentModel.playerVy)
-          if (ropeSpeed > HOOK_MAX_SPEED) {
-            const ropeScale = HOOK_MAX_SPEED / ropeSpeed
-            currentModel.playerVx *= ropeScale
-            currentModel.playerVy *= ropeScale
+            const ropeSpeed = Math.hypot(currentModel.playerVx, currentModel.playerVy)
+            if (ropeSpeed > HOOK_MAX_SPEED) {
+              const ropeScale = HOOK_MAX_SPEED / ropeSpeed
+              currentModel.playerVx *= ropeScale
+              currentModel.playerVy *= ropeScale
+            }
           }
 
           currentModel.grounded = false
@@ -1044,14 +1094,14 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
                     targetGround.crumbleActive = true
                     currentModel.grounded = false
                     currentModel.coyoteMs = 0
-                    currentModel.statusText = '발판 붕괴!'
+                    currentModel.statusText = 'Platform collapse!'
                   }
                   break
                 case 'spring':
                   currentModel.playerVy = SPRING_BOOST
                   currentModel.grounded = false
                   currentModel.coyoteMs = 0
-                  currentModel.statusText = '스프링!'
+                  currentModel.statusText = 'Spring!'
                   pushBurst(currentModel, 'spark', currentModel.playerX, currentModel.playerY)
                   break
                 case 'ice':
@@ -1113,6 +1163,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             currentModel.playerVx = Math.max(currentModel.playerVx * frameDrag, Math.max(currentModel.speed * 0.85, HOOK_MIN_SPEED_FLOOR))
           }
 
+          const prevY = currentModel.playerY
           currentModel.playerX += currentModel.playerVx * deltaSec
           currentModel.playerY += currentModel.playerVy * deltaSec
 
@@ -1129,14 +1180,15 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             const landPhase = (currentModel.elapsedMs % MOVING_PERIOD_MS) / MOVING_PERIOD_MS
             landingY = landingGround.y + Math.sin(landPhase * Math.PI * 2) * MOVING_AMPLITUDE
           }
-          if (landingGround !== null && currentModel.playerY <= landingY && currentModel.playerVy <= 0) {
+          const wasAbove = prevY >= landingY
+          if (landingGround !== null && wasAbove && currentModel.playerY <= landingY && currentModel.playerVy <= 0) {
             currentModel.playerY = landingY
             currentModel.playerVy = 0
             currentModel.grounded = true
             currentModel.coyoteMs = COYOTE_TIME_MS
             if (!previousGrounded) {
               currentModel.comboChain = 0
-              currentModel.statusText = '착지 성공. 다시 점프/훅!'
+              currentModel.statusText = 'Landed! Jump/Hook again!'
             }
 
             if (currentModel.jumpBufferMs > 0) {
@@ -1174,7 +1226,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
           if (isHit) {
             currentModel.coinsCollected += 1
-            currentModel.statusText = `코인 획득 +${SCORE_COIN_BONUS}`
+            currentModel.statusText = `Coin collected +${SCORE_COIN_BONUS}`
             pushBurst(currentModel, 'spark', coin.x, coin.y)
             didCollectCoin = true
             return false
@@ -1210,13 +1262,13 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         })
 
         if (isObstacleHit) {
-          finishRound('장애물 충돌!', true)
+          finishRound('Obstacle hit!', true)
           animationFrameRef.current = null
           return
         }
 
         if (currentModel.playerY < -GROUND_SCREEN_OFFSET - PLAYER_HEIGHT) {
-          finishRound('낙사! 발판에서 떨어졌습니다.', true)
+          finishRound('Fell off the platform!', true)
           animationFrameRef.current = null
           return
         }
@@ -1478,7 +1530,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         })}
 
         <img
-          className="gogunbuntu-player"
+          className={`gogunbuntu-player${renderState.grounded ? ' running' : renderState.rope.active ? ' hooking' : ' airborne'}`}
           src={selectedPlayerSkin.imageSrc}
           alt={`${selectedPlayerSkin.name} runner`}
           style={{
@@ -1488,9 +1540,11 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             height: playerRenderHeight,
             transform: `rotate(${clampNumber(
               renderState.rope.active
-                ? Math.atan2(-renderState.playerVy, renderState.playerVx) * (180 / Math.PI) * 0.4
-                : renderState.playerVy * -0.006,
-              -30, 25,
+                ? Math.atan2(-renderState.playerVy, renderState.playerVx) * (180 / Math.PI) * 0.35
+                : renderState.grounded
+                  ? 0
+                  : renderState.playerVy * -0.005,
+              -20, 20,
             ).toFixed(1)}deg)`,
           }}
         />
@@ -1499,7 +1553,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           <p className="gogunbuntu-score">{renderState.score.toLocaleString()}</p>
           <p className="gogunbuntu-best">BEST {displayedBestScore.toLocaleString()}</p>
           <p className="gogunbuntu-meta">
-            {Math.round(renderState.playerVx * 0.36)} km/h · 코인 {renderState.coinsCollected} · 체인 x{Math.max(1, renderState.comboChain)}
+            {Math.round(renderState.playerVx * 0.36)} km/h · Coins {renderState.coinsCollected} · Chain x{Math.max(1, renderState.comboChain)}
           </p>
         </div>
 
@@ -1508,9 +1562,9 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             className="gogunbuntu-stage-button"
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => finishRound('라운드 종료', false)}
+            onClick={() => finishRound('Round FINISH', false)}
           >
-            종료
+            FINISH
           </button>
           <button
             className="gogunbuntu-stage-button ghost"
@@ -1518,7 +1572,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             onPointerDown={(event) => event.stopPropagation()}
             onClick={onExit}
           >
-            나가기
+            EXIT
           </button>
         </div>
       </div>
@@ -1529,8 +1583,8 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 export const gogunbuntuModule: MiniGameModule = {
   manifest: {
     id: 'gogunbuntu',
-    title: '고군분투',
-    description: '점프와 훅 스윙으로 지형을 넘고 장애물을 피하며 최대 점수를 노리는 액션 러너',
+    title: 'Gogunbuntu',
+    description: 'Action runner: jump and swing past obstacles for max score',
     unlockCost: 0,
     baseReward: 24,
     scoreRewardMultiplier: 0.95,

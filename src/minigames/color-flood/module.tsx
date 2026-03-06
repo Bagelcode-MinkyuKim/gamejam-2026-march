@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { MAX_FRAME_DELTA_MS } from '../../primitives/constants'
-import kimYeonjaImage from '../../../assets/images/same-character/kim-yeonja.png'
 import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
 import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import floodFillSfx from '../../../assets/sounds/color-flood-fill.mp3'
+import comboSfx from '../../../assets/sounds/color-flood-combo.mp3'
+import boardClearSfx from '../../../assets/sounds/color-flood-clear.mp3'
+import warningSfx from '../../../assets/sounds/color-flood-warning.mp3'
+import megaFloodSfx from '../../../assets/sounds/color-flood-mega.mp3'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
 
 const BOARD_SIZE = 8
@@ -142,6 +146,8 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [score, setScore] = useState(0)
   const [boardsCleared, setBoardsCleared] = useState(0)
   const [remainingMs, setRemainingMs] = useState(TIME_LIMIT_MS)
+  const [combo, setCombo] = useState(0)
+  const [showComboText, setShowComboText] = useState(false)
   const [changedCells, setChangedCells] = useState<boolean[][]>(() => {
     const empty: boolean[][] = []
     for (let row = 0; row < BOARD_SIZE; row += 1) {
@@ -150,12 +156,15 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     return empty
   })
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [waveRipple, setWaveRipple] = useState(false)
+  const [warningPlayed, setWarningPlayed] = useState(false)
 
   const boardRef = useRef<CellColor[][]>(board)
   const movesRemainingRef = useRef(MAX_MOVES)
   const scoreRef = useRef(0)
   const boardsClearedRef = useRef(0)
   const remainingMsRef = useRef(TIME_LIMIT_MS)
+  const comboRef = useRef(0)
   const finishedRef = useRef(false)
   const animationFrameRef = useRef<number | null>(null)
   const lastFrameAtRef = useRef<number | null>(null)
@@ -164,6 +173,11 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const tapHitAudioRef = useRef<HTMLAudioElement | null>(null)
   const tapHitStrongAudioRef = useRef<HTMLAudioElement | null>(null)
   const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const floodFillAudioRef = useRef<HTMLAudioElement | null>(null)
+  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
+  const boardClearAudioRef = useRef<HTMLAudioElement | null>(null)
+  const warningAudioRef = useRef<HTMLAudioElement | null>(null)
+  const megaFloodAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const playAudio = useCallback(
     (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
@@ -226,6 +240,7 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         return
       }
 
+      const prevFloodCount = countFloodedCells(currentBoard)
       const nextBoard = applyFloodFill(currentBoard, colorIndex)
       boardRef.current = nextBoard
 
@@ -247,13 +262,51 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
       const floodedCount = countFloodedCells(nextBoard)
       const floodedRatio = floodedCount / (BOARD_SIZE * BOARD_SIZE)
+      const cellsGained = floodedCount - prevFloodCount
+      const gainRatio = cellsGained / (BOARD_SIZE * BOARD_SIZE)
+      // Combo system: big floods (>15% gain) increase combo
+      let nextCombo = comboRef.current
+      if (gainRatio >= 0.15) {
+        nextCombo = Math.min(nextCombo + 1, 10)
+        comboRef.current = nextCombo
+        setCombo(nextCombo)
+        setShowComboText(true)
+        setTimeout(() => setShowComboText(false), 800)
+      } else {
+        nextCombo = Math.max(0, nextCombo - 1)
+        comboRef.current = nextCombo
+        setCombo(nextCombo)
+      }
 
-      if (floodedRatio > 0.6) {
+      // Combo score bonus
+      const comboMultiplier = 1 + nextCombo * 0.2
+      const basePoints = Math.floor(cellsGained * 2 * comboMultiplier)
+
+      if (basePoints > 0) {
+        const nextScore = scoreRef.current + basePoints
+        scoreRef.current = nextScore
+        setScore(nextScore)
+        effects.showScorePopup(basePoints, 200, 300)
+      }
+
+      // Sound & effects based on flood magnitude
+      if (floodedRatio > 0.8) {
+        // Mega flood
+        playAudio(megaFloodAudioRef, 0.6, 1)
+        effects.triggerFlash('rgba(20,184,166,0.35)')
+        effects.triggerShake(8, 300)
+        effects.spawnParticles(8, 200, 250)
+        setWaveRipple(true)
+        setTimeout(() => setWaveRipple(false), 500)
+      } else if (floodedRatio > 0.5) {
         playAudio(tapHitStrongAudioRef, 0.5, 0.95 + floodedRatio * 0.2)
         effects.triggerFlash('rgba(34,197,94,0.2)')
-        effects.spawnParticles(4, 200, 250)
+        effects.spawnParticles(5, 200, 250)
+      } else if (gainRatio >= 0.15) {
+        playAudio(comboAudioRef, 0.45, 1 + nextCombo * 0.05)
+        effects.spawnParticles(3, 200, 250)
       } else {
-        playAudio(tapHitAudioRef, 0.4, 1)
+        playAudio(floodFillAudioRef, 0.4, 1 + floodedRatio * 0.3)
         effects.spawnParticles(2, 200, 250)
       }
 
@@ -271,21 +324,25 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (isBoardSolved(nextBoard)) {
         const moveBonus = nextMovesRemaining * BONUS_PER_REMAINING_MOVE
         const clearScore = BOARD_CLEAR_BONUS + moveBonus
-        const nextScore = scoreRef.current + clearScore
-        scoreRef.current = nextScore
-        setScore(nextScore)
+        const totalClearScore = scoreRef.current + clearScore
+        scoreRef.current = totalClearScore
+        setScore(totalClearScore)
 
         const nextBoardsCleared = boardsClearedRef.current + 1
         boardsClearedRef.current = nextBoardsCleared
         setBoardsCleared(nextBoardsCleared)
 
-        playAudio(tapHitStrongAudioRef, 0.65, 1.1 + nextBoardsCleared * 0.05)
-        effects.comboHitBurst(200, 200, nextBoardsCleared * 3, clearScore, ['🎉', '🌟', '✨', '🎊'])
+        playAudio(boardClearAudioRef, 0.65, 1 + nextBoardsCleared * 0.05)
+        effects.comboHitBurst(200, 200, nextBoardsCleared * 3 + 5, clearScore, ['🎉', '🌟', '✨', '🎊'])
         effects.showScorePopup(clearScore, 200, 180)
+        effects.triggerShake(10, 400)
+        effects.triggerFlash('rgba(234,179,8,0.3)')
 
         window.setTimeout(() => {
           if (!finishedRef.current) {
             startNewBoard()
+            comboRef.current = 0
+            setCombo(0)
           }
         }, CELL_TRANSITION_MS + 200)
         return
@@ -300,11 +357,13 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         window.setTimeout(() => {
           if (!finishedRef.current) {
             startNewBoard()
+            comboRef.current = 0
+            setCombo(0)
           }
         }, CELL_TRANSITION_MS + 200)
       }
     },
-    [clearTransitionTimer, isTransitioning, playAudio, startNewBoard],
+    [clearTransitionTimer, effects, isTransitioning, playAudio, startNewBoard],
   )
 
   const handleExit = useCallback(() => {
@@ -313,26 +372,33 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   }, [onExit, playAudio])
 
   useEffect(() => {
-    const tapHitAudio = new Audio(tapHitSfx)
-    tapHitAudio.preload = 'auto'
-    tapHitAudioRef.current = tapHitAudio
+    const audios = [
+      { ref: tapHitAudioRef, src: tapHitSfx },
+      { ref: tapHitStrongAudioRef, src: tapHitStrongSfx },
+      { ref: gameOverAudioRef, src: gameOverHitSfx },
+      { ref: floodFillAudioRef, src: floodFillSfx },
+      { ref: comboAudioRef, src: comboSfx },
+      { ref: boardClearAudioRef, src: boardClearSfx },
+      { ref: warningAudioRef, src: warningSfx },
+      { ref: megaFloodAudioRef, src: megaFloodSfx },
+    ]
 
-    const tapHitStrongAudio = new Audio(tapHitStrongSfx)
-    tapHitStrongAudio.preload = 'auto'
-    tapHitStrongAudioRef.current = tapHitStrongAudio
-
-    const gameOverAudio = new Audio(gameOverHitSfx)
-    gameOverAudio.preload = 'auto'
-    gameOverAudioRef.current = gameOverAudio
+    const audioElements: HTMLAudioElement[] = []
+    for (const { ref, src } of audios) {
+      const audio = new Audio(src)
+      audio.preload = 'auto'
+      ref.current = audio
+      audioElements.push(audio)
+    }
 
     return () => {
-      for (const audio of [tapHitAudio, tapHitStrongAudio, gameOverAudio]) {
+      for (const audio of audioElements) {
         audio.pause()
         audio.currentTime = 0
       }
-      tapHitAudioRef.current = null
-      tapHitStrongAudioRef.current = null
-      gameOverAudioRef.current = null
+      for (const { ref } of audios) {
+        ref.current = null
+      }
     }
   }, [])
 
@@ -347,6 +413,14 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleExit])
+
+  // Warning sound at 10s
+  useEffect(() => {
+    if (remainingMs <= 10000 && !warningPlayed && !finishedRef.current) {
+      setWarningPlayed(true)
+      playAudio(warningAudioRef, 0.5, 1)
+    }
+  }, [remainingMs, warningPlayed, playAudio])
 
   useEffect(() => {
     const step = (now: number) => {
@@ -400,37 +474,63 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const currentTopLeftColor = board[0][0]
   const isLowTime = remainingMs <= 10000
+  const timerProgress = remainingMs / TIME_LIMIT_MS
 
   return (
     <section className="mini-game-panel color-flood-panel" aria-label="color-flood-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
-      <div className="color-flood-score-strip">
-        <p className="color-flood-score">{score.toLocaleString()}</p>
-        <p className="color-flood-best">BEST {displayedBestScore.toLocaleString()}</p>
-        <p className={`color-flood-time ${isLowTime ? 'low-time' : ''}`}>
-          {(remainingMs / 1000).toFixed(1)}s
-        </p>
+      {/* Top: Score & Timer */}
+      <div className="cf-top-bar">
+        <div className="cf-score-block">
+          <p className="cf-score">{score.toLocaleString()}</p>
+          <p className="cf-best">BEST {displayedBestScore.toLocaleString()}</p>
+        </div>
+        <div className="cf-timer-block">
+          <p className={`cf-time ${isLowTime ? 'low-time' : ''}`}>
+            {(remainingMs / 1000).toFixed(1)}s
+          </p>
+          <div className="cf-timer-bar">
+            <div className="cf-timer-fill" style={{ width: `${timerProgress * 100}%`, backgroundColor: isLowTime ? '#ef4444' : '#14b8a6' }} />
+          </div>
+        </div>
       </div>
 
-      <div className="color-flood-meta-row">
-        <p className="color-flood-moves">
-          MOVES <strong>{movesRemaining}</strong>/{MAX_MOVES}
-        </p>
-        <p className="color-flood-cleared">
-          CLEARED <strong>{boardsCleared}</strong>
-        </p>
-        <p className="color-flood-progress">
-          FILLED <strong>{floodedPercent}%</strong>
-        </p>
+      {/* Combo indicator */}
+      {combo > 0 && (
+        <div className={`cf-combo ${showComboText ? 'cf-combo-pop' : ''}`}>
+          COMBO x{combo}
+        </div>
+      )}
+
+      {/* Meta info row */}
+      <div className="cf-meta-row">
+        <div className="cf-meta-item">
+          <span className="cf-meta-label">MOVES</span>
+          <span className="cf-meta-value">{movesRemaining}</span>
+        </div>
+        <div className="cf-meta-item">
+          <span className="cf-meta-label">CLEAR</span>
+          <span className="cf-meta-value">{boardsCleared}</span>
+        </div>
+        <div className="cf-meta-item">
+          <span className="cf-meta-label">FILL</span>
+          <span className="cf-meta-value">{floodedPercent}%</span>
+        </div>
       </div>
 
-      <div className="color-flood-board" role="grid" aria-label="color-flood-board">
+      {/* Fill progress bar */}
+      <div className="cf-fill-bar-container">
+        <div className="cf-fill-bar" style={{ width: `${floodedPercent}%` }} />
+      </div>
+
+      {/* Board - takes remaining space */}
+      <div className={`cf-board ${waveRipple ? 'cf-wave' : ''}`} role="grid" aria-label="color-flood-board">
         {board.map((row, rowIndex) => (
-          <div className="color-flood-row" key={`row-${rowIndex}`} role="row">
+          <div className="cf-row" key={`row-${rowIndex}`} role="row">
             {row.map((cellColor, colIndex) => {
               const isChanged = changedCells[rowIndex]?.[colIndex] ?? false
               return (
                 <div
-                  className={`color-flood-cell ${isChanged ? 'changed' : ''}`}
+                  className={`cf-cell ${isChanged ? 'changed' : ''}`}
                   key={`cell-${rowIndex}-${colIndex}`}
                   role="gridcell"
                   style={{
@@ -447,16 +547,13 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         ))}
       </div>
 
-      <div className="color-flood-character" style={{ textAlign: 'center', margin: '4px 0' }}>
-        <img src={kimYeonjaImage} alt="김연자" style={{ width: '80px', height: '80px', objectFit: 'contain', imageRendering: 'pixelated' }} />
-      </div>
-
-      <div className="color-flood-color-buttons" role="group" aria-label="color selection">
+      {/* Color buttons - large at bottom */}
+      <div className="cf-color-buttons" role="group" aria-label="color selection">
         {BOARD_COLORS.map((hex, colorIndex) => {
           const isCurrentColor = colorIndex === currentTopLeftColor
           return (
             <button
-              className={`color-flood-color-button ${isCurrentColor ? 'active' : ''}`}
+              className={`cf-color-btn ${isCurrentColor ? 'active' : ''}`}
               key={`color-btn-${colorIndex}`}
               type="button"
               disabled={isCurrentColor || movesRemaining <= 0}
@@ -476,163 +573,260 @@ function ColorFloodGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 6px;
-          padding: 8px;
+          justify-content: space-between;
+          padding: 12px 12px 16px;
           width: 100%;
+          height: 100%;
           user-select: none;
           -webkit-user-select: none;
           position: relative;
+          gap: 0;
+          background: linear-gradient(180deg, #f5f4ef 0%, #ede9df 50%, #e8e5dc 100%);
         }
 
-        .color-flood-score-strip {
+        /* ── Top Bar ── */
+        .cf-top-bar {
           display: flex;
           justify-content: space-between;
-          align-items: baseline;
+          align-items: flex-start;
           width: 100%;
-          padding: 0 4px;
+          padding: 0 2px;
+          flex-shrink: 0;
         }
 
-        .color-flood-score {
-          font-size: 28px;
-          font-weight: 800;
-          color: #14b8a6;
+        .cf-score-block {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+        }
+
+        .cf-score {
+          font-size: clamp(38px, 10vw, 52px);
+          font-weight: 900;
+          color: #0d9488;
           margin: 0;
           line-height: 1;
+          text-shadow: 0 2px 8px rgba(13,148,136,0.25);
         }
 
-        .color-flood-best {
-          font-size: 12px;
-          font-weight: 600;
-          color: #94a3b8;
-          margin: 0;
-        }
-
-        .color-flood-time {
-          font-size: 18px;
+        .cf-best {
+          font-size: clamp(13px, 3.5vw, 16px);
           font-weight: 700;
-          color: #e2e8f0;
+          color: #9ca3af;
           margin: 0;
+        }
+
+        .cf-timer-block {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 4px;
+        }
+
+        .cf-time {
+          font-size: clamp(30px, 7.5vw, 42px);
+          font-weight: 800;
+          color: #374151;
+          margin: 0;
+          line-height: 1;
           transition: color 0.2s;
         }
 
-        .color-flood-time.low-time {
+        .cf-time.low-time {
           color: #ef4444;
-          animation: color-flood-pulse 0.5s ease-in-out infinite alternate;
+          animation: cf-pulse 0.4s ease-in-out infinite alternate;
+          text-shadow: 0 0 12px rgba(239,68,68,0.5);
         }
 
-        @keyframes color-flood-pulse {
-          from { opacity: 1; }
-          to { opacity: 0.5; }
+        @keyframes cf-pulse {
+          from { opacity: 1; transform: scale(1); }
+          to { opacity: 0.6; transform: scale(1.08); }
         }
 
-        .color-flood-meta-row {
+        .cf-timer-bar {
+          width: clamp(90px, 28vw, 140px);
+          height: 8px;
+          background: #d1d5db;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+
+        .cf-timer-fill {
+          height: 100%;
+          border-radius: 4px;
+          transition: width 0.3s linear, background-color 0.3s;
+        }
+
+        /* ── Combo ── */
+        .cf-combo {
+          font-size: clamp(22px, 6vw, 32px);
+          font-weight: 900;
+          color: #d97706;
+          text-shadow: 0 2px 8px rgba(217,119,6,0.35);
+          margin: 4px 0;
+          flex-shrink: 0;
+          transition: transform 0.2s;
+        }
+
+        .cf-combo-pop {
+          animation: cf-combo-burst 0.5s ease-out;
+        }
+
+        @keyframes cf-combo-burst {
+          0% { transform: scale(0.5); opacity: 0; }
+          40% { transform: scale(1.4); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ── Meta Row ── */
+        .cf-meta-row {
           display: flex;
           justify-content: center;
-          gap: 12px;
+          gap: clamp(20px, 7vw, 36px);
           width: 100%;
-          padding: 2px 0;
+          padding: 6px 0 4px;
+          flex-shrink: 0;
         }
 
-        .color-flood-moves,
-        .color-flood-cleared,
-        .color-flood-progress {
-          font-size: 12px;
-          font-weight: 600;
-          color: #94a3b8;
-          margin: 0;
-        }
-
-        .color-flood-moves strong,
-        .color-flood-cleared strong,
-        .color-flood-progress strong {
-          color: #14b8a6;
-        }
-
-        .color-flood-board {
-          width: 100%;
-          max-width: 340px;
-          aspect-ratio: 1;
+        .cf-meta-item {
           display: flex;
           flex-direction: column;
-          gap: 1px;
-          background: #1e293b;
-          border-radius: 8px;
+          align-items: center;
+          gap: 0;
+        }
+
+        .cf-meta-label {
+          font-size: clamp(11px, 3vw, 14px);
+          font-weight: 800;
+          color: #9ca3af;
+          letter-spacing: 0.08em;
+        }
+
+        .cf-meta-value {
+          font-size: clamp(26px, 7vw, 36px);
+          font-weight: 900;
+          color: #0d9488;
+          line-height: 1;
+        }
+
+        /* ── Fill Progress Bar ── */
+        .cf-fill-bar-container {
+          width: 100%;
+          height: 10px;
+          background: #d1d5db;
+          border-radius: 5px;
           overflow: hidden;
-          border: 2px solid #334155;
+          margin: 4px 0 8px;
+          flex-shrink: 0;
+          border: 1px solid #c4c8ce;
         }
 
-        .color-flood-row {
+        .cf-fill-bar {
+          height: 100%;
+          background: linear-gradient(90deg, #14b8a6, #06b6d4);
+          border-radius: 5px;
+          transition: width 0.3s ease-out;
+          box-shadow: 0 0 6px rgba(20,184,166,0.3);
+        }
+
+        /* ── Board (square) ── */
+        .cf-board {
+          width: 100%;
+          aspect-ratio: 1;
+          max-height: calc(100% - 260px);
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          background: #e2e0d8;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 3px solid #c4c0b6;
+          padding: 3px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
+
+        .cf-board.cf-wave {
+          animation: cf-wave-ripple 0.5s ease-out;
+        }
+
+        @keyframes cf-wave-ripple {
+          0% { box-shadow: 0 0 0 0 rgba(20,184,166,0.4), 0 4px 16px rgba(0,0,0,0.1); }
+          100% { box-shadow: 0 0 0 16px rgba(20,184,166,0), 0 4px 16px rgba(0,0,0,0.1); }
+        }
+
+        .cf-row {
           display: flex;
           flex: 1;
-          gap: 1px;
+          gap: 3px;
         }
 
-        .color-flood-cell {
+        .cf-cell {
           flex: 1;
-          border-radius: 2px;
+          border-radius: 4px;
+          box-shadow: inset 0 -2px 4px rgba(0,0,0,0.15), inset 0 2px 3px rgba(255,255,255,0.25);
         }
 
-        .color-flood-cell.changed {
-          animation: color-flood-cell-pop 0.28s ease-out;
+        .cf-cell.changed {
+          animation: cf-cell-pop 0.3s ease-out;
         }
 
-        @keyframes color-flood-cell-pop {
-          0% { transform: scale(0.85); }
-          50% { transform: scale(1.05); }
-          100% { transform: scale(1); }
+        @keyframes cf-cell-pop {
+          0% { transform: scale(0.65); opacity: 0.5; }
+          50% { transform: scale(1.1); }
+          100% { transform: scale(1); opacity: 1; }
         }
 
-        .color-flood-color-buttons {
+        /* ── Color Buttons ── */
+        .cf-color-buttons {
           display: flex;
-          gap: 8px;
+          gap: clamp(10px, 3vw, 16px);
           justify-content: center;
-          padding: 4px 0;
+          padding: 12px 0 6px;
+          flex-shrink: 0;
+          width: 100%;
         }
 
-        .color-flood-color-button {
-          width: 44px;
-          height: 44px;
+        .cf-color-btn {
+          width: clamp(52px, 14vw, 64px);
+          height: clamp(52px, 14vw, 64px);
           border-radius: 50%;
-          border: 3px solid rgba(255, 255, 255, 0.2);
+          border: 4px solid rgba(255, 255, 255, 0.5);
           cursor: pointer;
-          transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
-          font-size: 14px;
+          transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+          font-size: clamp(18px, 5vw, 24px);
           color: #fff;
           display: flex;
           align-items: center;
           justify-content: center;
           font-family: inherit;
           padding: 0;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15), inset 0 2px 4px rgba(255,255,255,0.3);
         }
 
-        .color-flood-color-button:hover:not(:disabled) {
-          transform: scale(1.1);
-          border-color: rgba(255, 255, 255, 0.5);
+        .cf-color-btn:hover:not(:disabled) {
+          transform: scale(1.15);
+          border-color: rgba(255, 255, 255, 0.8);
         }
 
-        .color-flood-color-button:active:not(:disabled) {
-          transform: scale(0.92);
+        .cf-color-btn:active:not(:disabled) {
+          transform: scale(0.88);
         }
 
-        .color-flood-color-button:disabled {
+        .cf-color-btn:disabled {
           cursor: default;
-          opacity: 0.5;
+          opacity: 0.35;
         }
 
-        .color-flood-color-button.active {
+        .cf-color-btn.active {
           border-color: #fff;
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+          box-shadow: 0 0 20px rgba(255, 255, 255, 0.5), 0 4px 12px rgba(0,0,0,0.15);
           opacity: 1;
-          transform: scale(1.1);
+          transform: scale(1.18);
         }
       `}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
-
-      <button className="text-button" type="button" onClick={handleExit}>
-        허브로 돌아가기
-      </button>
     </section>
   )
 }
@@ -641,7 +835,7 @@ export const colorFloodModule: MiniGameModule = {
   manifest: {
     id: 'color-flood',
     title: 'Color Flood',
-    description: '색을 선택해 보드를 한 색으로 채워라! 적은 이동으로 클리어하면 고득점!',
+    description: 'Pick colors to fill the board! Fewer moves = higher score!',
     unlockCost: 55,
     baseReward: 18,
     scoreRewardMultiplier: 1.25,

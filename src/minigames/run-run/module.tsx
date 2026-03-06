@@ -810,7 +810,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [turnCount, setTurnCount] = useState(0)
   const [score, setScore] = useState(0)
   const [moveDirection, setMoveDirectionState] = useState<MoveDirection>('right')
-  const [statusText, setStatusText] = useState('자동 출발! 좌/우 터치로 방향 전환하세요.')
+  const [statusText, setStatusText] = useState('Auto start! Tap L/R to turn.')
 
   const roadRef = useRef<RoadSegment[]>(roadSegments)
   const playerRef = useRef<Point>(player)
@@ -904,7 +904,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
 
       if (hasDirectionChanged) {
         setTurnCount((previous) => previous + 1)
-        setStatusText(nextDirection === 'left' ? '좌측으로 이동 중' : '우측으로 이동 중')
+        setStatusText(nextDirection === 'left' ? 'Moving left' : 'Moving right')
         const turnRate = 0.94 + (speedRef.current / MAX_SPEED) * 0.22
         playSfx(turnAudioRef.current, 0.4, turnRate)
       }
@@ -1048,7 +1048,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
       setScore(toScore(travelDistanceRef.current))
 
       if (!isSafe) {
-        setStatusText('벽에 닿았습니다. 라운드 종료!')
+        setStatusText('Hit the wall. Round over!')
         playSfx(crashAudioRef.current, 0.62, 0.95)
         finishRound()
         animationFrameRef.current = null
@@ -1123,12 +1123,12 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
           <p className="run-run-score">{score}</p>
           <p className="run-run-best">BEST {displayedBestScore}</p>
           <p className="run-run-meta">
-            속도 {speed.toFixed(1)} · 전환 {turnCount} · {(elapsedMs / 1000).toFixed(1)}s · 이동 {travelDistance.toFixed(0)}
+            Speed {speed.toFixed(1)} · Turns {turnCount} · {(elapsedMs / 1000).toFixed(1)}s · Moves {travelDistance.toFixed(0)}
           </p>
         </div>
 
         <p className="run-run-status">{statusText}</p>
-        <p className="zigzag-tap-hint">왼쪽/오른쪽 터치로 방향 전환</p>
+        <p className="zigzag-tap-hint">Tap left/right to turn</p>
 
         <div className="run-run-overlay-actions">
           <button
@@ -1140,7 +1140,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
               finishRound()
             }}
           >
-            종료
+            FINISH
           </button>
           <button
             className="run-run-action-button ghost"
@@ -1148,7 +1148,7 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
             onPointerDown={(event) => event.stopPropagation()}
             onClick={onExit}
           >
-            나가기
+            EXIT
           </button>
         </div>
       </div>
@@ -1159,8 +1159,8 @@ function RunRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
 export const runRunModule: MiniGameModule = {
   manifest: {
     id: 'run-run',
-    title: '달려달려',
-    description: '탭할 때마다 좌우 전환하며 지그재그 길 위를 최대한 멀리 가는 탑뷰 게임',
+    title: 'Run Run',
+    description: 'Tap to turn on a zigzag path, go as far as you can',
     unlockCost: 60,
     baseReward: 14,
     scoreRewardMultiplier: 0.7,

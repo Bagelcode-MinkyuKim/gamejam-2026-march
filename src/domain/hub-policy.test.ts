@@ -24,7 +24,7 @@ const manifests: MiniGameManifest[] = [
   },
   {
     id: 'gogunbuntu',
-    title: '고군분투',
+    title: 'Gogunbuntu',
     description: 'desc',
     unlockCost: 120,
     baseReward: 18,
@@ -34,7 +34,7 @@ const manifests: MiniGameManifest[] = [
 ]
 
 describe('hub-policy', () => {
-  it('해금 시 코인이 차감되고 상태가 열린다', () => {
+  it('deducts coins and opens the game on unlock', () => {
     const progress = createInitialProgress(100, ['tap-dash'])
     const result = unlockMiniGame(progress, manifests, 'run-run')
 
@@ -43,13 +43,13 @@ describe('hub-policy', () => {
     expect(result.updatedProgress.unlockedMiniGameIds).toContain('run-run')
   })
 
-  it('코인이 부족하면 해금에 실패한다', () => {
+  it('fails to unlock when coins are insufficient', () => {
     const progress = createInitialProgress(10, ['tap-dash'])
 
     expect(() => unlockMiniGame(progress, manifests, 'run-run')).toThrowError(/Need 60 coins/)
   })
 
-  it('플레이 완료 시 보상, 플레이 횟수, 최고점이 갱신된다', () => {
+  it('updates reward, play count, and best score on completion', () => {
     const progress = createInitialProgress(100, ['tap-dash'])
     const completed = completeMiniGame(progress, manifests, 'tap-dash', {
       score: 15,
@@ -62,7 +62,7 @@ describe('hub-policy', () => {
     expect(completed.updatedProgress.bestScores['tap-dash']).toBe(15)
   })
 
-  it('잠긴 게임은 활성 상태 스냅샷을 만들 수 없다', () => {
+  it('cannot create active snapshot for a locked game', () => {
     const progress = createInitialProgress(30, ['tap-dash'])
 
     expect(() => toHubSnapshot(progress, manifests, 'run-run', 'run-run')).toThrowError(

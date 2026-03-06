@@ -34,7 +34,7 @@ const manifests: MiniGameManifest[] = [
   },
   {
     id: 'gogunbuntu',
-    title: '고군분투',
+    title: 'Gogunbuntu',
     description: 'desc',
     unlockCost: 120,
     baseReward: 14,
@@ -49,7 +49,7 @@ const bootstrapConfig = {
 }
 
 describe('GameHubUseCases', () => {
-  it('최초 로드 시 진행 데이터를 생성한다', async () => {
+  it('creates progress data on first load', async () => {
     const store = new InMemoryProgressStore()
     const useCases = new GameHubUseCases(store, manifests, bootstrapConfig)
 
@@ -60,7 +60,7 @@ describe('GameHubUseCases', () => {
     expect(snapshot.cards.find((card) => card.manifest.id === 'run-run')?.unlocked).toBe(false)
   })
 
-  it('해금 후 해당 게임이 열린다', async () => {
+  it('unlocks the game after spending coins', async () => {
     const store = new InMemoryProgressStore()
     const useCases = new GameHubUseCases(store, manifests, {
       initialCoins: 100,
@@ -73,7 +73,7 @@ describe('GameHubUseCases', () => {
     expect(snapshot.cards.find((card) => card.manifest.id === 'run-run')?.unlocked).toBe(true)
   })
 
-  it('플레이 완료 시 보상 코인이 반영된다', async () => {
+  it('awards reward coins on play completion', async () => {
     const store = new InMemoryProgressStore()
     const useCases = new GameHubUseCases(store, manifests, bootstrapConfig)
 
@@ -91,7 +91,7 @@ describe('GameHubUseCases', () => {
     expect(result.snapshot.cards.find((card) => card.manifest.id === 'tap-dash')?.playCount).toBe(1)
   })
 
-  it('기존 저장 데이터에도 스타터 해금 목록을 자동 반영한다', async () => {
+  it('auto-applies starter unlock list to existing save data', async () => {
     const store = new InMemoryProgressStore(createInitialProgress(30, ['tap-dash']))
     const useCases = new GameHubUseCases(store, manifests, {
       initialCoins: 30,

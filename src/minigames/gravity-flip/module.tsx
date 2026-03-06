@@ -1,65 +1,97 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
-import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
+import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 import parkWankyuSprite from '../../../assets/images/same-character/park-wankyu.png'
-import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
-import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
-import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
-const STAGE_WIDTH = 360
-const STAGE_HEIGHT = 480
-const GROUND_HEIGHT = 40
-const CEILING_HEIGHT = 40
-const PLAY_AREA_TOP = CEILING_HEIGHT
-const PLAY_AREA_BOTTOM = STAGE_HEIGHT - GROUND_HEIGHT
+import flipSfxUrl from '../../../assets/sounds/gravity-flip-flip.mp3'
+import coinSfxUrl from '../../../assets/sounds/gravity-flip-coin.mp3'
+import magnetSfxUrl from '../../../assets/sounds/gravity-flip-magnet.mp3'
+import milestoneSfxUrl from '../../../assets/sounds/gravity-flip-milestone.mp3'
+import crashSfxUrl from '../../../assets/sounds/gravity-flip-crash.mp3'
+import comboSfxUrl from '../../../assets/sounds/gravity-flip-combo.mp3'
+import shieldSfxUrl from '../../../assets/sounds/gravity-flip-shield.mp3'
+import feverSfxUrl from '../../../assets/sounds/gravity-flip-fever.mp3'
 
-const PLAYER_X = 70
-const PLAYER_WIDTH = 48
-const PLAYER_HEIGHT = 48
-const PLAYER_COLLIDER_WIDTH = 28
-const PLAYER_COLLIDER_HEIGHT = 38
+// ─── Stage uses percentage-based layout for full 9:16 utilization ───
+const GROUND_HEIGHT_PCT = 5.2
+const CEILING_HEIGHT_PCT = 5.2
+const PLAY_TOP_PCT = CEILING_HEIGHT_PCT
+const PLAY_BOTTOM_PCT = 100 - GROUND_HEIGHT_PCT
 
-const GRAVITY_STRENGTH = 1800
-const MAX_FALL_SPEED = 680
-const FLIP_IMPULSE = 420
+const PLAYER_X_PCT = 18
+const PLAYER_SIZE_PCT = 8.5
 
-const BASE_SCROLL_SPEED = 180
-const MAX_SCROLL_SPEED = 380
-const SPEED_ACCEL_PER_SECOND = 8
+const GRAVITY_STRENGTH = 2200
+const MAX_FALL_SPEED = 780
+const FLIP_IMPULSE = 500
 
-const OBSTACLE_WIDTH = 40
-const OBSTACLE_MIN_HEIGHT = 80
-const OBSTACLE_MAX_HEIGHT = 200
-const OBSTACLE_SPAWN_INTERVAL_MIN_MS = 900
-const OBSTACLE_SPAWN_INTERVAL_MAX_MS = 1800
-const OBSTACLE_SPAWN_INTERVAL_FLOOR_MS = 600
+const BASE_SCROLL_SPEED = 200
+const MAX_SCROLL_SPEED = 420
+const SPEED_ACCEL_PER_SECOND = 9
 
-const COIN_SIZE = 24
-const COIN_COLLIDER_RADIUS = 14
-const COIN_SPAWN_CHANCE = 0.55
+const OBSTACLE_WIDTH_PCT = 7
+const OBSTACLE_MIN_HEIGHT_PCT = 14
+
+const OBSTACLE_SPAWN_INTERVAL_MIN_MS = 850
+const OBSTACLE_SPAWN_INTERVAL_MAX_MS = 1700
+const OBSTACLE_SPAWN_INTERVAL_FLOOR_MS = 550
+
+const COIN_SIZE_PCT = 4.5
+const COIN_SPAWN_CHANCE = 0.6
 const COIN_SCORE_BONUS = 50
 
-const MAGNET_SIZE = 20
-const MAGNET_SPAWN_CHANCE = 0.12
+const MAGNET_SIZE_PCT = 3.8
+const MAGNET_SPAWN_CHANCE = 0.1
 const MAGNET_DURATION_MS = 5000
-const MAGNET_ATTRACT_RADIUS = 120
-const MAGNET_ATTRACT_SPEED = 300
+const MAGNET_ATTRACT_RADIUS_PCT = 20
+const MAGNET_ATTRACT_SPEED_PCT = 50
+
+const SHIELD_SPAWN_CHANCE = 0.08
+const SHIELD_DURATION_MS = 4000
+
+const DOUBLE_COIN_SPAWN_CHANCE = 0.07
+const DOUBLE_COIN_DURATION_MS = 6000
+
+const SPEED_ZONE_WIDTH_PCT = 12
+const SPEED_ZONE_SPAWN_CHANCE = 0.04
+const SPEED_ZONE_BOOST = 1.5
+const SPEED_ZONE_DURATION_MS = 3000
 
 const COIN_COMBO_DECAY_MS = 2000
-const COIN_COMBO_MULTIPLIER_CAP = 5
+const COIN_COMBO_MULTIPLIER_CAP = 8
+
+const FEVER_THRESHOLD_COINS = 10
+const FEVER_DURATION_MS = 8000
+const FEVER_SCORE_MULTIPLIER = 3
 
 const DISTANCE_MILESTONE = 2000
 const MILESTONE_BONUS = 100
 
-const SCORE_DISTANCE_MULTIPLIER = 0.12
+const SCORE_DISTANCE_MULTIPLIER = 0.14
 const GAME_TIMEOUT_MS = 120000
+
+// ─── Difficulty Phases ───
+interface DifficultyPhase {
+  readonly name: string
+  readonly minElapsedMs: number
+  readonly obstacleSpeedMult: number
+  readonly spawnRateMult: number
+  readonly maxObstacleHeightPct: number
+}
+const DIFFICULTY_PHASES: DifficultyPhase[] = [
+  { name: 'EASY', minElapsedMs: 0, obstacleSpeedMult: 1, spawnRateMult: 1, maxObstacleHeightPct: 28 },
+  { name: 'NORMAL', minElapsedMs: 15000, obstacleSpeedMult: 1.15, spawnRateMult: 0.9, maxObstacleHeightPct: 33 },
+  { name: 'HARD', minElapsedMs: 35000, obstacleSpeedMult: 1.3, spawnRateMult: 0.78, maxObstacleHeightPct: 38 },
+  { name: 'INSANE', minElapsedMs: 60000, obstacleSpeedMult: 1.5, spawnRateMult: 0.65, maxObstacleHeightPct: 42 },
+]
 
 interface Obstacle {
   readonly id: number
-  readonly x: number
-  readonly height: number
+  x: number
+  readonly heightPct: number
   readonly fromTop: boolean
+  readonly gapPct?: number
 }
 
 interface Coin {
@@ -67,13 +99,21 @@ interface Coin {
   x: number
   y: number
   collected: boolean
+  readonly isDouble: boolean
 }
 
-interface MagnetPowerup {
+interface Powerup {
   readonly id: number
   x: number
   readonly y: number
   collected: boolean
+  readonly type: 'magnet' | 'shield' | 'double-coin'
+}
+
+interface SpeedZone {
+  readonly id: number
+  x: number
+  readonly widthPct: number
 }
 
 interface GameModel {
@@ -87,31 +127,38 @@ interface GameModel {
   coinsCollected: number
   obstacles: Obstacle[]
   coins: Coin[]
-  magnets: MagnetPowerup[]
-  nextObstacleId: number
-  nextCoinId: number
-  nextMagnetId: number
+  powerups: Powerup[]
+  speedZones: SpeedZone[]
+  nextId: number
   timeSinceLastObstacle: number
   nextObstacleInterval: number
   magnetActiveMs: number
+  shieldActiveMs: number
+  doubleCoinActiveMs: number
+  speedBoostActiveMs: number
   coinCombo: number
   lastCoinCollectMs: number
   lastMilestone: number
+  feverActiveMs: number
+  feverCoinsAccum: number
+  currentPhase: number
+  flipCount: number
+  nearMissCount: number
   statusText: string
+  statusTimer: number
 }
 
-function clampNumber(value: number, min: number, max: number): number {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-function randomBetween(min: number, max: number): number {
+function rand(min: number, max: number): number {
   return min + Math.random() * (max - min)
 }
 
 function createInitialModel(): GameModel {
-  const startY = PLAY_AREA_BOTTOM - PLAYER_HEIGHT / 2 - 10
   return {
-    playerY: startY,
+    playerY: PLAY_BOTTOM_PCT - PLAYER_SIZE_PCT / 2 - 2,
     playerVy: 0,
     gravityDirection: 1,
     scrollSpeed: BASE_SCROLL_SPEED,
@@ -121,18 +168,33 @@ function createInitialModel(): GameModel {
     coinsCollected: 0,
     obstacles: [],
     coins: [],
-    magnets: [],
-    nextObstacleId: 0,
-    nextCoinId: 0,
-    nextMagnetId: 0,
+    powerups: [],
+    speedZones: [],
+    nextId: 0,
     timeSinceLastObstacle: 0,
     nextObstacleInterval: 1200,
     magnetActiveMs: 0,
+    shieldActiveMs: 0,
+    doubleCoinActiveMs: 0,
+    speedBoostActiveMs: 0,
     coinCombo: 0,
     lastCoinCollectMs: 0,
     lastMilestone: 0,
-    statusText: '탭하여 중력을 반전시키세요!',
+    feverActiveMs: 0,
+    feverCoinsAccum: 0,
+    currentPhase: 0,
+    flipCount: 0,
+    nearMissCount: 0,
+    statusText: 'Tap to flip gravity!',
+    statusTimer: 3000,
   }
+}
+
+function getCurrentPhase(elapsedMs: number): number {
+  for (let i = DIFFICULTY_PHASES.length - 1; i >= 0; i--) {
+    if (elapsedMs >= DIFFICULTY_PHASES[i].minElapsedMs) return i
+  }
+  return 0
 }
 
 function rectsOverlap(
@@ -142,28 +204,49 @@ function rectsOverlap(
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
 }
 
-function circleRectOverlap(
-  cx: number, cy: number, cr: number,
-  rx: number, ry: number, rw: number, rh: number,
-): boolean {
-  const nearestX = clampNumber(cx, rx, rx + rw)
-  const nearestY = clampNumber(cy, ry, ry + rh)
-  const dx = cx - nearestX
-  const dy = cy - nearestY
-  return dx * dx + dy * dy <= cr * cr
-}
-
-function computeObstacleInterval(elapsedMs: number): number {
-  const progress = clampNumber(elapsedMs / 60000, 0, 1)
+function computeObstacleInterval(elapsedMs: number, phaseMult: number): number {
+  const progress = clamp(elapsedMs / 60000, 0, 1)
   const intervalRange = OBSTACLE_SPAWN_INTERVAL_MAX_MS - OBSTACLE_SPAWN_INTERVAL_FLOOR_MS
   return Math.max(
     OBSTACLE_SPAWN_INTERVAL_FLOOR_MS,
-    OBSTACLE_SPAWN_INTERVAL_MIN_MS - progress * intervalRange * 0.4 + randomBetween(-100, 100),
+    (OBSTACLE_SPAWN_INTERVAL_MIN_MS - progress * intervalRange * 0.4 + rand(-100, 100)) * phaseMult,
   )
 }
 
+function computeScore(model: GameModel): number {
+  const distanceScore = Math.max(0, Math.floor(model.distanceTraveled * SCORE_DISTANCE_MULTIPLIER))
+  const comboMult = 1 + model.coinCombo * 0.25
+  const feverMult = model.feverActiveMs > 0 ? FEVER_SCORE_MULTIPLIER : 1
+  const coinScore = Math.floor(model.coinsCollected * COIN_SCORE_BONUS * comboMult * feverMult)
+  const milestoneScore = model.lastMilestone * MILESTONE_BONUS
+  const nearMissBonus = model.nearMissCount * 25
+  const flipBonus = Math.floor(model.flipCount * 2)
+  return distanceScore + coinScore + milestoneScore + nearMissBonus + flipBonus
+}
+
+// ─── Sound manager ───
+function createSfxPool(url: string, poolSize = 3): { play: (vol: number, rate?: number) => void } {
+  const pool: HTMLAudioElement[] = []
+  let idx = 0
+  for (let i = 0; i < poolSize; i++) {
+    const a = new Audio(url)
+    a.preload = 'auto'
+    pool.push(a)
+  }
+  return {
+    play(vol: number, rate = 1) {
+      const audio = pool[idx % pool.length]
+      idx++
+      audio.currentTime = 0
+      audio.volume = vol
+      audio.playbackRate = rate
+      void audio.play().catch(() => {})
+    },
+  }
+}
+
 function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const effects = useGameEffects()
+  const effects = useGameEffects({ maxParticles: 50 })
   const [renderModel, setRenderModel] = useState<GameModel>(() => createInitialModel())
 
   const modelRef = useRef<GameModel>(renderModel)
@@ -172,316 +255,376 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const lastFrameAtRef = useRef<number | null>(null)
   const flipQueuedRef = useRef(false)
 
-  const tapAudioRef = useRef<HTMLAudioElement | null>(null)
-  const tapStrongAudioRef = useRef<HTMLAudioElement | null>(null)
-  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
-
-  const playSfx = useCallback((source: HTMLAudioElement | null, volume: number, playbackRate = 1) => {
-    if (source === null) {
-      return
-    }
-
-    source.currentTime = 0
-    source.volume = volume
-    source.playbackRate = playbackRate
-    void source.play().catch(() => {})
-  }, [])
+  const sfxRef = useRef<{
+    flip: ReturnType<typeof createSfxPool>
+    coin: ReturnType<typeof createSfxPool>
+    magnet: ReturnType<typeof createSfxPool>
+    milestone: ReturnType<typeof createSfxPool>
+    crash: ReturnType<typeof createSfxPool>
+    combo: ReturnType<typeof createSfxPool>
+    shield: ReturnType<typeof createSfxPool>
+    fever: ReturnType<typeof createSfxPool>
+  } | null>(null)
 
   const finishRound = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
-
+    if (finishedRef.current) return
     finishedRef.current = true
     const model = modelRef.current
-    model.statusText = '장애물에 부딪혔습니다!'
-    playSfx(gameOverAudioRef.current, 0.62, 0.95)
+    model.statusText = 'CRASH!'
+    model.statusTimer = 99999
+    sfxRef.current?.crash.play(0.7, 0.95)
+
+    effects.triggerShake(6)
+    effects.triggerFlash('rgba(239,68,68,0.5)')
 
     const finalDurationMs = model.elapsedMs > 0 ? Math.round(model.elapsedMs) : Math.round(DEFAULT_FRAME_MS)
-    onFinish({
-      score: model.score,
-      durationMs: finalDurationMs,
-    })
-  }, [onFinish, playSfx])
+    onFinish({ score: model.score, durationMs: finalDurationMs })
+  }, [onFinish, effects])
 
   const handleFlip = useCallback(() => {
-    if (finishedRef.current) {
-      return
-    }
-
+    if (finishedRef.current) return
     flipQueuedRef.current = true
   }, [])
 
+  // Init audio
   useEffect(() => {
-    const tapAudio = new Audio(tapHitSfx)
-    tapAudio.preload = 'auto'
-    tapAudioRef.current = tapAudio
-
-    const tapStrongAudio = new Audio(tapHitStrongSfx)
-    tapStrongAudio.preload = 'auto'
-    tapStrongAudioRef.current = tapStrongAudio
-
-    const gameOverAudio = new Audio(gameOverHitSfx)
-    gameOverAudio.preload = 'auto'
-    gameOverAudioRef.current = gameOverAudio
-
-    return () => {
-      for (const audio of [tapAudio, tapStrongAudio, gameOverAudio]) {
-        audio.pause()
-        audio.currentTime = 0
-      }
-      effects.cleanup()
+    sfxRef.current = {
+      flip: createSfxPool(flipSfxUrl),
+      coin: createSfxPool(coinSfxUrl),
+      magnet: createSfxPool(magnetSfxUrl),
+      milestone: createSfxPool(milestoneSfxUrl),
+      crash: createSfxPool(crashSfxUrl),
+      combo: createSfxPool(comboSfxUrl),
+      shield: createSfxPool(shieldSfxUrl),
+      fever: createSfxPool(feverSfxUrl),
     }
+    return () => { effects.cleanup() }
   }, [])
 
+  // Input handlers
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        onExit()
-        return
-      }
-
-      if (finishedRef.current) {
-        return
-      }
-
-      if (event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        event.preventDefault()
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (finishedRef.current) return
+      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        e.preventDefault()
         handleFlip()
       }
     }
-
     window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
+    return () => { window.removeEventListener('keydown', handleKeyDown) }
   }, [handleFlip, onExit])
 
+  // Game loop
   useEffect(() => {
     lastFrameAtRef.current = null
 
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
-
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
+      if (finishedRef.current) { animationFrameRef.current = null; return }
+      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
 
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
-      const deltaSec = deltaMs / 1000
-      const model = modelRef.current
+      const dt = deltaMs / 1000
+      const m = modelRef.current
+      const sfx = sfxRef.current
 
-      model.elapsedMs += deltaMs
+      m.elapsedMs += deltaMs
 
-      if (model.elapsedMs >= GAME_TIMEOUT_MS) {
-        model.statusText = '시간 초과!'
-        model.score = computeScore(model)
-        setRenderModel({ ...model })
+      if (m.elapsedMs >= GAME_TIMEOUT_MS) {
+        m.statusText = "Time's up!"
+        m.statusTimer = 99999
+        m.score = computeScore(m)
+        setRenderModel({ ...m })
         finishRound()
-        animationFrameRef.current = null
         return
       }
 
-      const elapsedSeconds = model.elapsedMs / 1000
-      model.scrollSpeed = Math.min(MAX_SCROLL_SPEED, BASE_SCROLL_SPEED + elapsedSeconds * SPEED_ACCEL_PER_SECOND)
+      // Difficulty phase
+      const newPhase = getCurrentPhase(m.elapsedMs)
+      if (newPhase > m.currentPhase) {
+        m.currentPhase = newPhase
+        m.statusText = `${DIFFICULTY_PHASES[newPhase].name} MODE!`
+        m.statusTimer = 2000
+        sfx?.milestone.play(0.5, 1.1)
+        effects.triggerFlash('rgba(139,92,246,0.3)')
+      }
+      const phase = DIFFICULTY_PHASES[m.currentPhase]
 
-      const scrollDistance = model.scrollSpeed * deltaSec
-      model.distanceTraveled += scrollDistance
+      const elapsedSec = m.elapsedMs / 1000
+      const speedBoostMult = m.speedBoostActiveMs > 0 ? SPEED_ZONE_BOOST : 1
+      m.scrollSpeed = Math.min(MAX_SCROLL_SPEED, BASE_SCROLL_SPEED + elapsedSec * SPEED_ACCEL_PER_SECOND) * phase.obstacleSpeedMult * speedBoostMult
 
+      const scrollDist = m.scrollSpeed * dt
+      m.distanceTraveled += scrollDist
+
+      // Flip
       if (flipQueuedRef.current) {
         flipQueuedRef.current = false
-        model.gravityDirection = model.gravityDirection === 1 ? -1 : 1
-        model.playerVy = -model.gravityDirection * FLIP_IMPULSE
-        model.statusText = model.gravityDirection === 1 ? '중력: 아래' : '중력: 위'
-        playSfx(tapAudioRef.current, 0.45, 1 + Math.random() * 0.1)
+        m.gravityDirection = m.gravityDirection === 1 ? -1 : 1
+        m.playerVy = -m.gravityDirection * FLIP_IMPULSE
+        m.flipCount++
+        sfx?.flip.play(0.4, 1 + Math.random() * 0.15)
+        effects.spawnParticles(3, 50, 50)
       }
 
-      model.playerVy += model.gravityDirection * GRAVITY_STRENGTH * deltaSec
-      model.playerVy = clampNumber(model.playerVy, -MAX_FALL_SPEED, MAX_FALL_SPEED)
-      model.playerY += model.playerVy * deltaSec
+      // Physics (percentage-based Y)
+      const gravAccel = GRAVITY_STRENGTH * dt / 100 // convert to pct
+      m.playerVy += m.gravityDirection * gravAccel * 100
+      m.playerVy = clamp(m.playerVy, -MAX_FALL_SPEED, MAX_FALL_SPEED)
+      m.playerY += m.playerVy * dt / 100 * 100
 
-      const playerTop = PLAY_AREA_TOP + PLAYER_HEIGHT / 2
-      const playerBottom = PLAY_AREA_BOTTOM - PLAYER_HEIGHT / 2
-      if (model.playerY < playerTop) {
-        model.playerY = playerTop
-        model.playerVy = 0
-      }
-      if (model.playerY > playerBottom) {
-        model.playerY = playerBottom
-        model.playerVy = 0
-      }
+      const pTop = PLAY_TOP_PCT + PLAYER_SIZE_PCT / 2
+      const pBot = PLAY_BOTTOM_PCT - PLAYER_SIZE_PCT / 2
+      if (m.playerY < pTop) { m.playerY = pTop; m.playerVy = 0 }
+      if (m.playerY > pBot) { m.playerY = pBot; m.playerVy = 0 }
 
-      model.timeSinceLastObstacle += deltaMs
-      if (model.timeSinceLastObstacle >= model.nextObstacleInterval) {
-        model.timeSinceLastObstacle = 0
-        model.nextObstacleInterval = computeObstacleInterval(model.elapsedMs)
+      // Spawn obstacles
+      m.timeSinceLastObstacle += deltaMs
+      if (m.timeSinceLastObstacle >= m.nextObstacleInterval) {
+        m.timeSinceLastObstacle = 0
+        m.nextObstacleInterval = computeObstacleInterval(m.elapsedMs, phase.spawnRateMult)
 
         const fromTop = Math.random() < 0.5
-        const progress = clampNumber(model.elapsedMs / 45000, 0, 1)
-        const minH = OBSTACLE_MIN_HEIGHT + progress * 30
-        const maxH = OBSTACLE_MAX_HEIGHT + progress * 40
-        const obstacleHeight = randomBetween(minH, Math.min(maxH, PLAY_AREA_BOTTOM - PLAY_AREA_TOP - PLAYER_HEIGHT - 20))
+        const minH = OBSTACLE_MIN_HEIGHT_PCT
+        const maxH = phase.maxObstacleHeightPct
+        const playAreaPct = PLAY_BOTTOM_PCT - PLAY_TOP_PCT
+        const hPct = rand(minH, Math.min(maxH, playAreaPct - PLAYER_SIZE_PCT - 5))
 
-        model.obstacles = [
-          ...model.obstacles,
-          {
-            id: model.nextObstacleId,
-            x: STAGE_WIDTH + 10,
-            height: obstacleHeight,
-            fromTop,
-          },
-        ]
-        model.nextObstacleId += 1
+        m.obstacles.push({
+          id: m.nextId++,
+          x: 105,
+          heightPct: hPct,
+          fromTop,
+        })
 
+        // Spawn coins in safe area
         if (Math.random() < COIN_SPAWN_CHANCE) {
           const coinY = fromTop
-            ? PLAY_AREA_TOP + obstacleHeight + randomBetween(30, 80)
-            : PLAY_AREA_BOTTOM - obstacleHeight - randomBetween(30, 80)
-          const clampedCoinY = clampNumber(coinY, PLAY_AREA_TOP + COIN_SIZE, PLAY_AREA_BOTTOM - COIN_SIZE)
-          model.coins = [
-            ...model.coins,
-            {
-              id: model.nextCoinId,
-              x: STAGE_WIDTH + 10 + OBSTACLE_WIDTH / 2,
-              y: clampedCoinY,
-              collected: false,
-            },
-          ]
-          model.nextCoinId += 1
+            ? PLAY_TOP_PCT + hPct + rand(5, 15)
+            : PLAY_BOTTOM_PCT - hPct - rand(5, 15)
+          const isDouble = m.doubleCoinActiveMs > 0
+          m.coins.push({
+            id: m.nextId++,
+            x: 105 + OBSTACLE_WIDTH_PCT / 2,
+            y: clamp(coinY, PLAY_TOP_PCT + COIN_SIZE_PCT, PLAY_BOTTOM_PCT - COIN_SIZE_PCT),
+            collected: false,
+            isDouble,
+          })
         }
 
-        // Spawn magnet powerup
+        // Spawn powerups
+        const spawnY = rand(PLAY_TOP_PCT + 8, PLAY_BOTTOM_PCT - 8)
         if (Math.random() < MAGNET_SPAWN_CHANCE) {
-          const magnetY = randomBetween(PLAY_AREA_TOP + 40, PLAY_AREA_BOTTOM - 40)
-          model.magnets = [
-            ...model.magnets,
-            {
-              id: model.nextMagnetId,
-              x: STAGE_WIDTH + 10 + OBSTACLE_WIDTH + 30,
-              y: magnetY,
-              collected: false,
-            },
-          ]
-          model.nextMagnetId += 1
+          m.powerups.push({ id: m.nextId++, x: 112, y: spawnY, collected: false, type: 'magnet' })
+        } else if (Math.random() < SHIELD_SPAWN_CHANCE) {
+          m.powerups.push({ id: m.nextId++, x: 112, y: spawnY, collected: false, type: 'shield' })
+        } else if (Math.random() < DOUBLE_COIN_SPAWN_CHANCE) {
+          m.powerups.push({ id: m.nextId++, x: 112, y: spawnY, collected: false, type: 'double-coin' })
+        }
+
+        // Speed zones
+        if (Math.random() < SPEED_ZONE_SPAWN_CHANCE && m.speedBoostActiveMs <= 0) {
+          m.speedZones.push({ id: m.nextId++, x: 110, widthPct: SPEED_ZONE_WIDTH_PCT })
         }
       }
 
-      model.obstacles = model.obstacles
-        .map((obstacle) => ({ ...obstacle, x: obstacle.x - scrollDistance }))
-        .filter((obstacle) => obstacle.x + OBSTACLE_WIDTH > -20)
+      // Move everything (scroll in percentage)
+      const scrollPctPerSec = m.scrollSpeed / 4 // approximate px->pct conversion
+      const scrollPct = scrollPctPerSec * dt
 
-      model.coins = model.coins
-        .map((coin) => ({ ...coin, x: coin.x - scrollDistance }))
-        .filter((coin) => coin.x + COIN_SIZE > -20)
+      for (const ob of m.obstacles) ob.x -= scrollPct
+      m.obstacles = m.obstacles.filter(ob => ob.x + OBSTACLE_WIDTH_PCT > -5)
 
-      model.magnets = model.magnets
-        .map((m) => ({ ...m, x: m.x - scrollDistance }))
-        .filter((m) => m.x + MAGNET_SIZE > -20)
+      for (const c of m.coins) c.x -= scrollPct
+      m.coins = m.coins.filter(c => c.x + COIN_SIZE_PCT > -5)
 
-      // Magnet attraction: pull coins toward player
-      if (model.magnetActiveMs > 0) {
-        model.magnetActiveMs = Math.max(0, model.magnetActiveMs - deltaMs)
-        for (const coin of model.coins) {
+      for (const p of m.powerups) p.x -= scrollPct
+      m.powerups = m.powerups.filter(p => p.x + MAGNET_SIZE_PCT > -5)
+
+      for (const sz of m.speedZones) sz.x -= scrollPct
+      m.speedZones = m.speedZones.filter(sz => sz.x + sz.widthPct > -5)
+
+      // Timers
+      if (m.magnetActiveMs > 0) m.magnetActiveMs = Math.max(0, m.magnetActiveMs - deltaMs)
+      if (m.shieldActiveMs > 0) m.shieldActiveMs = Math.max(0, m.shieldActiveMs - deltaMs)
+      if (m.doubleCoinActiveMs > 0) m.doubleCoinActiveMs = Math.max(0, m.doubleCoinActiveMs - deltaMs)
+      if (m.speedBoostActiveMs > 0) m.speedBoostActiveMs = Math.max(0, m.speedBoostActiveMs - deltaMs)
+      if (m.feverActiveMs > 0) m.feverActiveMs = Math.max(0, m.feverActiveMs - deltaMs)
+      if (m.statusTimer > 0) m.statusTimer = Math.max(0, m.statusTimer - deltaMs)
+
+      // Magnet attraction
+      if (m.magnetActiveMs > 0) {
+        for (const coin of m.coins) {
           if (coin.collected) continue
-          const dx = PLAYER_X - coin.x
-          const dy = model.playerY - coin.y
+          const dx = PLAYER_X_PCT - coin.x
+          const dy = m.playerY - coin.y
           const dist = Math.hypot(dx, dy)
-          if (dist < MAGNET_ATTRACT_RADIUS && dist > 1) {
-            coin.x += (dx / dist) * MAGNET_ATTRACT_SPEED * deltaSec
-            coin.y += (dy / dist) * MAGNET_ATTRACT_SPEED * deltaSec
+          if (dist < MAGNET_ATTRACT_RADIUS_PCT && dist > 0.5) {
+            coin.x += (dx / dist) * MAGNET_ATTRACT_SPEED_PCT * dt
+            coin.y += (dy / dist) * MAGNET_ATTRACT_SPEED_PCT * dt
           }
         }
       }
 
       // Coin combo decay
-      if (model.elapsedMs - model.lastCoinCollectMs > COIN_COMBO_DECAY_MS) {
-        model.coinCombo = 0
+      if (m.elapsedMs - m.lastCoinCollectMs > COIN_COMBO_DECAY_MS) m.coinCombo = 0
+
+      // Speed zone check
+      for (const sz of m.speedZones) {
+        if (PLAYER_X_PCT > sz.x && PLAYER_X_PCT < sz.x + sz.widthPct && m.speedBoostActiveMs <= 0) {
+          m.speedBoostActiveMs = SPEED_ZONE_DURATION_MS
+          m.statusText = 'SPEED BOOST!'
+          m.statusTimer = 1500
+          effects.triggerFlash('rgba(34,197,94,0.3)')
+        }
       }
 
-      const playerColliderX = PLAYER_X - PLAYER_COLLIDER_WIDTH / 2
-      const playerColliderY = model.playerY - PLAYER_COLLIDER_HEIGHT / 2
+      // Collision: Player collider (in pct)
+      const pcX = PLAYER_X_PCT - PLAYER_SIZE_PCT * 0.35
+      const pcY = m.playerY - PLAYER_SIZE_PCT * 0.45
+      const pcW = PLAYER_SIZE_PCT * 0.7
+      const pcH = PLAYER_SIZE_PCT * 0.9
 
-      for (const obstacle of model.obstacles) {
-        const obstacleY = obstacle.fromTop ? PLAY_AREA_TOP : PLAY_AREA_BOTTOM - obstacle.height
-        if (
-          rectsOverlap(
-            playerColliderX, playerColliderY, PLAYER_COLLIDER_WIDTH, PLAYER_COLLIDER_HEIGHT,
-            obstacle.x, obstacleY, OBSTACLE_WIDTH, obstacle.height,
-          )
-        ) {
-          model.score = computeScore(model)
-          effects.triggerShake(4)
-          effects.triggerFlash('rgba(239,68,68,0.4)')
-          setRenderModel({ ...model })
+      // Obstacle collision
+      let hitObstacle = false
+      let nearMiss = false
+      for (const ob of m.obstacles) {
+        const obY = ob.fromTop ? PLAY_TOP_PCT : PLAY_BOTTOM_PCT - ob.heightPct
+        const obH = ob.heightPct
+
+        if (rectsOverlap(pcX, pcY, pcW, pcH, ob.x, obY, OBSTACLE_WIDTH_PCT, obH)) {
+          hitObstacle = true
+          break
+        }
+
+        // Near miss detection
+        const nearDist = 3
+        if (ob.x > pcX - nearDist && ob.x < pcX + pcW + nearDist) {
+          const gapStart = ob.fromTop ? PLAY_TOP_PCT + ob.heightPct : PLAY_TOP_PCT
+          const gapEnd = ob.fromTop ? PLAY_BOTTOM_PCT : PLAY_BOTTOM_PCT - ob.heightPct
+          if (m.playerY > gapStart && m.playerY < gapEnd) {
+            const distToEdge = ob.fromTop
+              ? m.playerY - (PLAY_TOP_PCT + ob.heightPct)
+              : (PLAY_BOTTOM_PCT - ob.heightPct) - m.playerY
+            if (distToEdge < 4 && distToEdge > 0) nearMiss = true
+          }
+        }
+      }
+
+      if (hitObstacle) {
+        if (m.shieldActiveMs > 0) {
+          m.shieldActiveMs = 0
+          m.statusText = 'SHIELD BROKEN!'
+          m.statusTimer = 1500
+          sfx?.shield.play(0.5, 0.8)
+          effects.triggerShake(3)
+          effects.triggerFlash('rgba(59,130,246,0.3)')
+          // Remove the obstacle that was hit
+          m.obstacles = m.obstacles.filter(ob => {
+            const obY = ob.fromTop ? PLAY_TOP_PCT : PLAY_BOTTOM_PCT - ob.heightPct
+            return !rectsOverlap(pcX, pcY, pcW, pcH, ob.x, obY, OBSTACLE_WIDTH_PCT, ob.heightPct)
+          })
+        } else {
+          m.score = computeScore(m)
+          effects.triggerShake(6)
+          effects.triggerFlash('rgba(239,68,68,0.5)')
+          setRenderModel({ ...m })
           finishRound()
-          animationFrameRef.current = null
           return
         }
       }
 
-      let didCollectCoin = false
-      for (const coin of model.coins) {
-        if (coin.collected) {
-          continue
-        }
+      if (nearMiss) {
+        m.nearMissCount++
+        effects.showScorePopup(25, 200, 300, '#a78bfa')
+        effects.spawnParticles(2, 100, 200)
+      }
 
-        const coinCenterX = coin.x + COIN_SIZE / 2
-        const coinCenterY = coin.y
-        if (
-          circleRectOverlap(
-            coinCenterX, coinCenterY, COIN_COLLIDER_RADIUS,
-            playerColliderX, playerColliderY, PLAYER_COLLIDER_WIDTH, PLAYER_COLLIDER_HEIGHT,
-          )
-        ) {
+      // Coin collection
+      let didCollectCoin = false
+      for (const coin of m.coins) {
+        if (coin.collected) continue
+        const cx = coin.x + COIN_SIZE_PCT / 2
+        const cy = coin.y
+        if (Math.hypot(cx - PLAYER_X_PCT, cy - m.playerY) < PLAYER_SIZE_PCT * 0.7) {
           coin.collected = true
-          model.coinCombo = Math.min(model.coinCombo + 1, COIN_COMBO_MULTIPLIER_CAP)
-          model.lastCoinCollectMs = model.elapsedMs
-          model.coinsCollected += 1
+          const bonus = coin.isDouble ? 2 : 1
+          m.coinsCollected += bonus
+          m.coinCombo = Math.min(m.coinCombo + 1, COIN_COMBO_MULTIPLIER_CAP)
+          m.lastCoinCollectMs = m.elapsedMs
+          m.feverCoinsAccum += bonus
           didCollectCoin = true
         }
       }
-
-      // Magnet powerup collection
-      for (const magnet of model.magnets) {
-        if (magnet.collected) continue
-        const mx = magnet.x + MAGNET_SIZE / 2
-        const my = magnet.y
-        if (circleRectOverlap(mx, my, MAGNET_SIZE, playerColliderX, playerColliderY, PLAYER_COLLIDER_WIDTH, PLAYER_COLLIDER_HEIGHT)) {
-          magnet.collected = true
-          model.magnetActiveMs = MAGNET_DURATION_MS
-          model.statusText = 'MAGNET ACTIVE!'
-        }
-      }
-      model.magnets = model.magnets.filter((m) => !m.collected)
+      m.coins = m.coins.filter(c => !c.collected)
 
       if (didCollectCoin) {
-        playSfx(tapStrongAudioRef.current, 0.5, 1.15 + model.coinCombo * 0.05)
-        effects.triggerFlash()
-        effects.spawnParticles(4, 200, 200)
+        sfx?.coin.play(0.5, 1.1 + m.coinCombo * 0.06)
+        effects.triggerFlash('rgba(251,191,36,0.15)')
+        effects.spawnParticles(4, 80, 150)
+        if (m.coinCombo >= 3) {
+          sfx?.combo.play(0.4, 1 + m.coinCombo * 0.05)
+          effects.showScorePopup(m.coinCombo, 200, 250, getComboColor(m.coinCombo))
+        }
       }
 
-      // Distance milestone bonus
-      const currentMilestone = Math.floor(model.distanceTraveled / DISTANCE_MILESTONE)
-      if (currentMilestone > model.lastMilestone) {
-        model.lastMilestone = currentMilestone
-        model.statusText = `MILESTONE ${currentMilestone}! +${MILESTONE_BONUS}`
+      // Fever mode
+      if (m.feverCoinsAccum >= FEVER_THRESHOLD_COINS && m.feverActiveMs <= 0) {
+        m.feverActiveMs = FEVER_DURATION_MS
+        m.feverCoinsAccum = 0
+        m.statusText = 'FEVER MODE!'
+        m.statusTimer = 2000
+        sfx?.fever.play(0.6)
+        effects.triggerFlash('rgba(234,179,8,0.4)')
+        effects.spawnParticles(12, 200, 300)
       }
 
-      model.coins = model.coins.filter((coin) => !coin.collected)
-      model.score = computeScore(model)
+      // Powerup collection
+      for (const p of m.powerups) {
+        if (p.collected) continue
+        if (Math.hypot(p.x + MAGNET_SIZE_PCT / 2 - PLAYER_X_PCT, p.y - m.playerY) < PLAYER_SIZE_PCT * 0.8) {
+          p.collected = true
+          if (p.type === 'magnet') {
+            m.magnetActiveMs = MAGNET_DURATION_MS
+            m.statusText = 'MAGNET!'
+            m.statusTimer = 1500
+            sfx?.magnet.play(0.5)
+          } else if (p.type === 'shield') {
+            m.shieldActiveMs = SHIELD_DURATION_MS
+            m.statusText = 'SHIELD ON!'
+            m.statusTimer = 1500
+            sfx?.shield.play(0.5)
+            effects.triggerFlash('rgba(59,130,246,0.3)')
+          } else if (p.type === 'double-coin') {
+            m.doubleCoinActiveMs = DOUBLE_COIN_DURATION_MS
+            m.statusText = 'DOUBLE COINS!'
+            m.statusTimer = 1500
+            sfx?.coin.play(0.5, 1.4)
+            effects.triggerFlash('rgba(234,179,8,0.3)')
+          }
+        }
+      }
+      m.powerups = m.powerups.filter(p => !p.collected)
 
-      setRenderModel({ ...model })
+      // Distance milestone
+      const currentMilestone = Math.floor(m.distanceTraveled / DISTANCE_MILESTONE)
+      if (currentMilestone > m.lastMilestone) {
+        m.lastMilestone = currentMilestone
+        m.statusText = `MILESTONE ${currentMilestone}! +${MILESTONE_BONUS}`
+        m.statusTimer = 2000
+        sfx?.milestone.play(0.5)
+        effects.spawnParticles(6, 200, 100)
+        effects.triggerFlash('rgba(168,85,247,0.25)')
+      }
+
+      m.score = computeScore(m)
+      setRenderModel({ ...m })
       effects.updateParticles()
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
 
     animationFrameRef.current = window.requestAnimationFrame(step)
-
     return () => {
       if (animationFrameRef.current !== null) {
         window.cancelAnimationFrame(animationFrameRef.current)
@@ -489,134 +632,188 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       }
       lastFrameAtRef.current = null
     }
-  }, [finishRound, playSfx])
+  }, [finishRound, effects])
 
   const displayedBestScore = useMemo(() => Math.max(bestScore, renderModel.score), [bestScore, renderModel.score])
   const isGravityUp = renderModel.gravityDirection === -1
-  const playerScreenY = renderModel.playerY - PLAYER_HEIGHT / 2
+  const isFever = renderModel.feverActiveMs > 0
+  const comboLabel = renderModel.coinCombo >= 3 ? getComboLabel(renderModel.coinCombo) : null
 
   return (
-    <section className="mini-game-panel gravity-flip-panel" aria-label="gravity-flip-game" style={{ position: 'relative', maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}>
+    <section
+      className={`mini-game-panel gravity-flip-panel ${isFever ? 'gf-fever' : ''}`}
+      aria-label="gravity-flip-game"
+      style={{ position: 'relative', maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}
+    >
       <div
-        className="gravity-flip-stage"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          handleFlip()
-        }}
+        className="gf-stage"
+        onPointerDown={(e) => { e.preventDefault(); handleFlip() }}
         role="presentation"
       >
-        <div className="gravity-flip-ceiling" />
-        <div className="gravity-flip-ground" />
+        {/* Background stars */}
+        <div className="gf-bg-stars" />
 
-        {renderModel.obstacles.map((obstacle) => {
-          const obstacleY = obstacle.fromTop ? PLAY_AREA_TOP : PLAY_AREA_BOTTOM - obstacle.height
-          return (
-            <div
-              className={`gravity-flip-obstacle ${obstacle.fromTop ? 'from-top' : 'from-bottom'}`}
-              key={obstacle.id}
-              style={{
-                left: obstacle.x,
-                top: obstacleY,
-                width: OBSTACLE_WIDTH,
-                height: obstacle.height,
-              }}
-            />
-          )
-        })}
-
-        {renderModel.coins.map((coin) => (
+        {/* Speed zone visual */}
+        {renderModel.speedZones.map(sz => (
           <div
-            className="gravity-flip-coin"
-            key={coin.id}
-            style={{
-              left: coin.x,
-              top: coin.y - COIN_SIZE / 2,
-              width: COIN_SIZE,
-              height: COIN_SIZE,
-            }}
+            key={sz.id}
+            className="gf-speed-zone"
+            style={{ left: `${sz.x}%`, width: `${sz.widthPct}%` }}
           />
         ))}
 
-        {renderModel.magnets.map((magnet) => (
+        {/* Ceiling & Ground */}
+        <div className="gf-ceiling" />
+        <div className="gf-ground" />
+
+        {/* Gravity indicator arrows */}
+        <div className={`gf-gravity-indicator ${isGravityUp ? 'up' : 'down'}`}>
+          {isGravityUp ? '▲' : '▼'}
+        </div>
+
+        {/* Obstacles */}
+        {renderModel.obstacles.map(ob => {
+          const obY = ob.fromTop ? PLAY_TOP_PCT : PLAY_BOTTOM_PCT - ob.heightPct
+          return (
+            <div
+              className={`gf-obstacle ${ob.fromTop ? 'from-top' : 'from-bottom'}`}
+              key={ob.id}
+              style={{
+                left: `${ob.x}%`,
+                top: `${obY}%`,
+                width: `${OBSTACLE_WIDTH_PCT}%`,
+                height: `${ob.heightPct}%`,
+              }}
+            >
+              <div className="gf-obstacle-glow" />
+            </div>
+          )
+        })}
+
+        {/* Coins */}
+        {renderModel.coins.map(coin => (
           <div
-            key={magnet.id}
+            className={`gf-coin ${coin.isDouble ? 'double' : ''}`}
+            key={coin.id}
             style={{
-              position: 'absolute',
-              left: magnet.x,
-              top: magnet.y - MAGNET_SIZE / 2,
-              width: MAGNET_SIZE,
-              height: MAGNET_SIZE,
-              borderRadius: '50%',
-              background: 'radial-gradient(circle, #a78bfa, #7c3aed)',
-              border: '2px solid #c4b5fd',
-              boxShadow: '0 0 8px #a78bfa',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 12,
-              color: '#fff',
-              fontWeight: 'bold',
+              left: `${coin.x}%`,
+              top: `${coin.y - COIN_SIZE_PCT / 2}%`,
+              width: `${COIN_SIZE_PCT}%`,
+              height: `${COIN_SIZE_PCT}%`,
             }}
           >
-            M
+            {coin.isDouble ? '2x' : ''}
           </div>
         ))}
 
-        <img
-          className="gravity-flip-player"
-          src={parkWankyuSprite}
-          alt="player"
-          style={{
-            left: PLAYER_X - PLAYER_WIDTH / 2,
-            top: playerScreenY,
-            width: PLAYER_WIDTH,
-            height: PLAYER_HEIGHT,
-            transform: isGravityUp ? 'scaleY(-1)' : 'none',
-          }}
-        />
+        {/* Powerups */}
+        {renderModel.powerups.map(p => (
+          <div
+            key={p.id}
+            className={`gf-powerup gf-powerup-${p.type}`}
+            style={{
+              left: `${p.x}%`,
+              top: `${p.y - MAGNET_SIZE_PCT / 2}%`,
+              width: `${MAGNET_SIZE_PCT}%`,
+              height: `${MAGNET_SIZE_PCT}%`,
+            }}
+          >
+            {p.type === 'magnet' ? 'M' : p.type === 'shield' ? 'S' : '2x'}
+          </div>
+        ))}
 
-        <div className="gravity-flip-hud">
-          <p className="gravity-flip-score">{renderModel.score}</p>
-          <p className="gravity-flip-best">BEST {displayedBestScore}</p>
-          <p className="gravity-flip-meta">
-            코인 {renderModel.coinsCollected}{renderModel.coinCombo > 0 ? ` (x${(1 + renderModel.coinCombo * 0.2).toFixed(1)})` : ''} · {(renderModel.elapsedMs / 1000).toFixed(1)}s
-          </p>
+        {/* Player */}
+        <div className={`gf-player-wrap ${renderModel.shieldActiveMs > 0 ? 'shielded' : ''}`} style={{
+          left: `${PLAYER_X_PCT - PLAYER_SIZE_PCT / 2}%`,
+          top: `${renderModel.playerY - PLAYER_SIZE_PCT / 2}%`,
+          width: `${PLAYER_SIZE_PCT}%`,
+          height: `${PLAYER_SIZE_PCT}%`,
+        }}>
+          <img
+            className="gf-player"
+            src={parkWankyuSprite}
+            alt="player"
+            style={{ transform: isGravityUp ? 'scaleY(-1)' : 'none' }}
+          />
+          {renderModel.shieldActiveMs > 0 && <div className="gf-shield-bubble" />}
+        </div>
+
+        {/* HUD */}
+        <div className="gf-hud">
+          <p className="gf-score">{renderModel.score}</p>
+          <p className="gf-best">BEST {displayedBestScore}</p>
+          <div className="gf-meta-row">
+            <span className="gf-coins-label">{renderModel.coinsCollected} coins</span>
+            {renderModel.coinCombo > 0 && <span className="gf-combo">x{(1 + renderModel.coinCombo * 0.25).toFixed(1)}</span>}
+          </div>
+          <p className="gf-time">{(renderModel.elapsedMs / 1000).toFixed(1)}s</p>
+        </div>
+
+        {/* Phase indicator */}
+        <div className="gf-phase-badge">
+          {DIFFICULTY_PHASES[renderModel.currentPhase].name}
+        </div>
+
+        {/* Active powerup indicators */}
+        <div className="gf-powerup-bar">
           {renderModel.magnetActiveMs > 0 && (
-            <p style={{ margin: 0, color: '#a78bfa', fontSize: 11, fontWeight: 700 }}>
-              MAGNET {(renderModel.magnetActiveMs / 1000).toFixed(1)}s
-            </p>
+            <span className="gf-active-buff magnet">{(renderModel.magnetActiveMs / 1000).toFixed(1)}s</span>
+          )}
+          {renderModel.shieldActiveMs > 0 && (
+            <span className="gf-active-buff shield">{(renderModel.shieldActiveMs / 1000).toFixed(1)}s</span>
+          )}
+          {renderModel.doubleCoinActiveMs > 0 && (
+            <span className="gf-active-buff double">{(renderModel.doubleCoinActiveMs / 1000).toFixed(1)}s</span>
+          )}
+          {renderModel.speedBoostActiveMs > 0 && (
+            <span className="gf-active-buff speed">{(renderModel.speedBoostActiveMs / 1000).toFixed(1)}s</span>
+          )}
+          {isFever && (
+            <span className="gf-active-buff fever">{(renderModel.feverActiveMs / 1000).toFixed(1)}s</span>
           )}
         </div>
 
-        <p className="gravity-flip-status">{renderModel.statusText}</p>
-        <p className="gravity-flip-tap-hint">탭하여 중력 반전</p>
+        {/* Combo label */}
+        {comboLabel && (
+          <div className="gf-combo-label" style={{ color: getComboColor(renderModel.coinCombo) }}>
+            {comboLabel}
+          </div>
+        )}
 
-        <div className="gravity-flip-overlay-actions">
+        {/* Status text */}
+        {renderModel.statusTimer > 0 && (
+          <p className="gf-status">{renderModel.statusText}</p>
+        )}
+
+        <p className="gf-tap-hint">Tap to flip gravity</p>
+
+        {/* Fever overlay */}
+        {isFever && <div className="gf-fever-overlay" />}
+
+        {/* Action buttons */}
+        <div className="gf-actions">
           <button
-            className="gravity-flip-action-button"
+            className="gf-btn"
             type="button"
-            onPointerDown={(event) => event.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
               if (!finishedRef.current) {
                 finishedRef.current = true
-                const model = modelRef.current
-                model.score = computeScore(model)
-                onFinish({
-                  score: model.score,
-                  durationMs: Math.max(Math.round(model.elapsedMs), Math.round(DEFAULT_FRAME_MS)),
-                })
+                const m = modelRef.current
+                m.score = computeScore(m)
+                onFinish({ score: m.score, durationMs: Math.max(Math.round(m.elapsedMs), Math.round(DEFAULT_FRAME_MS)) })
               }
             }}
           >
-            종료
+            FINISH
           </button>
           <button
-            className="gravity-flip-action-button ghost"
+            className="gf-btn ghost"
             type="button"
-            onPointerDown={(event) => event.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={onExit}
           >
-            나가기
+            EXIT
           </button>
         </div>
       </div>
@@ -628,19 +825,11 @@ function GravityFlipGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   )
 }
 
-function computeScore(model: GameModel): number {
-  const distanceScore = Math.max(0, Math.floor(model.distanceTraveled * SCORE_DISTANCE_MULTIPLIER))
-  const comboMultiplier = 1 + model.coinCombo * 0.2
-  const coinScore = Math.floor(model.coinsCollected * COIN_SCORE_BONUS * comboMultiplier)
-  const milestoneScore = model.lastMilestone * MILESTONE_BONUS
-  return distanceScore + coinScore + milestoneScore
-}
-
 export const gravityFlipModule: MiniGameModule = {
   manifest: {
     id: 'gravity-flip',
     title: 'Gravity Flip',
-    description: '중력을 반전시켜 장애물을 피하라! 천장과 바닥을 오가는 러너!',
+    description: 'Flip gravity to dodge obstacles! Collect coins & powerups!',
     unlockCost: 45,
     baseReward: 15,
     scoreRewardMultiplier: 1.2,

@@ -211,7 +211,7 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const handleWrongAnswer = useCallback(() => {
     phaseRef.current = 'result-wrong'
     setPhase('result-wrong')
-    setResultMessage('틀렸습니다!')
+    setResultMessage('Wrong!')
     setActiveNoteId(null)
 
     // Visual effects for wrong
@@ -419,7 +419,7 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const phaseLabel = (() => {
     switch (phase) {
       case 'listen':
-        return '멜로디를 들으세요...'
+        return 'Listen to the melody...'
       case 'play':
         return `${playerInputIndex} / ${sequence.length}`
       case 'result-correct':
@@ -427,7 +427,7 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       case 'result-wrong':
         return resultMessage
       case 'game-over':
-        return '게임 오버!'
+        return 'Game Over!'
     }
   })()
 
@@ -765,9 +765,6 @@ function MusicMemoryGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       </div>
 
       <div className="music-memory-footer">
-        <button className="music-memory-exit-btn" type="button" onClick={handleExit}>
-          허브로 돌아가기
-        </button>
       </div>
     </section>
   )
@@ -777,7 +774,7 @@ export const musicMemoryModule: MiniGameModule = {
   manifest: {
     id: 'music-memory',
     title: 'Music Memory',
-    description: '멜로디를 기억하고 정확히 연주하라! 도레미파 시몬!',
+    description: 'Remember the melody and play it back! Simon says!',
     unlockCost: 50,
     baseReward: 16,
     scoreRewardMultiplier: 1.25,

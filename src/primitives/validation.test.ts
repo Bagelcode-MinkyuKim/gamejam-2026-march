@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { assertValidProgress, createInitialProgress, migrateProgressForCurrentMiniGames } from './validation'
 
 describe('validation migrateProgressForCurrentMiniGames', () => {
-  it('기존 저장 데이터에 신규 게임 키가 없으면 0점으로 보정한다', () => {
+  it('backfills missing game keys with zero scores in legacy data', () => {
     const legacyProgress = {
       coins: 120,
       unlockedMiniGameIds: ['tap-dash', 'run-run'],
@@ -24,14 +24,14 @@ describe('validation migrateProgressForCurrentMiniGames', () => {
     expect(migrated.bestScores['same-character']).toBe(0)
   })
 
-  it('이미 최신 스키마면 객체를 그대로 반환한다', () => {
+  it('returns the same object if already up-to-date', () => {
     const latest = createInitialProgress(30, ['tap-dash'])
     const migrated = migrateProgressForCurrentMiniGames(latest)
 
     expect(migrated).toBe(latest)
   })
 
-  it('초기 진행 데이터 생성 시 same-character를 기본 해금한다', () => {
+  it('unlocks same-character by default on initial progress creation', () => {
     const created = createInitialProgress(30, ['tap-dash'])
     expect(created.unlockedMiniGameIds).toContain('same-character')
   })

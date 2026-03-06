@@ -40,10 +40,37 @@ import lobbyEmojiMatchIcon from '../../assets/images/generated/lobby-icons/lobby
 import lobbyTornadoRunIcon from '../../assets/images/generated/lobby-icons/lobby-tornado-run.png'
 import lobbyDodgeBallIcon from '../../assets/images/generated/lobby-icons/lobby-dodge-ball.png'
 import lobbyCookingRushIcon from '../../assets/images/generated/lobby-icons/lobby-cooking-rush.png'
+import lobbySpeedTapIcon from '../../assets/images/generated/lobby-icons/lobby-speed-tap.png'
+import lobbyColorMatchIcon from '../../assets/images/generated/lobby-icons/lobby-color-match.png'
+import lobbyBubblePopIcon from '../../assets/images/generated/lobby-icons/lobby-bubble-pop.png'
+import lobbyMemoryFlipIcon from '../../assets/images/generated/lobby-icons/lobby-memory-flip.png'
+import lobbySpeedSortIcon from '../../assets/images/generated/lobby-icons/lobby-speed-sort.png'
+import lobbySnakeClassicIcon from '../../assets/images/generated/lobby-icons/lobby-snake-classic.png'
+import lobbyBreakoutMiniIcon from '../../assets/images/generated/lobby-icons/lobby-breakout-mini.png'
+import lobbySlidePuzzleIcon from '../../assets/images/generated/lobby-icons/lobby-slide-puzzle.png'
+import lobbySimonSaysIcon from '../../assets/images/generated/lobby-icons/lobby-simon-says.png'
+import lobbyQuickDrawIcon from '../../assets/images/generated/lobby-icons/lobby-quick-draw.png'
+import lobbyPongSoloIcon from '../../assets/images/generated/lobby-icons/lobby-pong-solo.png'
+import lobbyLightSpeedIcon from '../../assets/images/generated/lobby-icons/lobby-light-speed.png'
+import lobbySpaceDodgeIcon from '../../assets/images/generated/lobby-icons/lobby-space-dodge.png'
+import lobbyFlappySingerIcon from '../../assets/images/generated/lobby-icons/lobby-flappy-singer.png'
+import lobbyColorFloodIcon from '../../assets/images/generated/lobby-icons/lobby-color-flood.png'
+import lobbyLavaFloorIcon from '../../assets/images/generated/lobby-icons/lobby-lava-floor.png'
+import lobbyRopeSwingIcon from '../../assets/images/generated/lobby-icons/lobby-rope-swing.png'
+import lobbyOddOneOutIcon from '../../assets/images/generated/lobby-icons/lobby-odd-one-out.png'
+import lobbyZombieRunIcon from '../../assets/images/generated/lobby-icons/lobby-zombie-run.png'
+import lobbyGravityFlipIcon from '../../assets/images/generated/lobby-icons/lobby-gravity-flip.png'
+import lobbyTicTacProIcon from '../../assets/images/generated/lobby-icons/lobby-tic-tac-pro.png'
+import lobbyMusicHarmonyIcon from '../../assets/images/generated/lobby-icons/lobby-music-harmony.png'
+import lobbyMathBlitzIcon from '../../assets/images/generated/lobby-icons/lobby-math-blitz.png'
 import kimYeonjaCastSprite from '../../assets/images/same-character/kim-yeonja.png'
 import parkSangminCastSprite from '../../assets/images/same-character/park-sangmin.png'
 import parkWankyuCastSprite from '../../assets/images/same-character/park-wankyu.png'
 import seoTaijiCastSprite from '../../assets/images/same-character/seo-taiji.png'
+import coinIconImg from '../../assets/images/generated/coin-icon.png'
+import lockIconImg from '../../assets/images/generated/lock-icon.png'
+import gameLogoImg from '../../assets/Title.png'
+import scoreBoardImg from '../../assets/Score Board.png'
 import lobbyBgmLoop from '../../assets/sounds/lobby-bgm-loop.mp3'
 import gameplayBgmLoop from '../../assets/sounds/gameplay-bgm-loop.mp3'
 import resultBgmLoop from '../../assets/sounds/result-bgm-loop.mp3'
@@ -51,8 +78,13 @@ import countdownTickSfx from '../../assets/sounds/countdown-tick.mp3'
 import countdownStartSfx from '../../assets/sounds/countdown-start.mp3'
 import gameOverHitSfx from '../../assets/sounds/game-over-hit.mp3'
 import newRecordFanfareSfx from '../../assets/sounds/new-record-fanfare.mp3'
-import uiButtonPopSfx from '../../assets/sounds/ui-button-pop.mp3'
 import resultCoinRollSfx from '../../assets/sounds/result-coin-roll.mp3'
+import uiBtnClickSfx from '../../assets/sounds/ui/btn-click.mp3'
+import uiCardSwipeSfx from '../../assets/sounds/ui/card-swipe.mp3'
+import uiCoinCollectSfx from '../../assets/sounds/ui/coin-collect.mp3'
+import uiTabSwitchSfx from '../../assets/sounds/ui/tab-switch.mp3'
+import uiUnlockPopSfx from '../../assets/sounds/ui/unlock-pop.mp3'
+import uiErrorBuzzSfx from '../../assets/sounds/ui/error-buzz.mp3'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
 const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
@@ -60,12 +92,6 @@ const GAME_START_COUNTDOWN_STEP_MS = 1000
 const GAME_OVER_OVERLAY_MS = 1100
 const RESULT_ROLL_DURATION_MS = 1200
 const IN_GAME_MODULE_BGM_IDS = new Set<MiniGameId>(['tap-dash', 'same-character', 'gogunbuntu'])
-const LIVE_CAST = [
-  { name: '김연자', imageSrc: kimYeonjaCastSprite },
-  { name: '박상민', imageSrc: parkSangminCastSprite },
-  { name: '박완규', imageSrc: parkWankyuCastSprite },
-  { name: '서태지', imageSrc: seoTaijiCastSprite },
-] as const
 const LIVE_FX_SPARKS = [
   { left: '8%', top: '18%', delay: '0s', duration: '2.6s' },
   { left: '16%', top: '46%', delay: '0.35s', duration: '3.1s' },
@@ -73,6 +99,25 @@ const LIVE_FX_SPARKS = [
   { left: '78%', top: '22%', delay: '0.42s', duration: '3.2s' },
   { left: '88%', top: '40%', delay: '1s', duration: '2.7s' },
   { left: '84%', top: '70%', delay: '0.2s', duration: '3s' },
+] as const
+const LOBBY_PARTICLES = [
+  { type: 'star', left: '6%', top: '15%', delay: '0s', dur: '5s' },
+  { type: 'note', left: '88%', top: '12%', delay: '1.2s', dur: '6s' },
+  { type: 'star', left: '14%', top: '38%', delay: '2.4s', dur: '5.5s' },
+  { type: 'sparkle', left: '92%', top: '35%', delay: '0.6s', dur: '4.8s' },
+  { type: 'note', left: '8%', top: '58%', delay: '3.1s', dur: '5.8s' },
+  { type: 'star', left: '85%', top: '55%', delay: '1.8s', dur: '6.2s' },
+  { type: 'sparkle', left: '18%', top: '75%', delay: '0.9s', dur: '5.2s' },
+  { type: 'note', left: '78%', top: '78%', delay: '2.6s', dur: '5.6s' },
+  { type: 'star', left: '50%', top: '8%', delay: '4s', dur: '6.5s' },
+  { type: 'sparkle', left: '45%', top: '90%', delay: '1.5s', dur: '4.5s' },
+] as const
+const MARQUEE_ITEMS = [
+  'Play mini-games to earn coins!',
+  'Unlock new games with coins',
+  'Beat your high score!',
+  'Collect all games!',
+  'Tap to start!',
 ] as const
 const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
   'tap-dash': lobbyTapDashIcon,
@@ -109,6 +154,29 @@ const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
   'cooking-rush': lobbyCookingRushIcon,
   'tornado-run': lobbyTornadoRunIcon,
   'dodge-ball': lobbyDodgeBallIcon,
+  'speed-tap': lobbySpeedTapIcon,
+  'color-match': lobbyColorMatchIcon,
+  'bubble-pop': lobbyBubblePopIcon,
+  'memory-flip': lobbyMemoryFlipIcon,
+  'snake-classic': lobbySnakeClassicIcon,
+  'breakout-mini': lobbyBreakoutMiniIcon,
+  'slide-puzzle': lobbySlidePuzzleIcon,
+  'simon-says': lobbySimonSaysIcon,
+  'speed-sort': lobbySpeedSortIcon,
+  'quick-draw': lobbyQuickDrawIcon,
+  'pong-solo': lobbyPongSoloIcon,
+  'light-speed': lobbyLightSpeedIcon,
+  'space-dodge': lobbySpaceDodgeIcon,
+  'flappy-singer': lobbyFlappySingerIcon,
+  'color-flood': lobbyColorFloodIcon,
+  'lava-floor': lobbyLavaFloorIcon,
+  'rope-swing': lobbyRopeSwingIcon,
+  'odd-one-out': lobbyOddOneOutIcon,
+  'zombie-run': lobbyZombieRunIcon,
+  'gravity-flip': lobbyGravityFlipIcon,
+  'tic-tac-pro': lobbyTicTacProIcon,
+  'music-harmony': lobbyMusicHarmonyIcon,
+  'math-blitz': lobbyMathBlitzIcon,
 }
 const FALLBACK_LOBBY_ICONS = [
   kimYeonjaCastSprite,
@@ -124,15 +192,16 @@ function getLobbyIcon(gameId: MiniGameId): string {
   return FALLBACK_LOBBY_ICONS[Math.abs(hash) % FALLBACK_LOBBY_ICONS.length]
 }
 const COUNTDOWN_GUIDE_BY_GAME_ID: Partial<Record<MiniGameId, string>> = {
-  'tap-dash': '등장하는 타겟을 연속 터치하고, 하트 아이템으로 시간을 크게 벌어보세요.',
-  'gogunbuntu': '점프로 높이를 맞추고 훅을 던져 스윙하며 지형을 돌파하세요.',
-  'same-character': '중앙 대기열 캐릭터를 같은 줄에 맞춰 연속 콤보를 만들어보세요.',
-  'combo-formula': '조합 순서를 입력하고 OK를 눌러 배수 콤보와 피버를 쌓으세요.',
-  'run-run': '좌우 전환 타이밍을 맞춰 코스 밖으로 벗어나지 않게 달리세요.',
-  'cham-cham-cham': '참참참! 공격은 방향을 맞추고, 수비는 빠르게 피하세요. 체력 3칸!',
-  'intense-cheer': '좌/우 터치로 점프하며 위로 올라가세요! 장애물을 피하고 하트와 코인을 모으세요.',
-  'dunga-dunga': '구멍에서 출몰하는 가수를 터치! 피버 게이지를 채워 황금 가수를 노려보세요.',
-  'fierce-cheer': '공을 좌우 벽에 번갈아 닿게 해서 점수를 올리세요! 20초 제한!',
+  'tap-dash': 'Tap targets in a row and grab hearts for big time boosts!',
+  'gogunbuntu': 'Jump to match height and swing through terrain!',
+  'same-character': 'Match queue characters to the right lane for combos!',
+  'combo-formula': 'Enter combos in order and press OK for multiplier fever!',
+  'run-run': 'Time your left-right turns to stay on the course!',
+  'cham-cham-cham': 'Attack: match direction. Defend: dodge fast. 3 HP!',
+  'intense-cheer': 'Tap left/right to jump up! Dodge obstacles, collect hearts & coins!',
+  'dunga-dunga': 'Tap popping singers! Fill fever gauge for golden bonus!',
+  'fierce-cheer': 'Bounce ball off walls to score! 20 second limit!',
+  'light-speed': 'Tap lights fast! Avoid bombs, catch gold for fever mode!',
 }
 
 interface RoundSettlement {
@@ -177,6 +246,8 @@ export function GameHubApp() {
   const [error, setError] = useState<string | null>(null)
   const [countdownStepIndex, setCountdownStepIndex] = useState<number | null>(null)
   const [isAudioReady, setAudioReady] = useState(false)
+  const [unlockPopupGameId, setUnlockPopupGameId] = useState<MiniGameId | null>(null)
+  const [unlockBurstActive, setUnlockBurstActive] = useState(false)
 
   useEffect(() => {
     void reload(useCases, DEFAULT_SELECTED_GAME_ID, null, setSnapshot, setError)
@@ -317,7 +388,7 @@ export function GameHubApp() {
     }
 
     const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : lobbyBgmLoop
-    const nextVolume = activeGameId !== null ? 0.3 : resultGameId !== null ? 0.32 : 0.34
+    const nextVolume = activeGameId !== null ? 0.18 : resultGameId !== null ? 0.2 : 0.22
     playBackgroundAudio(nextTrack, nextVolume, bgmAudioRef, bgmTrackRef)
   }, [activeGameId, countdownStepIndex, isAudioReady, resultGameId])
 
@@ -354,34 +425,77 @@ export function GameHubApp() {
   }
 
   const playUiClickSfx = () => {
-    if (!isAudioReady) {
-      return
-    }
-    playOneShotAudio(uiButtonPopSfx, 0.64)
+    if (!isAudioReady) return
+    playOneShotAudio(uiBtnClickSfx, 1)
+  }
+
+  const playUiCardSwipeSfx = () => {
+    if (!isAudioReady) return
+    playOneShotAudio(uiCardSwipeSfx, 0.95)
+  }
+
+  const playUiTabSwitchSfx = () => {
+    if (!isAudioReady) return
+    playOneShotAudio(uiTabSwitchSfx, 0.95)
+  }
+
+  const playUiCoinSfx = () => {
+    if (!isAudioReady) return
+    playOneShotAudio(uiCoinCollectSfx, 1)
+  }
+
+  const playUiUnlockSfx = () => {
+    if (!isAudioReady) return
+    playOneShotAudio(uiUnlockPopSfx, 1)
+  }
+
+  const playUiErrorSfx = () => {
+    if (!isAudioReady) return
+    playOneShotAudio(uiErrorBuzzSfx, 0.95)
   }
 
   const selectGame = async (gameId: MiniGameId) => {
     activateAudio()
-    playUiClickSfx()
+    playUiCardSwipeSfx()
     setIsLobbyGamePicked(true)
     setSelectedGameId(gameId)
     await reload(useCases, gameId, activeGameId, setSnapshot, setError)
   }
 
-  const unlockSelectedGame = async () => {
+  const openUnlockPopup = (gameId: MiniGameId) => {
     activateAudio()
-    playUiClickSfx()
-    if (snapshot === null || selectedCard === null) {
+    playUiTabSwitchSfx()
+    setUnlockPopupGameId(gameId)
+    setUnlockBurstActive(false)
+  }
+
+  const confirmUnlock = async () => {
+    if (snapshot === null || unlockPopupGameId === null) {
       return
     }
 
     try {
-      const next = await useCases.unlockGame(selectedGameId, selectedGameId, activeGameId)
+      const next = await useCases.unlockGame(unlockPopupGameId, selectedGameId, activeGameId)
       setSnapshot(next)
       setError(null)
+      setUnlockBurstActive(true)
+      playUiUnlockSfx()
+      playUiCoinSfx()
+      setTimeout(() => {
+        setUnlockPopupGameId(null)
+        setUnlockBurstActive(false)
+      }, 1200)
     } catch (caught) {
       setError(toMessage(caught))
+      playUiErrorSfx()
+      setUnlockPopupGameId(null)
     }
+  }
+
+  const closeUnlockPopup = () => {
+    playUiClickSfx()
+    setUnlockPopupGameId(null)
+    setUnlockBurstActive(false)
   }
 
   const startGameById = async (gameId: MiniGameId) => {
@@ -393,12 +507,12 @@ export function GameHubApp() {
 
     const gameCard = snapshot.cards.find((card) => card.manifest.id === gameId)
     if (gameCard === undefined) {
-      setError('선택한 미니게임 정보를 찾을 수 없습니다.')
+      setError('Could not find the selected mini game.')
       return
     }
 
     if (!gameCard.unlocked) {
-      setError('잠긴 미니게임은 먼저 해금해야 합니다.')
+      setError('This game is locked. Unlock it first!')
       return
     }
 
@@ -474,7 +588,7 @@ export function GameHubApp() {
       const { response } = completion
       const finishedCard = response.snapshot.cards.find((card) => card.manifest.id === finishedGameId)
       if (finishedCard === undefined) {
-        throw new Error('정산 결과에서 게임 카드 정보를 찾을 수 없습니다.')
+        throw new Error('Could not find game card in settlement results.')
       }
 
       setSnapshot(response.snapshot)
@@ -515,17 +629,30 @@ export function GameHubApp() {
     <main className={`game-shell ${isInGameView ? 'game-immersive' : ''}`}>
       <section className={`hub-frame ${isInGameView ? 'game-immersive' : ''}`} aria-label="mini-game-hub">
         {isInGameView ? null : (
-          <header className="hub-header">
-            <div>
-              <p className="eyebrow">MINI HEAVEN</p>
-              <h1>Bagel Mini Plaza</h1>
+          <>
+            <div className="lobby-deco-layer" aria-hidden>
+              {LOBBY_PARTICLES.map((p, i) => (
+                <span
+                  className={`lobby-deco-particle ${p.type}`}
+                  key={`deco-${i}`}
+                  style={{ left: p.left, top: p.top, '--float-delay': p.delay, '--float-dur': p.dur } as CSSProperties}
+                />
+              ))}
             </div>
-            <p className="coin-badge">{uiModel ? uiModel.coinLabel : '로딩중...'}</p>
-          </header>
+            <header className="hub-header">
+              <div>
+                <img className="hub-logo" src={gameLogoImg} alt="PUNGAK" />
+              </div>
+              <div className="coin-badge">
+                <img className="coin-badge-icon" src={coinIconImg} alt="coin" />
+                <span className="coin-badge-value">{uiModel ? uiModel.coinLabel : '...'}</span>
+              </div>
+            </header>
+          </>
         )}
 
         {lastReward !== null && !isResultActionView && !isInGameView ? (
-          <p className="reward-toast">이번 라운드 보상 +{lastReward} 코인</p>
+          <p className="reward-toast">Round reward +{lastReward} coins</p>
         ) : null}
         {error !== null && !isInGameView ? <p className="error-toast">{error}</p> : null}
 
@@ -547,13 +674,6 @@ export function GameHubApp() {
                 />
               ))}
             </div>
-            <div className={`game-live-cast-overlay ${isCountdownActive ? 'countdown' : ''}`} aria-hidden>
-              {LIVE_CAST.map((cast, index) => (
-                <span className="game-live-cast-item" key={cast.name} style={{ '--cast-index': `${index}` } as CSSProperties}>
-                  <img src={cast.imageSrc} alt="" />
-                </span>
-              ))}
-            </div>
             {isCountdownActive && countdownLabel !== null ? (
               <section
                 className={`game-countdown-panel ${isInGameView ? 'game-immersive' : ''}`}
@@ -561,7 +681,7 @@ export function GameHubApp() {
               >
                 <div className="game-countdown-content">
                   <p className="game-countdown-text">{countdownLabel}</p>
-                  <p className="game-countdown-title">{activeCard?.manifest.title ?? '미니게임'}</p>
+                  <p className="game-countdown-title">{activeCard?.manifest.title ?? 'Mini Game'}</p>
                   <p className="game-countdown-guide">{countdownGuide ?? activeCard?.manifest.description}</p>
                 </div>
               </section>
@@ -574,8 +694,8 @@ export function GameHubApp() {
             )}
             {gameOverOverlay !== null ? (
               <section className="game-over-overlay" aria-live="polite" aria-label="game-over-overlay">
-                <p className="game-over-title">게임 종료!!</p>
-                <p className="game-over-score">FINAL SCORE {gameOverOverlay.score.toLocaleString()}</p>
+                <p className="game-over-title">GAME OVER!!</p>
+                <p className="game-over-score" style={{ fontSize: adaptiveScoreFontSize(`FINAL SCORE ${gameOverOverlay.score.toLocaleString()}`, 20, 360) }}>FINAL SCORE {gameOverOverlay.score.toLocaleString()}</p>
               </section>
             ) : null}
           </section>
@@ -588,26 +708,29 @@ export function GameHubApp() {
               >
                 <p className="post-game-summary-eyebrow">ROUND RESULT</p>
                 <p className="post-game-summary-title">{resultTitle}</p>
-                <p className="post-game-summary-label">FINAL SCORE</p>
-                <p className="post-game-summary-score">{displayedSettlementScore.toLocaleString()}</p>
+                <div className="scoreboard-wrap">
+                  <img className="scoreboard-bg" src={scoreBoardImg} alt="" />
+                  <p className="scoreboard-label">FINAL SCORE</p>
+                  <p className="scoreboard-value" style={{ fontSize: adaptiveScoreFontSize(displayedSettlementScore.toLocaleString(), 52, 320) }}>{displayedSettlementScore.toLocaleString()}</p>
+                </div>
                 <div className="post-game-summary-grid">
                   <div className="post-game-summary-card">
-                    <span>획득 코인</span>
+                    <span>Coins Earned</span>
                     <strong>+{displayedSettlementCoins.toLocaleString()}</strong>
                   </div>
                   <div className="post-game-summary-card">
-                    <span>최고 기록</span>
-                    <strong>{settlement.bestScore.toLocaleString()}점</strong>
+                    <span>Best Score</span>
+                    <strong>{settlement.bestScore.toLocaleString()}</strong>
                   </div>
                   <div className="post-game-summary-card">
-                    <span>플레이 시간</span>
-                    <strong>{(settlement.durationMs / 1000).toFixed(1)}초</strong>
+                    <span>Play Time</span>
+                    <strong>{(settlement.durationMs / 1000).toFixed(1)}s</strong>
                   </div>
                 </div>
                 {settlement.newBestScore ? (
-                  <p className={`post-game-record-banner ${isNewBestEffectActive ? 'active' : ''}`}>NEW RECORD 갱신!</p>
+                  <p className={`post-game-record-banner ${isNewBestEffectActive ? 'active' : ''}`}>NEW RECORD!</p>
                 ) : (
-                  <p className="post-game-record-banner keep">신기록까지 {bestScoreGap.toLocaleString()}점</p>
+                  <p className="post-game-record-banner keep">{bestScoreGap.toLocaleString()} to new record</p>
                 )}
                 {settlement.newBestScore ? (
                   <div className={`post-game-record-burst ${isNewBestEffectActive ? 'active' : ''}`} aria-hidden>
@@ -623,15 +746,26 @@ export function GameHubApp() {
             ) : null}
             <section className="post-game-action-panel" aria-label="post-game-action-panel">
               <button className="action-button retry" type="button" onClick={() => void retryLastGame()}>
-                다시 도전
+                RETRY
               </button>
               <button className="action-button menu" type="button" onClick={() => void openMainMenu()}>
-                메인 메뉴
+                MAIN MENU
               </button>
             </section>
           </>
         ) : (
           <>
+            <div className="lobby-marquee" aria-hidden>
+              <div className="lobby-marquee-track">
+                {[...MARQUEE_ITEMS, ...MARQUEE_ITEMS].map((text, i) => (
+                  <span className="lobby-marquee-item" key={`mq-${i}`}>
+                    <span className="lobby-marquee-dot" />
+                    {text}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <p className="lobby-section-label">MINI GAMES</p>
             <section className="lobby-icon-grid" aria-label="mini-game-icon-grid">
               {uiModel?.cards.map((card) => {
                 const isSelected = isLobbyGamePicked && card.id === selectedGameId
@@ -645,11 +779,21 @@ export function GameHubApp() {
                   >
                     <span className="lobby-icon-thumb">
                       <img src={getLobbyIcon(card.id)} alt={`${card.title} icon`} />
+                      {!card.unlocked && (
+                        <span className="lobby-lock-overlay">
+                          <img className="lobby-lock-icon" src={lockIconImg} alt="locked" />
+                        </span>
+                      )}
                     </span>
                     <span className="lobby-icon-title">{card.title}</span>
-                    <span className={`lobby-icon-state ${card.unlocked ? 'open' : 'locked'}`}>
-                      {card.unlocked ? 'OPEN' : card.unlockCostLabel}
-                    </span>
+                    {card.unlocked ? (
+                      <span className="lobby-icon-state open">OPEN</span>
+                    ) : (
+                      <span className="lobby-icon-state locked">
+                        <img className="lobby-icon-state-coin" src={coinIconImg} alt="" />
+                        {card.unlockCostLabel}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -659,27 +803,60 @@ export function GameHubApp() {
               <section className="hub-selected-panel">
                 <h2>{selectedCard.manifest.title}</h2>
                 <p>{selectedCard.manifest.description}</p>
-                <p className="panel-meta">해금 비용: {selectedCard.manifest.unlockCost} 코인</p>
-                <p className="panel-meta">기본 보상: +{selectedCard.manifest.baseReward} 코인</p>
-                <p className="panel-meta">베스트: {selectedCard.bestScore} · 플레이: {selectedCard.playCount}회</p>
+                <p className="panel-meta">Unlock: {selectedCard.manifest.unlockCost} coins</p>
+                <p className="panel-meta">Reward: +{selectedCard.manifest.baseReward} coins</p>
+                <p className="panel-meta">Best: {selectedCard.bestScore} · Plays: {selectedCard.playCount}</p>
                 <div className="panel-actions">
                   {selectedCard.unlocked ? (
                     <button className="action-button" type="button" onClick={startSelectedGame}>
-                      플레이 시작
+                      PLAY
                     </button>
                   ) : (
-                    <button className="action-button" type="button" onClick={unlockSelectedGame}>
-                      해금하기
+                    <button className="action-button" type="button" onClick={() => openUnlockPopup(selectedGameId)}>
+                      UNLOCK
                     </button>
                   )}
                 </div>
               </section>
             ) : (
               <section className="hub-selected-placeholder" aria-label="lobby-select-guide">
-                <h2>미니게임 선택</h2>
-                <p>아이콘을 터치하면 게임 설명이 표시됩니다.</p>
+                <h2>Select a Game</h2>
+                <p>Tap an icon to see game details.</p>
               </section>
             )}
+
+            {unlockPopupGameId !== null && (() => {
+              const popupCard = snapshot?.cards.find((c) => c.manifest.id === unlockPopupGameId) ?? null
+              return popupCard ? (
+                <div className="unlock-popup-backdrop" onClick={closeUnlockPopup}>
+                  <section className={`unlock-popup ${unlockBurstActive ? 'burst' : ''}`} onClick={(e) => e.stopPropagation()}>
+                    {unlockBurstActive && (
+                      <div className="unlock-burst-fx" aria-hidden>
+                        <span /><span /><span /><span /><span /><span /><span /><span />
+                      </div>
+                    )}
+                    <img className="unlock-popup-icon" src={getLobbyIcon(unlockPopupGameId)} alt="" />
+                    <h3 className="unlock-popup-title">{popupCard.manifest.title}</h3>
+                    <p className="unlock-popup-cost">
+                      <img className="unlock-popup-coin" src={coinIconImg} alt="" />
+                      {popupCard.manifest.unlockCost} coins
+                    </p>
+                    {unlockBurstActive ? (
+                      <p className="unlock-popup-success">UNLOCKED!</p>
+                    ) : (
+                      <div className="unlock-popup-actions">
+                        <button className="action-button" type="button" onClick={() => void confirmUnlock()}>
+                          UNLOCK
+                        </button>
+                        <button className="unlock-popup-cancel" type="button" onClick={closeUnlockPopup}>
+                          CANCEL
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              ) : null
+            })()}
           </>
         )}
       </section>
@@ -749,6 +926,14 @@ function clearTimeoutSafe(timerRef: MutableRefObject<number | null>): void {
   }
 }
 
+function adaptiveScoreFontSize(text: string, basePx: number, containerPx: number): string {
+  const charCount = text.length
+  const estimatedWidth = charCount * basePx * 0.62
+  if (estimatedWidth <= containerPx) return `${basePx}px`
+  const scale = containerPx / estimatedWidth
+  return `${Math.max(basePx * scale, basePx * 0.35)}px`
+}
+
 function easeOutCubic(value: number): number {
   return 1 - (1 - value) ** 3
 }
@@ -780,5 +965,5 @@ function toMessage(caught: unknown): string {
     return caught.message
   }
 
-  return '알 수 없는 오류가 발생했습니다.'
+  return 'An unknown error occurred.'
 }

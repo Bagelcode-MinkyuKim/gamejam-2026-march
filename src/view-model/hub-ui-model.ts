@@ -24,12 +24,12 @@ function toCardModel(card: MiniGameCardState, selectedGameId: MiniGameId): HubUi
     id: card.manifest.id,
     title: card.manifest.title,
     description: card.manifest.description,
-    unlockCostLabel: `${card.manifest.unlockCost} 코인`,
-    rewardLabel: `기본 보상 +${card.manifest.baseReward}`,
+    unlockCostLabel: `${card.manifest.unlockCost}`,
+    rewardLabel: `Reward +${card.manifest.baseReward}`,
     unlocked: card.unlocked,
     selected: card.manifest.id === selectedGameId,
-    bestScoreLabel: `베스트 ${card.bestScore}`,
-    playCountLabel: `플레이 ${card.playCount}회`,
+    bestScoreLabel: `Best ${card.bestScore}`,
+    playCountLabel: `Plays ${card.playCount}`,
     accentColor: card.manifest.accentColor,
   }
 }
@@ -38,7 +38,7 @@ export function projectHubUi(snapshot: HubSnapshot): HubUiModel {
   const active = snapshot.cards.find((card) => card.manifest.id === snapshot.activeGameId)
 
   return {
-    coinLabel: `${snapshot.coins} 코인`,
+    coinLabel: `${snapshot.coins}`,
     activeGameTitle: active ? active.manifest.title : null,
     cards: snapshot.cards.map((card) => toCardModel(card, snapshot.selectedGameId)),
   }
