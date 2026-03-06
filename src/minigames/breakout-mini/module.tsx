@@ -11,1239 +11,662 @@ import stageClearSfx from '../../../assets/sounds/breakout-stage-clear.mp3'
 import ballLostSfx from '../../../assets/sounds/breakout-ball-lost.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
+// ─── Pixel Grid: all coords snap to PX grid ────────────────
+const PX = 2 // pixel size — all units are multiples of this
+const snap = (v: number) => Math.round(v / PX) * PX
+
 // ─── Layout: 9:16 full vertical ────────────────────────────
-const VIEWBOX_WIDTH = 360
-const VIEWBOX_HEIGHT = 640
+const VW = 360
+const VH = 640
 
 // ─── Paddle ─────────────────────────────────────────────────
-const PADDLE_WIDTH = 72
-const PADDLE_HEIGHT = 12
-const PADDLE_Y = VIEWBOX_HEIGHT - 50
-const PADDLE_CORNER_RADIUS = 6
-const PADDLE_WIDE_WIDTH = 110
-const PADDLE_WIDE_DURATION_MS = 8000
+const PAD_W = 72
+const PAD_H = 10
+const PAD_Y = VH - 48
+const PAD_WIDE_W = 108
+const PAD_WIDE_MS = 8000
 
 // ─── Ball ───────────────────────────────────────────────────
-const BALL_RADIUS = 7
-const BALL_INITIAL_SPEED = 240
-const BALL_SPEED_INCREMENT = 15
-const BALL_MAX_SPEED = 480
-const BALL_MIN_VY_RATIO = 0.35
+const BALL_SZ = 8 // square ball size
+const BALL_HALF = BALL_SZ / 2
+const BALL_INIT_SPD = 250
+const BALL_SPD_INC = 16
+const BALL_MAX_SPD = 500
+const BALL_MIN_VY = 0.35
 
 // ─── Bricks ─────────────────────────────────────────────────
-const BRICK_ROWS = 6
-const BRICK_COLS = 8
-const BRICK_WIDTH = 38
-const BRICK_HEIGHT = 16
-const BRICK_GAP = 3
-const BRICK_TOP_OFFSET = 80
-const BRICK_LEFT_OFFSET = (VIEWBOX_WIDTH - (BRICK_COLS * BRICK_WIDTH + (BRICK_COLS - 1) * BRICK_GAP)) / 2
+const BR_ROWS = 6
+const BR_COLS = 8
+const BR_W = 38
+const BR_H = 14
+const BR_GAP = 4
+const BR_TOP = 76
+const BR_LEFT = (VW - (BR_COLS * BR_W + (BR_COLS - 1) * BR_GAP)) / 2
 
-// ─── Game Config ────────────────────────────────────────────
-const INITIAL_LIVES = 3
-const LAUNCH_DELAY_MS = 800
-const PARTICLE_COUNT = 8
-const PARTICLE_LIFETIME_MS = 420
-const SHAKE_DURATION_MS = 150
-const SHAKE_INTENSITY = 5
+// ─── Config ─────────────────────────────────────────────────
+const LIVES = 3
+const LAUNCH_MS = 700
+const SHAKE_MS = 120
+const SHAKE_PX = 4
 
 // ─── Multi-ball ─────────────────────────────────────────────
-const MULTI_BALL_BRICK_THRESHOLD = 14
-const MAX_EXTRA_BALLS = 3
+const MULTI_THRESHOLD = 14
+const MAX_EXTRA = 3
 
-// ─── Unbreakable bricks ────────────────────────────────────
-const UNBREAKABLE_STAGE_START = 3
-const UNBREAKABLE_COLOR = '#475569'
+// ─── Unbreakable / 2-hit ───────────────────────────────────
+const UNBR_STAGE = 3
+const DBL_STAGE = 2
 
-// ─── 2-hit bricks ──────────────────────────────────────────
-const DOUBLE_HIT_STAGE_START = 2
-const DOUBLE_HIT_COLOR_DARK = 0.55 // darken factor for 2-hit bricks
+// ─── Power-ups ──────────────────────────────────────────────
+type PUType = 'wide' | 'fire' | 'slow' | 'life' | 'multi' | 'shield' | 'magnet' | 'bomb'
+const PU_CHANCE = 0.22
+const PU_SPD = 130
+const PU_SZ = 12
 
-// ─── Score ──────────────────────────────────────────────────
-const CONSECUTIVE_HIT_BONUS = 5
-
-// ─── Power-up types ─────────────────────────────────────────
-type PowerUpType = 'wide' | 'fireball' | 'slow' | 'extra-life' | 'multi-ball' | 'shield' | 'magnet'
-
-const POWERUP_DROP_CHANCE = 0.20
-const POWERUP_SPEED = 120
-const POWERUP_SIZE = 14
-
-const POWERUP_COLORS: Record<PowerUpType, string> = {
-  'wide': '#22c55e',
-  'fireball': '#ef4444',
-  'slow': '#3b82f6',
-  'extra-life': '#ec4899',
-  'multi-ball': '#a855f7',
-  'shield': '#f59e0b',
-  'magnet': '#14b8a6',
+const PU_COLORS: Record<PUType, string> = {
+  wide: '#50fa7b', fire: '#ff5555', slow: '#8be9fd', life: '#ff79c6',
+  multi: '#bd93f9', shield: '#f1fa8c', magnet: '#6272a4', bomb: '#ffb86c',
 }
-
-const POWERUP_LABELS: Record<PowerUpType, string> = {
-  'wide': 'W',
-  'fireball': 'F',
-  'slow': 'S',
-  'extra-life': '+',
-  'multi-ball': 'M',
-  'shield': 'D',
-  'magnet': 'G',
+const PU_LABEL: Record<PUType, string> = {
+  wide: 'W', fire: 'F', slow: 'S', life: '+', multi: 'M', shield: 'D', magnet: 'G', bomb: 'B',
 }
-
-const POWERUP_WEIGHTS: { type: PowerUpType; weight: number }[] = [
-  { type: 'wide', weight: 25 },
-  { type: 'fireball', weight: 18 },
-  { type: 'slow', weight: 15 },
-  { type: 'extra-life', weight: 8 },
-  { type: 'multi-ball', weight: 14 },
-  { type: 'shield', weight: 12 },
-  { type: 'magnet', weight: 8 },
+const PU_WEIGHTS: { t: PUType; w: number }[] = [
+  { t: 'wide', w: 22 }, { t: 'fire', w: 16 }, { t: 'slow', w: 14 },
+  { t: 'life', w: 6 }, { t: 'multi', w: 12 }, { t: 'shield', w: 10 },
+  { t: 'magnet', w: 8 }, { t: 'bomb', w: 12 },
 ]
 
-// ─── Fireball mode ──────────────────────────────────────────
-const FIREBALL_DURATION_MS = 6000
+// ─── Durations ──────────────────────────────────────────────
+const FIRE_MS = 6000
+const SLOW_MS = 5000
+const SLOW_F = 0.55
+const MAGNET_MS = 7000
+const MAGNET_STR = 200
+const SHIELD_Y = VH - 6
 
-// ─── Slow mode ──────────────────────────────────────────────
-const SLOW_DURATION_MS = 5000
-const SLOW_FACTOR = 0.55
+// ─── Moving bricks (stage 4+) ──────────────────────────────
+const MOVE_STAGE = 4
+const MOVE_SPEED = 30
 
-// ─── Shield ─────────────────────────────────────────────────
-const SHIELD_Y = VIEWBOX_HEIGHT - 8
+// ─── Pixel Particle ────────────────────────────────────────
+const PART_LIFE = 400
+const PART_CT = 6
 
-// ─── Magnet ─────────────────────────────────────────────────
-const MAGNET_DURATION_MS = 7000
-const MAGNET_STRENGTH = 180
+// ─── Retro Palette (Dracula) ───────────────────────────────
+const PAL = {
+  bg: '#282a36', bgLight: '#44475a', fg: '#f8f8f2', comment: '#6272a4',
+  red: '#ff5555', orange: '#ffb86c', yellow: '#f1fa8c',
+  green: '#50fa7b', cyan: '#8be9fd', purple: '#bd93f9', pink: '#ff79c6',
+}
 
-// ─── Trail ──────────────────────────────────────────────────
-const TRAIL_LENGTH = 8
-const TRAIL_INTERVAL_MS = 16
+const BRICK_PAL: { c: string; pts: number }[] = [
+  { c: PAL.red, pts: 50 }, { c: PAL.orange, pts: 40 }, { c: PAL.yellow, pts: 30 },
+  { c: PAL.green, pts: 20 }, { c: PAL.cyan, pts: 15 }, { c: PAL.purple, pts: 10 },
+]
 
 // ─── Types ──────────────────────────────────────────────────
 interface Brick {
-  readonly id: number
-  readonly row: number
-  readonly col: number
-  readonly x: number
-  readonly y: number
-  readonly width: number
-  readonly height: number
-  readonly baseColor: string
-  readonly points: number
-  readonly unbreakable: boolean
-  readonly maxHits: number
-  hitsLeft: number
-  alive: boolean
-  hitFlash: number
+  id: number; row: number; col: number; x: number; y: number
+  w: number; h: number; baseColor: string; pts: number
+  unbr: boolean; maxHp: number; hp: number; alive: boolean
+  flash: number; moveDir: number
+}
+interface Ball { x: number; y: number; vx: number; vy: number; spd: number; on: boolean }
+interface Pxl { id: number; x: number; y: number; vx: number; vy: number; c: string; t: number; sz: number }
+interface PU { id: number; type: PUType; x: number; y: number; t: number }
+interface Trail { x: number; y: number }
+
+interface GS {
+  bricks: Brick[]; ball: Ball; extras: Ball[]; padX: number
+  lives: number; score: number; stage: number; pxls: Pxl[]; ms: number
+  launchMs: number; shakeMs: number; nPxl: number; nBrick: number
+  consHits: number; totalDest: number
+  pus: PU[]; nPU: number
+  wideMs: number; fireMs: number; slowMs: number; shieldOn: boolean; magnetMs: number
+  combo: number; comboMs: number
+  trail: Trail[]; trailMs: number; stageFlashMs: number
+  multiplier: number; multiplierMs: number
 }
 
-interface Ball {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  speed: number
-  launched: boolean
-}
+// ─── Helpers ────────────────────────────────────────────────
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-interface Particle {
-  readonly id: number
-  x: number
-  y: number
-  vx: number
-  vy: number
-  color: string
-  createdAtMs: number
-  size: number
-}
-
-interface PowerUp {
-  readonly id: number
-  readonly type: PowerUpType
-  x: number
-  y: number
-  createdAtMs: number
-}
-
-interface TrailPoint {
-  x: number
-  y: number
-  age: number
-}
-
-interface GameState {
-  bricks: Brick[]
-  ball: Ball
-  extraBalls: Ball[]
-  paddleX: number
-  lives: number
-  score: number
-  stage: number
-  particles: Particle[]
-  elapsedMs: number
-  launchTimerMs: number
-  shakeMs: number
-  nextParticleId: number
-  nextBrickId: number
-  consecutiveHits: number
-  totalBricksDestroyed: number
-  multiBallsSpawned: number
-  powerUps: PowerUp[]
-  nextPowerUpId: number
-  widePaddleMs: number
-  fireballMs: number
-  slowMs: number
-  shieldActive: boolean
-  magnetMs: number
-  combo: number
-  comboTimerMs: number
-  trail: TrailPoint[]
-  lastTrailMs: number
-  stageClearFlashMs: number
-}
-
-const BRICK_COLORS: { color: string; points: number }[] = [
-  { color: '#ef4444', points: 50 },
-  { color: '#f97316', points: 40 },
-  { color: '#eab308', points: 30 },
-  { color: '#22c55e', points: 20 },
-  { color: '#06b6d4', points: 10 },
-  { color: '#8b5cf6', points: 10 },
-]
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
-}
-
-function darkenColor(hex: string, factor: number): string {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgb(${Math.round(r * factor)},${Math.round(g * factor)},${Math.round(b * factor)})`
-}
-
-function pickPowerUpType(): PowerUpType {
-  const totalWeight = POWERUP_WEIGHTS.reduce((sum, w) => sum + w.weight, 0)
-  let rand = Math.random() * totalWeight
-  for (const entry of POWERUP_WEIGHTS) {
-    rand -= entry.weight
-    if (rand <= 0) return entry.type
-  }
+function pickPU(): PUType {
+  const tot = PU_WEIGHTS.reduce((s, w) => s + w.w, 0)
+  let r = Math.random() * tot
+  for (const e of PU_WEIGHTS) { r -= e.w; if (r <= 0) return e.t }
   return 'wide'
 }
 
-function createBricks(stage: number, startId: number): Brick[] {
-  const bricks: Brick[] = []
+function makeBricks(stage: number, startId: number): Brick[] {
+  const out: Brick[] = []
   let id = startId
-  const rows = Math.min(BRICK_ROWS + Math.floor(stage / 2), 9)
-
-  for (let row = 0; row < rows; row += 1) {
-    const colorIndex = row % BRICK_COLORS.length
-    const { color, points } = BRICK_COLORS[colorIndex]
-
-    for (let col = 0; col < BRICK_COLS; col += 1) {
-      const skipPattern = stage > 1 && (row + col + stage) % 7 === 0
-      if (skipPattern) continue
-
-      const x = BRICK_LEFT_OFFSET + col * (BRICK_WIDTH + BRICK_GAP)
-      const y = BRICK_TOP_OFFSET + row * (BRICK_HEIGHT + BRICK_GAP)
-      const isUnbreakable = stage >= UNBREAKABLE_STAGE_START && (row + col + stage) % 11 === 0
-      // 2-hit bricks: appear from stage 2+, scattered pattern
-      const isDoubleHit = !isUnbreakable && stage >= DOUBLE_HIT_STAGE_START && (row * 3 + col + stage) % 5 === 0
-      const maxHits = isUnbreakable ? 999 : isDoubleHit ? 2 : 1
-
-      bricks.push({
-        id, row, col, x, y,
-        width: BRICK_WIDTH,
-        height: BRICK_HEIGHT,
-        baseColor: isUnbreakable ? UNBREAKABLE_COLOR : color,
-        points: isUnbreakable ? 0 : (points + stage * 2) * maxHits,
-        unbreakable: isUnbreakable,
-        maxHits,
-        hitsLeft: maxHits,
-        alive: true,
-        hitFlash: 0,
-      })
-      id += 1
+  const rows = Math.min(BR_ROWS + Math.floor(stage / 2), 9)
+  for (let r = 0; r < rows; r++) {
+    const ci = r % BRICK_PAL.length
+    const { c, pts } = BRICK_PAL[ci]
+    for (let col = 0; col < BR_COLS; col++) {
+      if (stage > 1 && (r + col + stage) % 7 === 0) continue
+      const x = BR_LEFT + col * (BR_W + BR_GAP)
+      const y = BR_TOP + r * (BR_H + BR_GAP)
+      const unbr = stage >= UNBR_STAGE && (r + col + stage) % 11 === 0
+      const dbl = !unbr && stage >= DBL_STAGE && (r * 3 + col + stage) % 5 === 0
+      const maxHp = unbr ? 999 : dbl ? 2 : 1
+      const moveDir = stage >= MOVE_STAGE && !unbr && r % 2 === 0 ? (col % 2 === 0 ? 1 : -1) : 0
+      out.push({ id: id++, row: r, col, x, y, w: BR_W, h: BR_H, baseColor: unbr ? PAL.comment : c, pts: unbr ? 0 : (pts + stage * 2) * maxHp, unbr, maxHp, hp: maxHp, alive: true, flash: 0, moveDir })
     }
   }
-  return bricks
+  return out
 }
 
-function getBrickColor(brick: Brick): string {
-  if (brick.unbreakable) return UNBREAKABLE_COLOR
-  if (brick.maxHits > 1 && brick.hitsLeft > 1) return darkenColor(brick.baseColor, DOUBLE_HIT_COLOR_DARK)
-  return brick.baseColor
-}
-
-function createBall(paddleX: number): Ball {
-  return {
-    x: paddleX,
-    y: PADDLE_Y - BALL_RADIUS - 1,
-    vx: 0, vy: 0,
-    speed: BALL_INITIAL_SPEED,
-    launched: false,
+function brickColor(b: Brick): string {
+  if (b.unbr) return PAL.comment
+  if (b.maxHp > 1 && b.hp > 1) {
+    const r = parseInt(b.baseColor.slice(1, 3), 16)
+    const g = parseInt(b.baseColor.slice(3, 5), 16)
+    const bl = parseInt(b.baseColor.slice(5, 7), 16)
+    return `rgb(${r >> 1},${g >> 1},${bl >> 1})`
   }
+  return b.baseColor
 }
 
-function launchBall(ball: Ball): void {
-  const angle = -Math.PI / 2 + (Math.random() - 0.5) * (Math.PI / 3)
-  ball.vx = Math.cos(angle) * ball.speed
-  ball.vy = Math.sin(angle) * ball.speed
-  ball.launched = true
+function mkBall(px: number): Ball { return { x: px, y: PAD_Y - BALL_SZ - 1, vx: 0, vy: 0, spd: BALL_INIT_SPD, on: false } }
+function launchBall(b: Ball) { const a = -Math.PI / 2 + (Math.random() - 0.5) * (Math.PI / 3); b.vx = Math.cos(a) * b.spd; b.vy = Math.sin(a) * b.spd; b.on = true }
+
+function mkState(): GS {
+  const px = VW / 2, bricks = makeBricks(1, 0)
+  return { bricks, ball: mkBall(px), extras: [], padX: px, lives: LIVES, score: 0, stage: 1, pxls: [], ms: 0, launchMs: LAUNCH_MS, shakeMs: 0, nPxl: 0, nBrick: bricks.length, consHits: 0, totalDest: 0, pus: [], nPU: 0, wideMs: 0, fireMs: 0, slowMs: 0, shieldOn: false, magnetMs: 0, combo: 0, comboMs: 0, trail: [], trailMs: 0, stageFlashMs: 0, multiplier: 1, multiplierMs: 0 }
 }
 
-function createInitialState(): GameState {
-  const paddleX = VIEWBOX_WIDTH / 2
-  const bricks = createBricks(1, 0)
-  return {
-    bricks,
-    ball: createBall(paddleX),
-    extraBalls: [],
-    paddleX,
-    lives: INITIAL_LIVES,
-    score: 0,
-    stage: 1,
-    particles: [],
-    elapsedMs: 0,
-    launchTimerMs: LAUNCH_DELAY_MS,
-    shakeMs: 0,
-    nextParticleId: 0,
-    nextBrickId: bricks.length,
-    consecutiveHits: 0,
-    totalBricksDestroyed: 0,
-    multiBallsSpawned: 0,
-    powerUps: [],
-    nextPowerUpId: 0,
-    widePaddleMs: 0,
-    fireballMs: 0,
-    slowMs: 0,
-    shieldActive: false,
-    magnetMs: 0,
-    combo: 0,
-    comboTimerMs: 0,
-    trail: [],
-    lastTrailMs: 0,
-    stageClearFlashMs: 0,
+function spawnPxl(s: GS, x: number, y: number, c: string, n = PART_CT) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 160
+    s.pxls.push({ id: s.nPxl++, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, c, t: s.ms, sz: PX + Math.floor(Math.random() * 3) * PX })
   }
 }
 
-function spawnParticles(state: GameState, x: number, y: number, color: string, count = PARTICLE_COUNT): void {
-  for (let i = 0; i < count; i += 1) {
-    const angle = Math.random() * Math.PI * 2
-    const speed = 80 + Math.random() * 180
-    state.particles.push({
-      id: state.nextParticleId,
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      color,
-      createdAtMs: state.elapsedMs,
-      size: 2 + Math.random() * 3,
-    })
-    state.nextParticleId += 1
+function boxHit(rx: number, ry: number, rw: number, rh: number, bx: number, by: number, bs: number): { hit: boolean; nx: number; ny: number } {
+  const cx = clamp(bx + bs / 2, rx, rx + rw), cy = clamp(by + bs / 2, ry, ry + rh)
+  const dx = (bx + bs / 2) - cx, dy = (by + bs / 2) - cy, d2 = dx * dx + dy * dy, r = bs / 2
+  if (d2 > r * r) return { hit: false, nx: 0, ny: 0 }
+  const d = Math.sqrt(d2) || 1
+  return { hit: true, nx: dx / d, ny: dy / d }
+}
+
+function reflect(b: Ball, nx: number, ny: number) {
+  const dot = b.vx * nx + b.vy * ny; b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny
+  const sp = Math.hypot(b.vx, b.vy) || 1; b.vx = (b.vx / sp) * b.spd; b.vy = (b.vy / sp) * b.spd
+}
+
+function ensureVY(b: Ball) {
+  const sp = Math.hypot(b.vx, b.vy) || 1
+  if (Math.abs(b.vy) / sp < BALL_MIN_VY) {
+    const s = b.vy >= 0 ? 1 : -1; b.vy = s * BALL_MIN_VY * b.spd
+    b.vx = Math.sign(b.vx || 1) * Math.sqrt(b.spd * b.spd - b.vy * b.vy)
   }
 }
 
-function rectIntersectsBall(
-  rx: number, ry: number, rw: number, rh: number,
-  bx: number, by: number, br: number,
-): { hit: boolean; normalX: number; normalY: number } {
-  const closestX = clampNumber(bx, rx, rx + rw)
-  const closestY = clampNumber(by, ry, ry + rh)
-  const dx = bx - closestX
-  const dy = by - closestY
-  const distSq = dx * dx + dy * dy
-  if (distSq > br * br) return { hit: false, normalX: 0, normalY: 0 }
-  const dist = Math.sqrt(distSq) || 1
-  return { hit: true, normalX: dx / dist, normalY: dy / dist }
-}
-
-function reflectBall(ball: Ball, normalX: number, normalY: number): void {
-  const dot = ball.vx * normalX + ball.vy * normalY
-  ball.vx -= 2 * dot * normalX
-  ball.vy -= 2 * dot * normalY
-  const currentSpeed = Math.hypot(ball.vx, ball.vy) || 1
-  ball.vx = (ball.vx / currentSpeed) * ball.speed
-  ball.vy = (ball.vy / currentSpeed) * ball.speed
-}
-
-function ensureMinVerticalComponent(ball: Ball): void {
-  const currentSpeed = Math.hypot(ball.vx, ball.vy) || 1
-  const vyRatio = Math.abs(ball.vy) / currentSpeed
-  if (vyRatio < BALL_MIN_VY_RATIO) {
-    const sign = ball.vy >= 0 ? 1 : -1
-    ball.vy = sign * BALL_MIN_VY_RATIO * ball.speed
-    const remainingVx = Math.sqrt(ball.speed * ball.speed - ball.vy * ball.vy)
-    ball.vx = Math.sign(ball.vx || 1) * remainingVx
-  }
-}
-
-// ─── CSS ────────────────────────────────────────────────────
-const BREAKOUT_CSS = `
-  .breakout-panel {
-    max-width: 432px;
-    width: 100%;
-    height: 100%;
-    margin: 0 auto;
-    overflow: hidden;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-  }
-  .breakout-hud {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px 4px;
-    z-index: 5;
-    flex-shrink: 0;
-  }
-  .breakout-score {
-    font-size: 1.4rem;
-    color: #fbbf24;
-    margin: 0;
-    text-shadow: 0 2px 8px rgba(251,191,36,0.4);
-  }
-  .breakout-best {
-    font-size: 0.55rem;
-    color: #94a3b8;
-    margin: 0;
-  }
-  .breakout-stage {
-    font-size: 0.7rem;
-    color: #e2e8f0;
-    margin: 0;
-    text-shadow: 0 0 8px rgba(255,255,255,0.3);
-  }
-  .breakout-lives {
-    display: flex;
-    gap: 4px;
-  }
-  .breakout-board {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-    touch-action: none;
-  }
-  .breakout-svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-  .breakout-powerup-bar {
-    display: flex;
-    gap: 6px;
-    padding: 0 12px 4px;
-    min-height: 22px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-  }
-  .breakout-powerup-badge {
-    font-size: 0.5rem;
-    padding: 2px 8px;
-    border-radius: 8px;
-    color: #fff;
-    font-weight: bold;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-  }
-  .breakout-combo-text {
-    position: absolute;
-    top: 45%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 2rem;
-    font-weight: bold;
-    pointer-events: none;
-    z-index: 10;
-    text-shadow: 0 4px 16px rgba(0,0,0,0.5), 0 0 20px currentColor;
-    animation: breakout-combo-pop 0.4s ease-out;
-  }
-  @keyframes breakout-combo-pop {
-    0% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
-    40% { transform: translate(-50%, -50%) scale(0.9); opacity: 1; }
-    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-  }
-  .breakout-stage-banner {
-    position: absolute;
-    top: 35%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 2.2rem;
-    color: #fbbf24;
-    font-weight: bold;
-    pointer-events: none;
-    z-index: 12;
-    text-shadow: 0 4px 20px rgba(251,191,36,0.6);
-    animation: breakout-stage-in 0.6s ease-out;
-  }
-  @keyframes breakout-stage-in {
-    0% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
-    50% { transform: translate(-50%, -50%) scale(0.85); opacity: 1; }
-    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-  }
+// ─── CSS (pixel/retro theme) ────────────────────────────────
+const CSS = `
+.bo-panel{max-width:432px;width:100%;height:100%;margin:0 auto;overflow:hidden;position:relative;display:flex;flex-direction:column;background:${PAL.bg};image-rendering:pixelated}
+.bo-hud{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 2px;z-index:5;flex-shrink:0}
+.bo-score{font-size:1.3rem;color:${PAL.yellow};margin:0;text-shadow:0 2px 0 ${PAL.bgLight}}
+.bo-best{font-size:.5rem;color:${PAL.comment};margin:0}
+.bo-stage{font-size:.65rem;color:${PAL.fg};margin:0}
+.bo-lives{display:flex;gap:3px}
+.bo-board{flex:1;position:relative;overflow:hidden;touch-action:none}
+.bo-svg{width:100%;height:100%;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.bo-pu-bar{display:flex;gap:4px;padding:0 10px 3px;min-height:20px;flex-shrink:0;flex-wrap:wrap}
+.bo-pu-badge{font-size:.45rem;padding:1px 6px;border-radius:0;border:${PX}px solid ${PAL.fg};color:${PAL.bg};font-weight:bold}
+.bo-combo{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);font-size:1.8rem;font-weight:bold;pointer-events:none;z-index:10;text-shadow:${PX}px ${PX}px 0 ${PAL.bg};animation:bo-pop .35s ease-out}
+.bo-stg{position:absolute;top:32%;left:50%;transform:translate(-50%,-50%);font-size:2rem;color:${PAL.yellow};font-weight:bold;pointer-events:none;z-index:12;text-shadow:${PX * 2}px ${PX * 2}px 0 ${PAL.bg};animation:bo-pop .5s ease-out}
+.bo-mult{position:absolute;top:18%;right:12px;font-size:1.1rem;color:${PAL.orange};font-weight:bold;pointer-events:none;z-index:8;text-shadow:${PX}px ${PX}px 0 ${PAL.bg};animation:bo-pop .3s ease-out}
+@keyframes bo-pop{0%{transform:translate(-50%,-50%) scale(2.5);opacity:0}40%{transform:translate(-50%,-50%) scale(.9);opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}
+.bo-scanline{position:absolute;inset:0;pointer-events:none;z-index:20;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.06) 3px,rgba(0,0,0,.06) 4px);mix-blend-mode:multiply}
 `
 
 function BreakoutMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const [renderScore, setRenderScore] = useState(0)
-  const [renderLives, setRenderLives] = useState(INITIAL_LIVES)
-  const [renderStage, setRenderStage] = useState(1)
-  const [renderBricks, setRenderBricks] = useState<Brick[]>(() => createBricks(1, 0))
-  const [renderBalls, setRenderBalls] = useState<{ x: number; y: number; fireball: boolean; magnet: boolean }[]>([])
-  const [renderPaddleX, setRenderPaddleX] = useState(VIEWBOX_WIDTH / 2)
-  const [renderPaddleWidth, setRenderPaddleWidth] = useState(PADDLE_WIDTH)
-  const [renderParticles, setRenderParticles] = useState<Particle[]>([])
-  const [renderShakeX, setRenderShakeX] = useState(0)
-  const [renderShakeY, setRenderShakeY] = useState(0)
-  const [renderPowerUps, setRenderPowerUps] = useState<PowerUp[]>([])
-  const [renderTrail, setRenderTrail] = useState<TrailPoint[]>([])
-  const [renderCombo, setRenderCombo] = useState(0)
-  const [renderComboLabel, setRenderComboLabel] = useState('')
-  const [renderComboColor, setRenderComboColor] = useState('#fff')
-  const [renderActivePowerUps, setRenderActivePowerUps] = useState<{ type: PowerUpType; ms: number }[]>([])
-  const [renderStageBanner, setRenderStageBanner] = useState(0)
-  const [renderShield, setRenderShield] = useState(false)
+  const [rScore, setScore] = useState(0)
+  const [rLives, setLives] = useState(LIVES)
+  const [rStage, setStage] = useState(1)
+  const [rBricks, setBricks] = useState<Brick[]>(() => makeBricks(1, 0))
+  const [rBalls, setBalls] = useState<{ x: number; y: number; fire: boolean; mag: boolean }[]>([])
+  const [rPadX, setPadX] = useState(VW / 2)
+  const [rPadW, setPadW] = useState(PAD_W)
+  const [rPxls, setPxls] = useState<Pxl[]>([])
+  const [rShkX, setShkX] = useState(0)
+  const [rShkY, setShkY] = useState(0)
+  const [rPUs, setPUs] = useState<PU[]>([])
+  const [rTrail, setTrail] = useState<Trail[]>([])
+  const [rCombo, setCombo] = useState(0)
+  const [rComboLbl, setComboLbl] = useState('')
+  const [rComboClr, setComboClr] = useState('#fff')
+  const [rActPU, setActPU] = useState<{ t: PUType; ms: number }[]>([])
+  const [rStageBan, setStageBan] = useState(0)
+  const [rShield, setShield] = useState(false)
+  const [rMult, setMult] = useState(1)
 
   const effects = useGameEffects()
-
-  const stateRef = useRef<GameState>(createInitialState())
-  const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const pointerXRef = useRef<number | null>(null)
+  const sRef = useRef<GS>(mkState())
+  const doneRef = useRef(false)
+  const rafRef = useRef<number | null>(null)
+  const lastRef = useRef<number | null>(null)
+  const ptrRef = useRef<number | null>(null)
   const boardRef = useRef<HTMLDivElement | null>(null)
+  const audRef = useRef<Record<string, HTMLAudioElement | null>>({})
 
-  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
-
-  const playSfx = useCallback((key: string, volume: number, playbackRate = 1) => {
-    const source = audioRefs.current[key]
-    if (!source) return
-    source.currentTime = 0
-    source.volume = volume
-    source.playbackRate = playbackRate
-    void source.play().catch(() => {})
+  const sfx = useCallback((k: string, v: number, r = 1) => {
+    const a = audRef.current[k]; if (!a) return
+    a.currentTime = 0; a.volume = v; a.playbackRate = r; void a.play().catch(() => {})
   }, [])
 
-  const syncRenderState = useCallback((state: GameState) => {
-    setRenderScore(state.score)
-    setRenderLives(state.lives)
-    setRenderStage(state.stage)
-    setRenderBricks([...state.bricks])
-
-    const currentPaddleW = state.widePaddleMs > 0 ? PADDLE_WIDE_WIDTH : PADDLE_WIDTH
-    setRenderPaddleWidth(currentPaddleW)
-
-    const allBalls = [state.ball, ...state.extraBalls].filter(b => b.launched || !state.ball.launched)
-    setRenderBalls(allBalls.map(b => ({ x: b.x, y: b.y, fireball: state.fireballMs > 0, magnet: state.magnetMs > 0 })))
-
-    setRenderPaddleX(state.paddleX)
-    setRenderParticles([...state.particles])
-    setRenderPowerUps([...state.powerUps])
-    setRenderTrail([...state.trail])
-    setRenderCombo(state.combo)
-    setRenderComboLabel(getComboLabel(state.combo))
-    setRenderComboColor(getComboColor(state.combo))
-    setRenderStageBanner(state.stageClearFlashMs)
-    setRenderShield(state.shieldActive)
-
-    const activePU: { type: PowerUpType; ms: number }[] = []
-    if (state.widePaddleMs > 0) activePU.push({ type: 'wide', ms: state.widePaddleMs })
-    if (state.fireballMs > 0) activePU.push({ type: 'fireball', ms: state.fireballMs })
-    if (state.slowMs > 0) activePU.push({ type: 'slow', ms: state.slowMs })
-    if (state.shieldActive) activePU.push({ type: 'shield', ms: 99999 })
-    if (state.magnetMs > 0) activePU.push({ type: 'magnet', ms: state.magnetMs })
-    setRenderActivePowerUps(activePU)
-
-    if (state.shakeMs > 0) {
-      const intensity = (state.shakeMs / SHAKE_DURATION_MS) * SHAKE_INTENSITY
-      setRenderShakeX((Math.random() - 0.5) * 2 * intensity)
-      setRenderShakeY((Math.random() - 0.5) * 2 * intensity)
-    } else {
-      setRenderShakeX(0)
-      setRenderShakeY(0)
-    }
+  const sync = useCallback((s: GS) => {
+    setScore(s.score); setLives(s.lives); setStage(s.stage); setBricks([...s.bricks])
+    const pw = s.wideMs > 0 ? PAD_WIDE_W : PAD_W; setPadW(pw)
+    const allB = [s.ball, ...s.extras].filter(b => b.on || !s.ball.on)
+    setBalls(allB.map(b => ({ x: snap(b.x), y: snap(b.y), fire: s.fireMs > 0, mag: s.magnetMs > 0 })))
+    setPadX(snap(s.padX)); setPxls([...s.pxls]); setPUs([...s.pus])
+    setTrail([...s.trail]); setCombo(s.combo)
+    setComboLbl(getComboLabel(s.combo)); setComboClr(getComboColor(s.combo))
+    setStageBan(s.stageFlashMs); setShield(s.shieldOn); setMult(s.multiplier)
+    const ap: { t: PUType; ms: number }[] = []
+    if (s.wideMs > 0) ap.push({ t: 'wide', ms: s.wideMs })
+    if (s.fireMs > 0) ap.push({ t: 'fire', ms: s.fireMs })
+    if (s.slowMs > 0) ap.push({ t: 'slow', ms: s.slowMs })
+    if (s.shieldOn) ap.push({ t: 'shield', ms: 99999 })
+    if (s.magnetMs > 0) ap.push({ t: 'magnet', ms: s.magnetMs })
+    if (s.multiplierMs > 0) ap.push({ t: 'bomb', ms: s.multiplierMs }) // reuse badge for multiplier
+    setActPU(ap)
+    if (s.shakeMs > 0) {
+      const i = (s.shakeMs / SHAKE_MS) * SHAKE_PX
+      setShkX(snap((Math.random() - 0.5) * 2 * i)); setShkY(snap((Math.random() - 0.5) * 2 * i))
+    } else { setShkX(0); setShkY(0) }
   }, [])
 
-  const finishGame = useCallback(() => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    const state = stateRef.current
-    const elapsedMs = Math.max(Math.round(state.elapsedMs), Math.round(DEFAULT_FRAME_MS))
-    playSfx('gameOver', 0.6, 0.95)
-    effects.cleanup()
-    onFinish({ score: state.score, durationMs: elapsedMs })
-  }, [onFinish, playSfx, effects])
+  const finish = useCallback(() => {
+    if (doneRef.current) return; doneRef.current = true
+    const s = sRef.current; sfx('over', 0.6, 0.95); effects.cleanup()
+    onFinish({ score: s.score, durationMs: Math.max(Math.round(s.ms), Math.round(DEFAULT_FRAME_MS)) })
+  }, [onFinish, sfx, effects])
 
-  const advanceStage = useCallback((state: GameState) => {
-    state.stage += 1
-    const newSpeed = Math.min(BALL_MAX_SPEED, state.ball.speed + BALL_SPEED_INCREMENT)
-    const bricks = createBricks(state.stage, state.nextBrickId)
-    state.bricks = bricks
-    state.nextBrickId += bricks.length
-    state.ball = createBall(state.paddleX)
-    state.ball.speed = newSpeed
-    state.launchTimerMs = LAUNCH_DELAY_MS
-    state.extraBalls = []
-    state.powerUps = []
-    state.trail = []
-    state.stageClearFlashMs = 1500
-    // Stage bonus: +100 * stage
-    const stageBonus = 100 * state.stage
-    state.score += stageBonus
-    playSfx('stageClear', 0.6, 1.1)
-    effects.comboHitBurst(180, 320, state.stage * 6, stageBonus)
-    effects.triggerFlash('rgba(251,191,36,0.4)', 200)
-  }, [playSfx, effects])
+  const nextStage = useCallback((s: GS) => {
+    s.stage += 1; const spd = Math.min(BALL_MAX_SPD, s.ball.spd + BALL_SPD_INC)
+    const br = makeBricks(s.stage, s.nBrick); s.bricks = br; s.nBrick += br.length
+    s.ball = mkBall(s.padX); s.ball.spd = spd; s.launchMs = LAUNCH_MS
+    s.extras = []; s.pus = []; s.trail = []; s.stageFlashMs = 1400
+    const bonus = 100 * s.stage; s.score += bonus
+    // Multiplier boost on stage clear
+    s.multiplier = Math.min(s.multiplier + 1, 5); s.multiplierMs = 10000
+    sfx('clear', 0.6, 1.1); effects.comboHitBurst(180, 320, s.stage * 6, bonus)
+    effects.triggerFlash(`${PAL.yellow}66`, 200)
+  }, [sfx, effects])
 
-  const loseBall = useCallback((state: GameState) => {
-    state.lives -= 1
-    state.shakeMs = SHAKE_DURATION_MS
-    state.combo = 0
-    state.comboTimerMs = 0
-    state.trail = []
-    playSfx('ballLost', 0.5)
-    effects.triggerShake(10)
-    effects.triggerFlash('rgba(239,68,68,0.5)', 150)
-    if (state.lives > 0) {
-      state.ball = createBall(state.paddleX)
-      state.launchTimerMs = LAUNCH_DELAY_MS
-    }
-  }, [playSfx, effects])
+  const loseBall = useCallback((s: GS) => {
+    s.lives -= 1; s.shakeMs = SHAKE_MS; s.combo = 0; s.comboMs = 0; s.trail = []
+    s.multiplier = 1; s.multiplierMs = 0
+    sfx('lost', 0.5); effects.triggerShake(10); effects.triggerFlash(`${PAL.red}88`, 150)
+    if (s.lives > 0) { s.ball = mkBall(s.padX); s.launchMs = LAUNCH_MS }
+  }, [sfx, effects])
 
-  const updatePaddleFromPointer = useCallback((state: GameState) => {
-    const board = boardRef.current
-    if (!board || pointerXRef.current === null) return
-    const rect = board.getBoundingClientRect()
-    const relativeX = (pointerXRef.current - rect.left) / rect.width
-    const currentPaddleW = state.widePaddleMs > 0 ? PADDLE_WIDE_WIDTH : PADDLE_WIDTH
-    const targetX = clampNumber(
-      relativeX * VIEWBOX_WIDTH,
-      currentPaddleW / 2,
-      VIEWBOX_WIDTH - currentPaddleW / 2,
-    )
-    state.paddleX += (targetX - state.paddleX) * 0.4
-    state.paddleX = clampNumber(state.paddleX, currentPaddleW / 2, VIEWBOX_WIDTH - currentPaddleW / 2)
+  const movePad = useCallback((s: GS) => {
+    const bd = boardRef.current; if (!bd || ptrRef.current === null) return
+    const rc = bd.getBoundingClientRect(); const rel = (ptrRef.current - rc.left) / rc.width
+    const pw = s.wideMs > 0 ? PAD_WIDE_W : PAD_W
+    const tgt = clamp(rel * VW, pw / 2, VW - pw / 2)
+    s.padX += (tgt - s.padX) * 0.4; s.padX = clamp(s.padX, pw / 2, VW - pw / 2)
   }, [])
 
-  const applyPowerUp = useCallback((state: GameState, type: PowerUpType) => {
-    playSfx('powerup', 0.55, 1.1)
-    effects.triggerFlash(POWERUP_COLORS[type] + '40', 100)
-
-    switch (type) {
-      case 'wide':
-        state.widePaddleMs = PADDLE_WIDE_DURATION_MS
-        break
-      case 'fireball':
-        state.fireballMs = FIREBALL_DURATION_MS
-        break
-      case 'slow':
-        state.slowMs = SLOW_DURATION_MS
-        break
-      case 'extra-life':
-        state.lives = Math.min(state.lives + 1, 5)
-        effects.spawnParticles(5, VIEWBOX_WIDTH / 2, VIEWBOX_HEIGHT / 2)
-        break
-      case 'multi-ball': {
-        const extraBall = createBall(state.paddleX)
-        launchBall(extraBall)
-        extraBall.speed = state.ball.speed
-        extraBall.vx = -state.ball.vx * 0.8
-        extraBall.vy = state.ball.vy
-        state.extraBalls.push(extraBall)
+  const applyPU = useCallback((s: GS, t: PUType) => {
+    sfx('pu', 0.55, 1.1); effects.triggerFlash(PU_COLORS[t] + '40', 100)
+    switch (t) {
+      case 'wide': s.wideMs = PAD_WIDE_MS; break
+      case 'fire': s.fireMs = FIRE_MS; break
+      case 'slow': s.slowMs = SLOW_MS; break
+      case 'life': s.lives = Math.min(s.lives + 1, 5); effects.spawnParticles(5, VW / 2, VH / 2); break
+      case 'multi': { const e = mkBall(s.padX); launchBall(e); e.spd = s.ball.spd; e.vx = -s.ball.vx * 0.8; e.vy = s.ball.vy; s.extras.push(e); break }
+      case 'shield': s.shieldOn = true; break
+      case 'magnet': s.magnetMs = MAGNET_MS; break
+      case 'bomb': {
+        // Screen wipe: destroy all breakable bricks on screen
+        let destroyed = 0
+        for (const br of s.bricks) {
+          if (!br.alive || br.unbr) continue
+          br.alive = false; br.hp = 0; destroyed++
+          spawnPxl(s, br.x + br.w / 2, br.y + br.h / 2, br.baseColor, 4)
+          s.score += br.pts
+        }
+        s.totalDest += destroyed
+        effects.triggerShake(12); effects.triggerFlash(`${PAL.orange}88`, 200)
+        sfx('clear', 0.7, 0.8)
         break
       }
-      case 'shield':
-        state.shieldActive = true
-        break
-      case 'magnet':
-        state.magnetMs = MAGNET_DURATION_MS
-        break
     }
-  }, [playSfx, effects])
+  }, [sfx, effects])
 
-  // Audio setup
+  // Audio
   useEffect(() => {
-    const sfxMap: Record<string, string> = {
-      brickHit: brickHitSfx,
-      paddleHit: paddleHitSfx,
-      wallHit: wallHitSfx,
-      powerup: powerupSfx,
-      combo: comboSfx,
-      stageClear: stageClearSfx,
-      ballLost: ballLostSfx,
-      gameOver: gameOverHitSfx,
-    }
-    const audios: HTMLAudioElement[] = []
-    for (const [key, src] of Object.entries(sfxMap)) {
-      const audio = new Audio(src)
-      audio.preload = 'auto'
-      audioRefs.current[key] = audio
-      audios.push(audio)
-    }
-    return () => {
-      effects.cleanup()
-      for (const audio of audios) { audio.pause(); audio.currentTime = 0 }
-      audioRefs.current = {}
-    }
+    const map: Record<string, string> = { hit: brickHitSfx, pad: paddleHitSfx, wall: wallHitSfx, pu: powerupSfx, cmb: comboSfx, clear: stageClearSfx, lost: ballLostSfx, over: gameOverHitSfx }
+    const arr: HTMLAudioElement[] = []
+    for (const [k, src] of Object.entries(map)) { const a = new Audio(src); a.preload = 'auto'; audRef.current[k] = a; arr.push(a) }
+    return () => { effects.cleanup(); for (const a of arr) { a.pause(); a.currentTime = 0 }; audRef.current = {} }
   }, [])
 
-  // Pointer / touch
+  // Pointer
   useEffect(() => {
-    const handlePointerMove = (e: PointerEvent) => { pointerXRef.current = e.clientX }
-    const handlePointerDown = (e: PointerEvent) => { pointerXRef.current = e.clientX }
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length > 0) pointerXRef.current = e.touches[0].clientX
-    }
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('touchmove', handleTouchMove, { passive: true })
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('touchmove', handleTouchMove)
-    }
+    const pm = (e: PointerEvent) => { ptrRef.current = e.clientX }
+    const pd = (e: PointerEvent) => { ptrRef.current = e.clientX }
+    const tm = (e: TouchEvent) => { if (e.touches.length) ptrRef.current = e.touches[0].clientX }
+    window.addEventListener('pointermove', pm); window.addEventListener('pointerdown', pd)
+    window.addEventListener('touchmove', tm, { passive: true })
+    return () => { window.removeEventListener('pointermove', pm); window.removeEventListener('pointerdown', pd); window.removeEventListener('touchmove', tm) }
   }, [])
 
   // Keyboard
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') { event.preventDefault(); onExit(); return }
-      if (finishedRef.current) return
-      const state = stateRef.current
-      const moveStep = 20
-      const currentPaddleW = state.widePaddleMs > 0 ? PADDLE_WIDE_WIDTH : PADDLE_WIDTH
-      if (event.code === 'ArrowLeft') {
-        event.preventDefault()
-        state.paddleX = clampNumber(state.paddleX - moveStep, currentPaddleW / 2, VIEWBOX_WIDTH - currentPaddleW / 2)
-      } else if (event.code === 'ArrowRight') {
-        event.preventDefault()
-        state.paddleX = clampNumber(state.paddleX + moveStep, currentPaddleW / 2, VIEWBOX_WIDTH - currentPaddleW / 2)
-      }
+    const kd = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (doneRef.current) return
+      const s = sRef.current, step = 20, pw = s.wideMs > 0 ? PAD_WIDE_W : PAD_W
+      if (e.code === 'ArrowLeft') { e.preventDefault(); s.padX = clamp(s.padX - step, pw / 2, VW - pw / 2) }
+      else if (e.code === 'ArrowRight') { e.preventDefault(); s.padX = clamp(s.padX + step, pw / 2, VW - pw / 2) }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', kd); return () => window.removeEventListener('keydown', kd)
   }, [onExit])
 
   // Game loop
   useEffect(() => {
-    lastFrameAtRef.current = null
-
+    lastRef.current = null
     const step = (now: number) => {
-      if (finishedRef.current) { animationFrameRef.current = null; return }
-      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
+      if (doneRef.current) { rafRef.current = null; return }
+      if (lastRef.current === null) lastRef.current = now
+      const rawDt = Math.min(now - lastRef.current, MAX_FRAME_DELTA_MS); lastRef.current = now
+      const s = sRef.current; const sf = s.slowMs > 0 ? SLOW_F : 1
+      const dt = rawDt * sf; const ds = dt / 1000; s.ms += rawDt
+      effects.updateParticles(); movePad(s)
 
-      const rawDeltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-      const state = stateRef.current
-      const slowFactor = state.slowMs > 0 ? SLOW_FACTOR : 1
-      const deltaMs = rawDeltaMs * slowFactor
-      const deltaSec = deltaMs / 1000
-      state.elapsedMs += rawDeltaMs
+      // Timers
+      if (s.wideMs > 0) s.wideMs = Math.max(0, s.wideMs - rawDt)
+      if (s.fireMs > 0) s.fireMs = Math.max(0, s.fireMs - rawDt)
+      if (s.slowMs > 0) s.slowMs = Math.max(0, s.slowMs - rawDt)
+      if (s.magnetMs > 0) s.magnetMs = Math.max(0, s.magnetMs - rawDt)
+      if (s.shakeMs > 0) s.shakeMs = Math.max(0, s.shakeMs - rawDt)
+      if (s.stageFlashMs > 0) s.stageFlashMs = Math.max(0, s.stageFlashMs - rawDt)
+      if (s.multiplierMs > 0) { s.multiplierMs -= rawDt; if (s.multiplierMs <= 0) { s.multiplier = 1; s.multiplierMs = 0 } }
+      if (s.comboMs > 0) { s.comboMs -= rawDt; if (s.comboMs <= 0) { s.combo = 0; s.comboMs = 0 } }
+      for (const b of s.bricks) { if (b.flash > 0) b.flash = Math.max(0, b.flash - rawDt) }
 
-      effects.updateParticles()
-      updatePaddleFromPointer(state)
-
-      // Tick power-up timers
-      if (state.widePaddleMs > 0) state.widePaddleMs = Math.max(0, state.widePaddleMs - rawDeltaMs)
-      if (state.fireballMs > 0) state.fireballMs = Math.max(0, state.fireballMs - rawDeltaMs)
-      if (state.slowMs > 0) state.slowMs = Math.max(0, state.slowMs - rawDeltaMs)
-      if (state.magnetMs > 0) state.magnetMs = Math.max(0, state.magnetMs - rawDeltaMs)
-      if (state.shakeMs > 0) state.shakeMs = Math.max(0, state.shakeMs - rawDeltaMs)
-      if (state.stageClearFlashMs > 0) state.stageClearFlashMs = Math.max(0, state.stageClearFlashMs - rawDeltaMs)
-
-      // Combo timer
-      if (state.comboTimerMs > 0) {
-        state.comboTimerMs -= rawDeltaMs
-        if (state.comboTimerMs <= 0) { state.combo = 0; state.comboTimerMs = 0 }
+      // Moving bricks
+      if (s.stage >= MOVE_STAGE) {
+        for (const b of s.bricks) {
+          if (!b.alive || b.moveDir === 0) continue
+          b.x += b.moveDir * MOVE_SPEED * ds
+          if (b.x <= BR_LEFT - BR_GAP || b.x + b.w >= BR_LEFT + BR_COLS * (BR_W + BR_GAP)) b.moveDir *= -1
+        }
       }
 
-      // Brick flash decay
-      for (const brick of state.bricks) {
-        if (brick.hitFlash > 0) brick.hitFlash = Math.max(0, brick.hitFlash - rawDeltaMs)
-      }
-
-      // Particles update
-      state.particles = state.particles.filter(p => state.elapsedMs - p.createdAtMs < PARTICLE_LIFETIME_MS)
-      for (const p of state.particles) {
-        p.x += p.vx * deltaSec
-        p.y += p.vy * deltaSec
-        p.vy += 250 * deltaSec
-      }
+      // Pixel particles
+      s.pxls = s.pxls.filter(p => s.ms - p.t < PART_LIFE)
+      for (const p of s.pxls) { p.x += p.vx * ds; p.y += p.vy * ds; p.vy += 300 * ds }
 
       // Power-ups fall
-      const currentPaddleWForPU = state.widePaddleMs > 0 ? PADDLE_WIDE_WIDTH : PADDLE_WIDTH
-      for (let i = state.powerUps.length - 1; i >= 0; i -= 1) {
-        const pu = state.powerUps[i]
-        pu.y += POWERUP_SPEED * deltaSec
-        if (
-          pu.y + POWERUP_SIZE >= PADDLE_Y &&
-          pu.y - POWERUP_SIZE <= PADDLE_Y + PADDLE_HEIGHT &&
-          pu.x >= state.paddleX - currentPaddleWForPU / 2 - POWERUP_SIZE &&
-          pu.x <= state.paddleX + currentPaddleWForPU / 2 + POWERUP_SIZE
-        ) {
-          applyPowerUp(state, pu.type)
-          state.powerUps.splice(i, 1)
-          continue
+      const pw = s.wideMs > 0 ? PAD_WIDE_W : PAD_W
+      for (let i = s.pus.length - 1; i >= 0; i--) {
+        const pu = s.pus[i]; pu.y += PU_SPD * ds
+        if (pu.y + PU_SZ >= PAD_Y && pu.y - PU_SZ <= PAD_Y + PAD_H && pu.x >= s.padX - pw / 2 - PU_SZ && pu.x <= s.padX + pw / 2 + PU_SZ) {
+          applyPU(s, pu.type); s.pus.splice(i, 1); continue
         }
-        if (pu.y > VIEWBOX_HEIGHT + 20) state.powerUps.splice(i, 1)
+        if (pu.y > VH + 20) s.pus.splice(i, 1)
       }
 
-      if (!state.ball.launched) {
-        state.ball.x = state.paddleX
-        state.ball.y = PADDLE_Y - BALL_RADIUS - 1
-        state.launchTimerMs -= rawDeltaMs
-        if (state.launchTimerMs <= 0) launchBall(state.ball)
-        syncRenderState(state)
-        animationFrameRef.current = window.requestAnimationFrame(step)
-        return
+      if (!s.ball.on) {
+        s.ball.x = s.padX; s.ball.y = PAD_Y - BALL_SZ - 1
+        s.launchMs -= rawDt; if (s.launchMs <= 0) launchBall(s.ball)
+        sync(s); rafRef.current = requestAnimationFrame(step); return
       }
 
-      // Ball trail
-      if (state.elapsedMs - state.lastTrailMs > TRAIL_INTERVAL_MS) {
-        state.trail.push({ x: state.ball.x, y: state.ball.y, age: 0 })
-        if (state.trail.length > TRAIL_LENGTH) state.trail.shift()
-        state.lastTrailMs = state.elapsedMs
-      }
-      for (const tp of state.trail) tp.age += rawDeltaMs
+      // Trail
+      if (s.ms - s.trailMs > 18) { s.trail.push({ x: snap(s.ball.x), y: snap(s.ball.y) }); if (s.trail.length > 6) s.trail.shift(); s.trailMs = s.ms }
 
-      // Physics substeps
-      const subSteps = Math.max(1, Math.ceil(rawDeltaMs / (DEFAULT_FRAME_MS * 0.5)))
-      const subDeltaSec = deltaSec / subSteps
-      const currentPaddleW = state.widePaddleMs > 0 ? PADDLE_WIDE_WIDTH : PADDLE_WIDTH
-      const isFireball = state.fireballMs > 0
-      const isMagnet = state.magnetMs > 0
+      const subs = Math.max(1, Math.ceil(rawDt / (DEFAULT_FRAME_MS * 0.5)))
+      const subDs = ds / subs; const isFire = s.fireMs > 0; const isMag = s.magnetMs > 0
 
-      const processBall = (b: Ball): 'lost' | 'ok' => {
-        // Magnet: gently attract ball horizontally toward paddle
-        if (isMagnet && b.vy > 0) {
-          const dx = state.paddleX - b.x
-          b.vx += Math.sign(dx) * MAGNET_STRENGTH * subDeltaSec
-          // Re-normalize speed
-          const curSpeed = Math.hypot(b.vx, b.vy)
-          if (curSpeed > 0) {
-            b.vx = (b.vx / curSpeed) * b.speed
-            b.vy = (b.vy / curSpeed) * b.speed
-          }
-          ensureMinVerticalComponent(b)
+      const proc = (b: Ball): 'lost' | 'ok' => {
+        if (isMag && b.vy > 0) {
+          const dx = s.padX - b.x; b.vx += Math.sign(dx) * MAGNET_STR * subDs
+          const sp = Math.hypot(b.vx, b.vy); if (sp > 0) { b.vx = (b.vx / sp) * b.spd; b.vy = (b.vy / sp) * b.spd }
+          ensureVY(b)
         }
-
-        b.x += b.vx * subDeltaSec
-        b.y += b.vy * subDeltaSec
-
-        // Wall collisions
-        if (b.x - BALL_RADIUS <= 0) {
-          b.x = BALL_RADIUS; b.vx = Math.abs(b.vx)
-          playSfx('wallHit', 0.2, 1.2)
-        } else if (b.x + BALL_RADIUS >= VIEWBOX_WIDTH) {
-          b.x = VIEWBOX_WIDTH - BALL_RADIUS; b.vx = -Math.abs(b.vx)
-          playSfx('wallHit', 0.2, 1.2)
-        }
-        if (b.y - BALL_RADIUS <= 0) {
-          b.y = BALL_RADIUS; b.vy = Math.abs(b.vy)
-          playSfx('wallHit', 0.15, 1.4)
-        }
-
-        // Out of bounds — check shield first
-        if (b.y + BALL_RADIUS >= VIEWBOX_HEIGHT + 20) {
-          if (state.shieldActive) {
-            state.shieldActive = false
-            b.y = SHIELD_Y - BALL_RADIUS
-            b.vy = -Math.abs(b.vy)
-            playSfx('wallHit', 0.4, 0.6)
-            effects.triggerFlash('rgba(245,158,11,0.4)', 100)
-            spawnParticles(state, b.x, SHIELD_Y, '#f59e0b', 8)
-            return 'ok'
-          }
+        b.x += b.vx * subDs; b.y += b.vy * subDs
+        // Walls
+        if (b.x <= 0) { b.x = 0; b.vx = Math.abs(b.vx); sfx('wall', 0.2, 1.2) }
+        else if (b.x + BALL_SZ >= VW) { b.x = VW - BALL_SZ; b.vx = -Math.abs(b.vx); sfx('wall', 0.2, 1.2) }
+        if (b.y <= 0) { b.y = 0; b.vy = Math.abs(b.vy); sfx('wall', 0.15, 1.4) }
+        // Bottom
+        if (b.y + BALL_SZ >= VH + 20) {
+          if (s.shieldOn) { s.shieldOn = false; b.y = SHIELD_Y - BALL_SZ; b.vy = -Math.abs(b.vy); sfx('wall', 0.4, 0.6); effects.triggerFlash(`${PAL.yellow}66`, 100); spawnPxl(s, b.x, SHIELD_Y, PAL.yellow, 8); return 'ok' }
           return 'lost'
         }
-
-        // Paddle collision
-        const paddleLeft = state.paddleX - currentPaddleW / 2
-        const paddleCollision = rectIntersectsBall(paddleLeft, PADDLE_Y, currentPaddleW, PADDLE_HEIGHT, b.x, b.y, BALL_RADIUS)
-        if (paddleCollision.hit && b.vy > 0) {
-          b.y = PADDLE_Y - BALL_RADIUS
-          state.consecutiveHits = 0
-          const hitOffset = (b.x - state.paddleX) / (currentPaddleW / 2)
-          const clampedOffset = clampNumber(hitOffset, -0.92, 0.92)
-          const bounceAngle = clampedOffset * (Math.PI / 3)
-          b.vx = Math.sin(bounceAngle) * b.speed
-          b.vy = -Math.cos(bounceAngle) * b.speed
-          ensureMinVerticalComponent(b)
-          playSfx('paddleHit', 0.4, 1 + Math.abs(clampedOffset) * 0.2)
-          spawnParticles(state, b.x, PADDLE_Y, '#e2e8f0', 3)
+        // Paddle
+        const pl = s.padX - pw / 2
+        const pc = boxHit(pl, PAD_Y, pw, PAD_H, b.x, b.y, BALL_SZ)
+        if (pc.hit && b.vy > 0) {
+          b.y = PAD_Y - BALL_SZ; s.consHits = 0
+          const off = (b.x + BALL_HALF - s.padX) / (pw / 2)
+          const co = clamp(off, -0.92, 0.92), ang = co * (Math.PI / 3)
+          b.vx = Math.sin(ang) * b.spd; b.vy = -Math.cos(ang) * b.spd; ensureVY(b)
+          sfx('pad', 0.4, 1 + Math.abs(co) * 0.2); spawnPxl(s, b.x + BALL_HALF, PAD_Y, PAL.fg, 3)
         }
-
-        // Brick collisions
-        let hitCount = 0
-        for (const brick of state.bricks) {
-          if (!brick.alive) continue
-          const col = rectIntersectsBall(brick.x, brick.y, brick.width, brick.height, b.x, b.y, BALL_RADIUS)
+        // Bricks
+        let hc = 0
+        for (const br of s.bricks) {
+          if (!br.alive) continue
+          const col = boxHit(br.x, br.y, br.w, br.h, b.x, b.y, BALL_SZ)
           if (!col.hit) continue
-
-          if (brick.unbreakable && !isFireball) {
-            if (hitCount === 0) { reflectBall(b, col.normalX, col.normalY); ensureMinVerticalComponent(b) }
-            hitCount += 1
-            brick.hitFlash = 120
-            playSfx('wallHit', 0.2, 0.7)
-            spawnParticles(state, brick.x + brick.width / 2, brick.y + brick.height / 2, '#94a3b8', 2)
-            continue
+          if (br.unbr && !isFire) {
+            if (hc === 0) { reflect(b, col.nx, col.ny); ensureVY(b) }
+            hc++; br.flash = 120; sfx('wall', 0.2, 0.7); spawnPxl(s, br.x + br.w / 2, br.y + br.h / 2, PAL.comment, 2); continue
           }
-
-          // Handle multi-hit bricks
-          brick.hitsLeft -= 1
-          brick.hitFlash = 150
-          if (brick.hitsLeft <= 0 || isFireball) {
-            brick.alive = false
-            brick.hitsLeft = 0
-            state.consecutiveHits += 1
-            state.totalBricksDestroyed += 1
-            state.combo += 1
-            state.comboTimerMs = 1200
-
-            const hitBonus = state.consecutiveHits > 1 ? CONSECUTIVE_HIT_BONUS * (state.consecutiveHits - 1) : 0
-            const comboBonus = state.combo > 2 ? state.combo * 3 : 0
-            const totalBrickScore = brick.points + hitBonus + comboBonus
-            state.score += totalBrickScore
-            hitCount += 1
-
-            spawnParticles(state, brick.x + brick.width / 2, brick.y + brick.height / 2, brick.baseColor, 6)
-            effects.spawnParticles(2, brick.x + brick.width / 2, brick.y + brick.height / 2)
-            effects.showScorePopup(totalBrickScore, brick.x + brick.width / 2, brick.y + brick.height / 2, brick.baseColor)
-
-            // Drop power-up
-            if (Math.random() < POWERUP_DROP_CHANCE) {
-              state.powerUps.push({
-                id: state.nextPowerUpId++,
-                type: pickPowerUpType(),
-                x: brick.x + brick.width / 2,
-                y: brick.y + brick.height / 2,
-                createdAtMs: state.elapsedMs,
-              })
+          br.hp -= 1; br.flash = 150
+          if (br.hp <= 0 || isFire) {
+            br.alive = false; br.hp = 0; s.consHits++; s.totalDest++; s.combo++; s.comboMs = 1200
+            const hb = s.consHits > 1 ? 5 * (s.consHits - 1) : 0
+            const cb = s.combo > 2 ? s.combo * 3 : 0
+            const total = (br.pts + hb + cb) * s.multiplier
+            s.score += total; hc++
+            spawnPxl(s, br.x + br.w / 2, br.y + br.h / 2, br.baseColor, 8)
+            effects.spawnParticles(2, br.x + br.w / 2, br.y + br.h / 2)
+            effects.showScorePopup(total, br.x + br.w / 2, br.y + br.h / 2, br.baseColor)
+            if (Math.random() < PU_CHANCE) { s.pus.push({ id: s.nPU++, type: pickPU(), x: br.x + br.w / 2, y: br.y + br.h / 2, t: s.ms }) }
+            if (s.totalDest % MULTI_THRESHOLD === 0 && s.extras.length < MAX_EXTRA) {
+              const e = mkBall(s.padX); launchBall(e); e.spd = b.spd; s.extras.push(e)
+              effects.triggerFlash(`${PAL.purple}55`, 80)
             }
-
-            // Multi-ball threshold
-            if (state.totalBricksDestroyed % MULTI_BALL_BRICK_THRESHOLD === 0 && state.extraBalls.length < MAX_EXTRA_BALLS) {
-              const extraBall = createBall(state.paddleX)
-              launchBall(extraBall)
-              extraBall.speed = b.speed
-              state.extraBalls.push(extraBall)
-              effects.triggerFlash('rgba(168,85,247,0.3)', 80)
-            }
-          } else {
-            // Brick damaged but not destroyed
-            hitCount += 1
-            spawnParticles(state, brick.x + brick.width / 2, brick.y + brick.height / 2, brick.baseColor, 3)
-            effects.showScorePopup(Math.floor(brick.points / brick.maxHits), brick.x + brick.width / 2, brick.y + brick.height / 2, '#94a3b8')
-            state.score += Math.floor(brick.points / brick.maxHits)
-          }
-
-          // Fireball passes through, normal ball reflects on first hit
-          if (!isFireball && hitCount === 1) {
-            reflectBall(b, col.normalX, col.normalY)
-            ensureMinVerticalComponent(b)
-          }
+          } else { hc++; spawnPxl(s, br.x + br.w / 2, br.y + br.h / 2, br.baseColor, 3); s.score += Math.floor(br.pts / br.maxHp) * s.multiplier }
+          if (!isFire && hc === 1) { reflect(b, col.nx, col.ny); ensureVY(b) }
         }
-
-        if (hitCount > 0) {
-          const pitchBoost = Math.min(0.4, hitCount * 0.1)
-          playSfx('brickHit', 0.35 + hitCount * 0.05, 1 + pitchBoost)
-          effects.triggerShake(2 + hitCount)
-          if (state.combo >= 5 && state.combo % 5 === 0) {
-            playSfx('combo', 0.45, 1 + state.combo * 0.01)
-            effects.comboHitBurst(b.x, b.y, state.combo, state.combo * 10)
-          }
+        if (hc > 0) {
+          sfx('hit', 0.35 + hc * 0.05, 1 + Math.min(0.4, hc * 0.1))
+          effects.triggerShake(2 + hc)
+          if (s.combo >= 5 && s.combo % 5 === 0) { sfx('cmb', 0.45, 1 + s.combo * 0.01); effects.comboHitBurst(b.x, b.y, s.combo, s.combo * 10) }
         }
-
         return 'ok'
       }
 
-      for (let sub = 0; sub < subSteps; sub += 1) {
-        const mainResult = processBall(state.ball)
-        if (mainResult === 'lost') {
-          if (state.extraBalls.length > 0) {
-            state.ball = state.extraBalls.shift()!
-            playSfx('wallHit', 0.3, 0.8)
-          } else {
-            loseBall(state)
-            if (state.lives <= 0) { syncRenderState(state); finishGame(); return }
-            syncRenderState(state)
-            animationFrameRef.current = window.requestAnimationFrame(step)
-            return
-          }
+      for (let sub = 0; sub < subs; sub++) {
+        if (proc(s.ball) === 'lost') {
+          if (s.extras.length > 0) { s.ball = s.extras.shift()!; sfx('wall', 0.3, 0.8) }
+          else { loseBall(s); if (s.lives <= 0) { sync(s); finish(); return } sync(s); rafRef.current = requestAnimationFrame(step); return }
         }
-
-        for (let i = state.extraBalls.length - 1; i >= 0; i -= 1) {
-          const eb = state.extraBalls[i]
-          if (!eb.launched) continue
-          const result = processBall(eb)
-          if (result === 'lost') state.extraBalls.splice(i, 1)
-        }
+        for (let i = s.extras.length - 1; i >= 0; i--) { const e = s.extras[i]; if (!e.on) continue; if (proc(e) === 'lost') s.extras.splice(i, 1) }
       }
-
-      // Stage clear
-      const aliveBreakable = state.bricks.filter(b => b.alive && !b.unbreakable)
-      if (aliveBreakable.length === 0) advanceStage(state)
-
-      syncRenderState(state)
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (s.bricks.filter(b => b.alive && !b.unbr).length === 0) nextStage(s)
+      sync(s); rafRef.current = requestAnimationFrame(step)
     }
+    rafRef.current = requestAnimationFrame(step)
+    return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }; lastRef.current = null }
+  }, [nextStage, finish, loseBall, sfx, sync, movePad, applyPU, effects])
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
-    return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
-    }
-  }, [advanceStage, finishGame, loseBall, playSfx, syncRenderState, updatePaddleFromPointer, applyPowerUp, effects])
-
-  const displayedBestScore = useMemo(() => Math.max(bestScore, renderScore), [bestScore, renderScore])
-
-  const livesDisplay = useMemo(() => {
-    const hearts: string[] = []
-    for (let i = 0; i < Math.max(INITIAL_LIVES, renderLives); i += 1) {
-      hearts.push(i < renderLives ? '#ef4444' : '#374151')
-    }
-    return hearts
-  }, [renderLives])
+  const bestDisp = useMemo(() => Math.max(bestScore, rScore), [bestScore, rScore])
+  const hearts = useMemo(() => {
+    const h: string[] = []; for (let i = 0; i < Math.max(LIVES, rLives); i++) h.push(i < rLives ? PAL.red : PAL.bgLight); return h
+  }, [rLives])
 
   return (
-    <section className="mini-game-panel breakout-panel" aria-label="breakout-mini-game" style={effects.getShakeStyle()}>
-      <style>{BREAKOUT_CSS}{GAME_EFFECTS_CSS}</style>
+    <section className="mini-game-panel bo-panel" aria-label="breakout-mini-game" style={effects.getShakeStyle()}>
+      <style>{CSS}{GAME_EFFECTS_CSS}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
+      {/* CRT scanline overlay */}
+      <div className="bo-scanline" />
 
-      {renderCombo >= 3 && renderComboLabel && (
-        <div className="breakout-combo-text" style={{ color: renderComboColor }} key={renderCombo}>
-          {renderCombo}x {renderComboLabel}
-        </div>
-      )}
+      {rCombo >= 3 && rComboLbl && <div className="bo-combo" style={{ color: rComboClr }} key={rCombo}>{rCombo}x {rComboLbl}</div>}
+      {rStageBan > 0 && <div className="bo-stg" key={`s-${rStage}`}>STAGE {rStage}</div>}
+      {rMult > 1 && <div className="bo-mult" key={`m-${rMult}`}>x{rMult}</div>}
 
-      {renderStageBanner > 0 && (
-        <div className="breakout-stage-banner" key={`stage-${renderStage}`}>
-          STAGE {renderStage}
-        </div>
-      )}
-
-      <div className="breakout-hud">
-        <div>
-          <p className="breakout-score">{renderScore.toLocaleString()}</p>
-          <p className="breakout-best">BEST {displayedBestScore.toLocaleString()}</p>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <p className="breakout-stage">STAGE {renderStage}</p>
-        </div>
-        <div className="breakout-lives">
-          {livesDisplay.map((color, index) => (
-            <svg key={index} width="18" height="18" viewBox="0 0 24 24">
-              <path
-                d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-                fill={color}
-              />
+      <div className="bo-hud">
+        <div><p className="bo-score">{rScore.toLocaleString()}</p><p className="bo-best">BEST {bestDisp.toLocaleString()}</p></div>
+        <div style={{ textAlign: 'center' }}><p className="bo-stage">STAGE {rStage}</p></div>
+        <div className="bo-lives">
+          {hearts.map((c, i) => (
+            <svg key={i} width="16" height="16" viewBox="0 0 16 16" style={{ imageRendering: 'pixelated' }}>
+              <rect x="4" y="0" width="4" height="2" fill={c} /><rect x="8" y="0" width="4" height="2" fill={c} />
+              <rect x="2" y="2" width="12" height="2" fill={c} /><rect x="2" y="4" width="12" height="2" fill={c} />
+              <rect x="2" y="6" width="12" height="2" fill={c} /><rect x="4" y="8" width="8" height="2" fill={c} />
+              <rect x="6" y="10" width="4" height="2" fill={c} />
             </svg>
           ))}
         </div>
       </div>
 
-      <div className="breakout-powerup-bar">
-        {renderActivePowerUps.map(pu => (
-          <span
-            key={pu.type}
-            className="breakout-powerup-badge"
-            style={{
-              background: POWERUP_COLORS[pu.type],
-              opacity: pu.ms < 2000 && pu.type !== 'shield' ? 0.5 + 0.5 * Math.sin(pu.ms * 0.01) : 1,
-            }}
-          >
-            {pu.type === 'shield' ? 'SHIELD' : `${pu.type.toUpperCase()} ${Math.ceil(pu.ms / 1000)}s`}
+      <div className="bo-pu-bar">
+        {rActPU.map(p => (
+          <span key={p.t} className="bo-pu-badge" style={{ background: PU_COLORS[p.t], opacity: p.ms < 2000 && p.t !== 'shield' ? 0.5 + 0.5 * Math.sin(p.ms * 0.012) : 1 }}>
+            {p.t === 'shield' ? 'SHLD' : p.t === 'bomb' ? `x${rMult}` : `${p.t.toUpperCase()} ${Math.ceil(p.ms / 1000)}`}
           </span>
         ))}
       </div>
 
-      <div className="breakout-board" ref={boardRef} role="presentation">
-        <svg
-          className="breakout-svg"
-          viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-          preserveAspectRatio="xMidYMid meet"
-          aria-label="breakout-field"
-        >
-          <defs>
-            <radialGradient id="ball-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.6" />
-              <stop offset="100%" stopColor="#fbbf24" stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id="fireball-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.8" />
-              <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id="magnet-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#14b8a6" stopOpacity="0.7" />
-              <stop offset="100%" stopColor="#14b8a6" stopOpacity="0" />
-            </radialGradient>
-            <linearGradient id="paddle-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f1f5f9" />
-              <stop offset="100%" stopColor="#94a3b8" />
-            </linearGradient>
-            <linearGradient id="shield-grad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0" />
-              <stop offset="30%" stopColor="#f59e0b" stopOpacity="0.8" />
-              <stop offset="70%" stopColor="#fbbf24" stopOpacity="0.8" />
-              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
-            </linearGradient>
-          </defs>
+      <div className="bo-board" ref={boardRef} role="presentation">
+        <svg className="bo-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid meet" aria-label="breakout-field">
+          <g transform={`translate(${rShkX} ${rShkY})`}>
+            {/* BG */}
+            <rect x="0" y="0" width={VW} height={VH} fill={PAL.bg} />
+            {/* Grid dots */}
+            {Array.from({ length: 20 }, (_, i) => Array.from({ length: 12 }, (_, j) => (
+              <rect key={`d${i}-${j}`} x={j * 32 + 14} y={i * 32 + 14} width={PX} height={PX} fill={PAL.bgLight} opacity="0.3" />
+            )))}
 
-          <g transform={`translate(${renderShakeX.toFixed(2)} ${renderShakeY.toFixed(2)})`}>
-            <rect x="0" y="0" width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT} fill="#0f172a" />
-
-            {Array.from({ length: 8 }, (_, i) => (
-              <line key={`gl-${i}`} x1={0} y1={80 * i} x2={VIEWBOX_WIDTH} y2={80 * i} stroke="#1e293b" strokeWidth="0.5" opacity="0.3" />
+            {/* Danger line */}
+            {Array.from({ length: Math.floor(VW / 8) }, (_, i) => (
+              <rect key={`dz${i}`} x={i * 8} y={VH - PX * 2} width={4} height={PX} fill={PAL.red} opacity="0.5" />
             ))}
 
-            {/* Danger zone */}
-            <rect x="0" y={PADDLE_Y + PADDLE_HEIGHT + 10} width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT - PADDLE_Y - PADDLE_HEIGHT - 10} fill="rgba(239,68,68,0.05)" />
-            <line x1="0" y1={VIEWBOX_HEIGHT - 4} x2={VIEWBOX_WIDTH} y2={VIEWBOX_HEIGHT - 4} stroke="#ef4444" strokeWidth="2" opacity="0.4" />
-
-            {/* Shield barrier */}
-            {renderShield && (
-              <>
-                <rect x="20" y={SHIELD_Y - 2} width={VIEWBOX_WIDTH - 40} height="4" rx="2" fill="url(#shield-grad)" />
-                <rect x="20" y={SHIELD_Y - 1} width={VIEWBOX_WIDTH - 40} height="2" rx="1" fill="#fbbf24" opacity="0.6" />
-              </>
-            )}
+            {/* Shield */}
+            {rShield && Array.from({ length: Math.floor((VW - 40) / 6) }, (_, i) => (
+              <rect key={`sh${i}`} x={20 + i * 6} y={SHIELD_Y - PX} width={4} height={PX * 2} fill={i % 2 === 0 ? PAL.yellow : PAL.orange} />
+            ))}
 
             {/* Bricks */}
-            {renderBricks.filter(b => b.alive).map(brick => {
-              const brickColor = getBrickColor(brick)
-              const is2Hit = brick.maxHits > 1 && brick.hitsLeft > 1
+            {rBricks.filter(b => b.alive).map(br => {
+              const bc = brickColor(br); const is2 = br.maxHp > 1 && br.hp > 1; const cracked = br.maxHp > 1 && br.hp === 1
+              const bx = snap(br.x), by = snap(br.y)
               return (
-                <g key={brick.id}>
-                  <rect
-                    x={brick.x} y={brick.y}
-                    width={brick.width} height={brick.height}
-                    rx="3" fill={brickColor}
-                    opacity={brick.hitFlash > 0 ? 0.5 + 0.5 * Math.sin(brick.hitFlash * 0.1) : 1}
-                  />
-                  {/* Brick shine */}
-                  <rect
-                    x={brick.x + 2} y={brick.y + 1}
-                    width={brick.width - 4} height={4}
-                    rx="2"
-                    fill={brick.unbreakable ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.3)'}
-                  />
-                  {/* Brick bottom shadow */}
-                  <rect
-                    x={brick.x + 1} y={brick.y + brick.height - 3}
-                    width={brick.width - 2} height={3}
-                    rx="1"
-                    fill="rgba(0,0,0,0.2)"
-                  />
-                  {/* 2-hit brick indicator: inner border */}
-                  {is2Hit && (
-                    <rect
-                      x={brick.x + 2} y={brick.y + 2}
-                      width={brick.width - 4} height={brick.height - 4}
-                      rx="2" fill="none"
-                      stroke="rgba(255,255,255,0.4)" strokeWidth="1.5"
-                      strokeDasharray="4 2"
-                    />
-                  )}
-                  {/* Damaged 2-hit brick: crack lines */}
-                  {brick.maxHits > 1 && brick.hitsLeft === 1 && (
-                    <>
-                      <line x1={brick.x + 8} y1={brick.y + 3} x2={brick.x + brick.width / 2} y2={brick.y + brick.height - 3} stroke="rgba(255,255,255,0.35)" strokeWidth="1" />
-                      <line x1={brick.x + brick.width - 6} y1={brick.y + 5} x2={brick.x + brick.width / 2 + 4} y2={brick.y + brick.height - 5} stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
-                    </>
-                  )}
-                  {brick.unbreakable && (
-                    <>
-                      <line x1={brick.x + 4} y1={brick.y + 5} x2={brick.x + brick.width - 4} y2={brick.y + brick.height - 3} stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
-                      <line x1={brick.x + brick.width - 4} y1={brick.y + 5} x2={brick.x + 4} y2={brick.y + brick.height - 3} stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
-                    </>
-                  )}
+                <g key={br.id} opacity={br.flash > 0 ? 0.4 + 0.6 * Math.abs(Math.sin(br.flash * 0.015)) : 1}>
+                  {/* Main body */}
+                  <rect x={bx} y={by} width={br.w} height={br.h} fill={bc} />
+                  {/* Top highlight */}
+                  <rect x={bx + PX} y={by} width={br.w - PX * 2} height={PX} fill={br.unbr ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.35)'} />
+                  {/* Bottom shadow */}
+                  <rect x={bx} y={by + br.h - PX} width={br.w} height={PX} fill="rgba(0,0,0,0.25)" />
+                  {/* Left highlight */}
+                  <rect x={bx} y={by + PX} width={PX} height={br.h - PX * 2} fill="rgba(255,255,255,0.15)" />
+                  {/* 2-hit: inner dots */}
+                  {is2 && <>
+                    <rect x={bx + 6} y={by + 4} width={PX} height={PX} fill={PAL.fg} opacity="0.5" />
+                    <rect x={bx + br.w - 8} y={by + 4} width={PX} height={PX} fill={PAL.fg} opacity="0.5" />
+                    <rect x={bx + br.w / 2 - 1} y={by + br.h - 6} width={PX} height={PX} fill={PAL.fg} opacity="0.5" />
+                  </>}
+                  {/* Cracked: pixel crack lines */}
+                  {cracked && <>
+                    <rect x={bx + 8} y={by + 2} width={PX} height={PX} fill={PAL.fg} opacity="0.4" />
+                    <rect x={bx + 10} y={by + 4} width={PX} height={PX} fill={PAL.fg} opacity="0.4" />
+                    <rect x={bx + 12} y={by + 6} width={PX} height={PX} fill={PAL.fg} opacity="0.3" />
+                    <rect x={bx + 10} y={by + 8} width={PX} height={PX} fill={PAL.fg} opacity="0.3" />
+                    <rect x={bx + br.w - 10} y={by + 3} width={PX} height={PX} fill={PAL.fg} opacity="0.35" />
+                    <rect x={bx + br.w - 12} y={by + 5} width={PX} height={PX} fill={PAL.fg} opacity="0.35" />
+                  </>}
+                  {/* Unbreakable: X pattern */}
+                  {br.unbr && <>
+                    <rect x={bx + 6} y={by + 3} width={PX} height={PX} fill={PAL.fg} opacity="0.1" />
+                    <rect x={bx + br.w - 8} y={by + 3} width={PX} height={PX} fill={PAL.fg} opacity="0.1" />
+                    <rect x={bx + br.w / 2 - 1} y={by + br.h / 2 - 1} width={PX} height={PX} fill={PAL.fg} opacity="0.12" />
+                    <rect x={bx + 6} y={by + br.h - 5} width={PX} height={PX} fill={PAL.fg} opacity="0.1" />
+                    <rect x={bx + br.w - 8} y={by + br.h - 5} width={PX} height={PX} fill={PAL.fg} opacity="0.1" />
+                  </>}
                 </g>
               )
             })}
 
-            {/* Power-ups falling */}
-            {renderPowerUps.map(pu => {
-              const puColor = POWERUP_COLORS[pu.type]
-              const pulseScale = 1 + 0.15 * Math.sin(pu.y * 0.05)
+            {/* Power-ups (pixel boxes) */}
+            {rPUs.map(pu => {
+              const c = PU_COLORS[pu.type]; const px = snap(pu.x - PU_SZ / 2); const py = snap(pu.y - PU_SZ / 2)
               return (
                 <g key={pu.id}>
-                  <circle cx={pu.x} cy={pu.y} r={POWERUP_SIZE + 4} fill={puColor} opacity="0.2" />
-                  <circle cx={pu.x} cy={pu.y} r={POWERUP_SIZE * pulseScale} fill={puColor} stroke="#fff" strokeWidth="1.5" />
-                  <text x={pu.x} y={pu.y + 4} textAnchor="middle" fill="#fff" fontSize="10" fontWeight="bold" fontFamily="'Press Start 2P', monospace">
-                    {POWERUP_LABELS[pu.type]}
-                  </text>
+                  <rect x={px - PX} y={py - PX} width={PU_SZ + PX * 2} height={PU_SZ + PX * 2} fill={c} opacity="0.3" />
+                  <rect x={px} y={py} width={PU_SZ} height={PU_SZ} fill={c} />
+                  <rect x={px} y={py} width={PU_SZ} height={PX} fill="rgba(255,255,255,0.4)" />
+                  <text x={snap(pu.x)} y={snap(pu.y) + 4} textAnchor="middle" fill={PAL.bg} fontSize="8" fontWeight="bold" fontFamily="'Press Start 2P',monospace">{PU_LABEL[pu.type]}</text>
                 </g>
               )
             })}
 
-            {/* Paddle */}
-            <rect
-              x={renderPaddleX - renderPaddleWidth / 2}
-              y={PADDLE_Y}
-              width={renderPaddleWidth}
-              height={PADDLE_HEIGHT}
-              rx={PADDLE_CORNER_RADIUS}
-              fill="url(#paddle-grad)"
-            />
-            <rect
-              x={renderPaddleX - renderPaddleWidth / 2 + 4}
-              y={PADDLE_Y + 2}
-              width={renderPaddleWidth - 8}
-              height={3}
-              rx="1.5"
-              fill="rgba(255,255,255,0.4)"
-            />
-            <circle cx={renderPaddleX - renderPaddleWidth / 2 + 4} cy={PADDLE_Y + PADDLE_HEIGHT / 2} r="3" fill="rgba(251,191,36,0.4)" />
-            <circle cx={renderPaddleX + renderPaddleWidth / 2 - 4} cy={PADDLE_Y + PADDLE_HEIGHT / 2} r="3" fill="rgba(251,191,36,0.4)" />
+            {/* Paddle (pixel) */}
+            <rect x={snap(rPadX - rPadW / 2)} y={PAD_Y} width={rPadW} height={PAD_H} fill={PAL.fg} />
+            <rect x={snap(rPadX - rPadW / 2)} y={PAD_Y} width={rPadW} height={PX} fill="rgba(255,255,255,0.5)" />
+            <rect x={snap(rPadX - rPadW / 2)} y={PAD_Y + PAD_H - PX} width={rPadW} height={PX} fill="rgba(0,0,0,0.3)" />
+            {/* Paddle edge pixels */}
+            <rect x={snap(rPadX - rPadW / 2)} y={PAD_Y + PX * 2} width={PX} height={PAD_H - PX * 4} fill={PAL.yellow} opacity="0.6" />
+            <rect x={snap(rPadX + rPadW / 2 - PX)} y={PAD_Y + PX * 2} width={PX} height={PAD_H - PX * 4} fill={PAL.yellow} opacity="0.6" />
 
-            {/* Ball trail */}
-            {renderTrail.map((tp, i) => {
-              const alpha = (i / renderTrail.length) * 0.3
-              const size = BALL_RADIUS * (i / renderTrail.length) * 0.7
-              const trailColor = renderBalls[0]?.fireball ? '#ef4444' : renderBalls[0]?.magnet ? '#14b8a6' : '#fbbf24'
-              return (
-                <circle key={i} cx={tp.x} cy={tp.y} r={size} fill={trailColor} opacity={alpha} />
-              )
+            {/* Ball trail (pixel) */}
+            {rTrail.map((t, i) => {
+              const a = ((i + 1) / rTrail.length) * 0.3; const sz = PX + Math.floor((i / rTrail.length) * 2) * PX
+              const tc = rBalls[0]?.fire ? PAL.red : rBalls[0]?.mag ? PAL.cyan : PAL.yellow
+              return <rect key={i} x={t.x} y={t.y} width={sz} height={sz} fill={tc} opacity={a} />
             })}
 
-            {/* Balls */}
-            {renderBalls.map((b, i) => {
-              const glowId = b.fireball ? 'url(#fireball-glow)' : b.magnet ? 'url(#magnet-glow)' : 'url(#ball-glow)'
-              const ballColor = b.fireball ? '#ef4444' : b.magnet ? '#14b8a6' : '#fbbf24'
+            {/* Balls (pixel squares) */}
+            {rBalls.map((b, i) => {
+              const bc = b.fire ? PAL.red : b.mag ? PAL.cyan : PAL.yellow
               return (
-                <g key={`ball-${i}`}>
-                  <circle cx={b.x} cy={b.y} r={BALL_RADIUS + 6} fill={glowId} />
-                  <circle cx={b.x} cy={b.y} r={BALL_RADIUS} fill={ballColor} />
-                  <circle cx={b.x - 2} cy={b.y - 2} r={2.5} fill="rgba(255,255,255,0.7)" />
-                  {b.fireball && (
-                    <circle cx={b.x} cy={b.y} r={BALL_RADIUS + 2} fill="none" stroke="#ff6b35" strokeWidth="1.5" opacity="0.6" />
-                  )}
-                  {b.magnet && !b.fireball && (
-                    <circle cx={b.x} cy={b.y} r={BALL_RADIUS + 3} fill="none" stroke="#14b8a6" strokeWidth="1" opacity="0.4" strokeDasharray="3 3" />
-                  )}
+                <g key={`b${i}`}>
+                  {/* Glow pixels */}
+                  <rect x={b.x - PX} y={b.y} width={BALL_SZ + PX * 2} height={BALL_SZ} fill={bc} opacity="0.2" />
+                  <rect x={b.x} y={b.y - PX} width={BALL_SZ} height={BALL_SZ + PX * 2} fill={bc} opacity="0.2" />
+                  {/* Ball body */}
+                  <rect x={b.x} y={b.y} width={BALL_SZ} height={BALL_SZ} fill={bc} />
+                  {/* Highlight pixel */}
+                  <rect x={b.x} y={b.y} width={PX} height={PX} fill={PAL.fg} opacity="0.8" />
+                  {b.fire && <rect x={b.x + PX * 2} y={b.y + PX * 2} width={PX} height={PX} fill={PAL.orange} />}
+                  {b.mag && !b.fire && <>
+                    <rect x={b.x - PX * 2} y={b.y + PX} width={PX} height={PX} fill={PAL.cyan} opacity="0.4" />
+                    <rect x={b.x + BALL_SZ + PX} y={b.y + PX} width={PX} height={PX} fill={PAL.cyan} opacity="0.4" />
+                  </>}
                 </g>
               )
             })}
 
-            {/* SVG Particles */}
-            {renderParticles.map(p => {
-              const age = stateRef.current.elapsedMs - p.createdAtMs
-              const progress = clampNumber(age / PARTICLE_LIFETIME_MS, 0, 1)
-              const opacity = 1 - progress
-              const size = p.size * (1 - progress * 0.5)
-              return (
-                <circle key={p.id} cx={p.x} cy={p.y} r={size} fill={p.color} opacity={opacity} />
-              )
+            {/* Pixel particles */}
+            {rPxls.map(p => {
+              const age = sRef.current.ms - p.t; const prog = clamp(age / PART_LIFE, 0, 1); const op = 1 - prog
+              return <rect key={p.id} x={snap(p.x)} y={snap(p.y)} width={p.sz} height={p.sz} fill={p.c} opacity={op} />
             })}
 
-            {/* Walls */}
-            <line x1="1" y1="0" x2="1" y2={VIEWBOX_HEIGHT} stroke="#334155" strokeWidth="2" />
-            <line x1={VIEWBOX_WIDTH - 1} y1="0" x2={VIEWBOX_WIDTH - 1} y2={VIEWBOX_HEIGHT} stroke="#334155" strokeWidth="2" />
-            <line x1="0" y1="1" x2={VIEWBOX_WIDTH} y2="1" stroke="#334155" strokeWidth="2" />
+            {/* Walls (pixel borders) */}
+            <rect x="0" y="0" width={PX} height={VH} fill={PAL.bgLight} />
+            <rect x={VW - PX} y="0" width={PX} height={VH} fill={PAL.bgLight} />
+            <rect x="0" y="0" width={VW} height={PX} fill={PAL.bgLight} />
           </g>
         </svg>
       </div>
@@ -1259,7 +682,7 @@ export const breakoutMiniModule: MiniGameModule = {
     unlockCost: 50,
     baseReward: 16,
     scoreRewardMultiplier: 1.2,
-    accentColor: '#ef4444',
+    accentColor: '#ff5555',
   },
   Component: BreakoutMiniGame,
 }

@@ -98,7 +98,7 @@ function NumberSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [tiles, setTiles] = useState<NumberTile[]>([])
   const [clearedTiles, setClearedTiles] = useState<ClearedTile[]>([])
   const [isWrongFlash, setWrongFlash] = useState(false)
-  const [areaSize, setAreaSize] = useState({ width: 320, height: 320 })
+  const [_areaSize, setAreaSize] = useState({ width: 320, height: 320 })
 
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)

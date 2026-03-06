@@ -16,18 +16,23 @@ import comboSfx from '../../../assets/sounds/speed-sort-combo.mp3'
 import ruleChangeSfx from '../../../assets/sounds/speed-sort-rule-change.mp3'
 import timeBonusSfx from '../../../assets/sounds/speed-sort-time-bonus.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import levelupSfx from '../../../assets/sounds/speed-sort-levelup.mp3'
+import perfectSfx from '../../../assets/sounds/speed-sort-perfect.mp3'
+import dangerSfx from '../../../assets/sounds/speed-sort-danger.mp3'
+import powerupSfx from '../../../assets/sounds/speed-sort-powerup.mp3'
+import speedBonusSfx from '../../../assets/sounds/speed-sort-speed-bonus.mp3'
 
 // ─── Constants ──────────────────────────────────────────────────────
 
-const ROUND_DURATION_MS = 30000
+const ROUND_DURATION_MS = 35000
 const CORRECT_SCORE = 1
 const WRONG_PENALTY = 2
 const RULE_CHANGE_INTERVAL_MS = 8000
-const SWIPE_ANIMATION_DURATION_MS = 280
-const FEEDBACK_FLASH_DURATION_MS = 200
+const SWIPE_ANIMATION_DURATION_MS = 250
+const FEEDBACK_FLASH_DURATION_MS = 180
 const LOW_TIME_THRESHOLD_MS = 5000
-const COMBO_DECAY_WINDOW_MS = 2000
-const SPAWN_DELAY_MS = 300
+const COMBO_DECAY_WINDOW_MS = 2500
+const SPAWN_DELAY_MS = 280
 
 const MIN_RULE_CHANGE_INTERVAL_MS = 3000
 const RULE_CHANGE_SPEEDUP_PER_10 = 500
@@ -35,28 +40,43 @@ const COMBO_MULTIPLIER_STEP = 10
 const COMBO_TIME_BONUS_THRESHOLD = 15
 const COMBO_TIME_BONUS_MS = 1500
 
-// Fever mode
+// Fever
 const FEVER_COMBO_THRESHOLD = 8
 const FEVER_SCORE_MULTIPLIER = 2
-const PERFECT_STREAK_THRESHOLD = 10
-const PERFECT_STREAK_BONUS = 5
 
-// Difficulty escalation
-const DIFFICULTY_LEVELS = [
-  { label: 'EASY', color: '#22c55e', minScore: 0 },
-  { label: 'NORMAL', color: '#3b82f6', minScore: 15 },
-  { label: 'HARD', color: '#f59e0b', minScore: 35 },
-  { label: 'EXTREME', color: '#ef4444', minScore: 60 },
-  { label: 'INSANE', color: '#a855f7', minScore: 100 },
+// Speed bonus: fast reaction = extra points
+const SPEED_BONUS_FAST_MS = 600
+const SPEED_BONUS_INSTANT_MS = 300
+const SPEED_BONUS_FAST_EXTRA = 1
+const SPEED_BONUS_INSTANT_EXTRA = 3
+
+// Power-ups
+const POWERUP_CHANCE = 0.12
+const POWERUP_DURATION_MS = 4000
+type PowerUpKind = 'freeze' | 'double' | 'magnet'
+const POWERUP_INFO: Record<PowerUpKind, { label: string; emoji: string; color: string }> = {
+  freeze: { label: 'TIME FREEZE', emoji: '❄️', color: '#22d3ee' },
+  double: { label: 'DOUBLE PTS', emoji: '💰', color: '#fbbf24' },
+  magnet: { label: 'POINT MAGNET', emoji: '🧲', color: '#a855f7' },
+}
+
+// Level system
+const LEVELS = [
+  { name: 'Lv.1', threshold: 0, color: '#4ade80', bg: '#064e3b' },
+  { name: 'Lv.2', threshold: 10, color: '#60a5fa', bg: '#1e3a5f' },
+  { name: 'Lv.3', threshold: 25, color: '#facc15', bg: '#422006' },
+  { name: 'Lv.4', threshold: 45, color: '#fb923c', bg: '#431407' },
+  { name: 'Lv.5', threshold: 70, color: '#f87171', bg: '#450a0a' },
+  { name: 'Lv.MAX', threshold: 100, color: '#e879f9', bg: '#3b0764' },
 ] as const
 
 const CHARACTER_POOL = [
-  { id: 'kim-yeonja', name: 'Kim Yeonja', imageSrc: kimYeonjaImage, color: '#ec4899', emoji: '🎤' },
-  { id: 'park-sangmin', name: 'Park Sangmin', imageSrc: parkSangminImage, color: '#ef4444', emoji: '🎸' },
-  { id: 'park-wankyu', name: 'Park Wankyu', imageSrc: parkWankyuImage, color: '#f59e0b', emoji: '🎵' },
-  { id: 'seo-taiji', name: 'Seo Taiji', imageSrc: seoTaijiImage, color: '#8b5cf6', emoji: '🎹' },
-  { id: 'song-changsik', name: 'Song Changsik', imageSrc: songChangsikImage, color: '#22c55e', emoji: '🎺' },
-  { id: 'tae-jina', name: 'Tae Jina', imageSrc: taeJinaImage, color: '#22d3ee', emoji: '🥁' },
+  { id: 'kim-yeonja', name: 'Yeonja', imageSrc: kimYeonjaImage, color: '#ec4899', emoji: '🎤' },
+  { id: 'park-sangmin', name: 'Sangmin', imageSrc: parkSangminImage, color: '#ef4444', emoji: '🎸' },
+  { id: 'park-wankyu', name: 'Wankyu', imageSrc: parkWankyuImage, color: '#f59e0b', emoji: '🎵' },
+  { id: 'seo-taiji', name: 'Taiji', imageSrc: seoTaijiImage, color: '#8b5cf6', emoji: '🎹' },
+  { id: 'song-changsik', name: 'Changsik', imageSrc: songChangsikImage, color: '#22c55e', emoji: '🎺' },
+  { id: 'tae-jina', name: 'Jina', imageSrc: taeJinaImage, color: '#22d3ee', emoji: '🥁' },
 ] as const
 
 type Character = (typeof CHARACTER_POOL)[number]
@@ -73,9 +93,7 @@ function shuffleArray<T>(array: readonly T[]): T[] {
   const shuffled = [...array]
   for (let i = shuffled.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1))
-    const temp = shuffled[i]
-    shuffled[i] = shuffled[j]
-    shuffled[j] = temp
+    const temp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = temp
   }
   return shuffled
 }
@@ -86,240 +104,396 @@ function generateRule(): SortRule {
   const leftGroup = shuffled.slice(0, splitIndex)
   const rightGroup = shuffled.slice(splitIndex)
   return {
-    leftCharacterIds: new Set(leftGroup.map((c) => c.id)),
-    rightCharacterIds: new Set(rightGroup.map((c) => c.id)),
-    leftLabel: leftGroup.map((c) => c.name.split(' ').pop()).join(', '),
-    rightLabel: rightGroup.map((c) => c.name.split(' ').pop()).join(', '),
+    leftCharacterIds: new Set(leftGroup.map(c => c.id)),
+    rightCharacterIds: new Set(rightGroup.map(c => c.id)),
+    leftLabel: leftGroup.map(c => c.name).join(', '),
+    rightLabel: rightGroup.map(c => c.name).join(', '),
   }
 }
 
 function pickRandomCharacter(previousId?: string): Character {
-  const candidates = CHARACTER_POOL.filter((c) => c.id !== previousId)
-  const source = candidates.length > 0 ? candidates : [...CHARACTER_POOL]
-  return source[Math.floor(Math.random() * source.length)]
+  const candidates = CHARACTER_POOL.filter(c => c.id !== previousId)
+  return candidates[Math.floor(Math.random() * candidates.length)] ?? CHARACTER_POOL[0]
 }
 
 function getCorrectSide(characterId: string, rule: SortRule): SortSide {
   return rule.leftCharacterIds.has(characterId) ? 'left' : 'right'
 }
 
-function getDifficultyLevel(score: number) {
-  for (let i = DIFFICULTY_LEVELS.length - 1; i >= 0; i--) {
-    if (score >= DIFFICULTY_LEVELS[i].minScore) return DIFFICULTY_LEVELS[i]
+function getLevel(score: number) {
+  for (let i = LEVELS.length - 1; i >= 0; i--) {
+    if (score >= LEVELS[i].threshold) return LEVELS[i]
   }
-  return DIFFICULTY_LEVELS[0]
+  return LEVELS[0]
 }
 
-// ─── CSS ────────────────────────────────────────────────────────────
+function randomPowerUp(): PowerUpKind {
+  const kinds: PowerUpKind[] = ['freeze', 'double', 'magnet']
+  return kinds[Math.floor(Math.random() * kinds.length)]
+}
 
-const SPEED_SORT_CSS = `
+// ─── Retro Pixel CSS ────────────────────────────────────────────────
+
+const RETRO_CSS = `
   ${GAME_EFFECTS_CSS}
 
-  .ss-panel {
+  @keyframes ss-crt-flicker {
+    0% { opacity: 0.97; }
+    50% { opacity: 1; }
+    100% { opacity: 0.97; }
+  }
+
+  @keyframes ss-scanline {
+    0% { background-position: 0 0; }
+    100% { background-position: 0 4px; }
+  }
+
+  @keyframes ss-pixel-in {
+    0% { transform: scale(0) rotate(-15deg); opacity: 0; filter: blur(4px); }
+    50% { transform: scale(1.15) rotate(3deg); opacity: 1; filter: blur(0); }
+    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  }
+
+  @keyframes ss-swipe-l {
+    0% { transform: translateX(0) rotate(0); opacity: 1; }
+    100% { transform: translateX(-250px) rotate(-35deg); opacity: 0; }
+  }
+
+  @keyframes ss-swipe-r {
+    0% { transform: translateX(0) rotate(0); opacity: 1; }
+    100% { transform: translateX(250px) rotate(35deg); opacity: 0; }
+  }
+
+  @keyframes ss-bounce-score {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.25); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes ss-speed-flash {
+    0% { opacity: 1; transform: scale(1.3); }
+    100% { opacity: 0; transform: scale(0.8) translateY(-30px); }
+  }
+
+  @keyframes ss-powerup-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+  }
+
+  @keyframes ss-powerup-expire {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.3; transform: scale(0.95); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes ss-rule-danger {
+    0%, 100% { border-color: #f97316; background: rgba(249,115,22,0.05); }
+    50% { border-color: #ef4444; background: rgba(239,68,68,0.1); }
+  }
+
+  @keyframes ss-level-up {
+    0% { transform: scale(2) translateY(-10px); opacity: 0; }
+    40% { transform: scale(0.9) translateY(2px); opacity: 1; }
+    100% { transform: scale(1) translateY(0); opacity: 1; }
+  }
+
+  @keyframes ss-ripple-out {
+    0% { transform: scale(0); opacity: 0.7; }
+    100% { transform: scale(4); opacity: 0; }
+  }
+
+  @keyframes ss-fever-bg {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  @keyframes ss-pixel-border-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 3px var(--lvl-color, #4ade80); }
+    50% { box-shadow: inset 0 0 0 3px transparent; }
+  }
+
+  .ss-retro {
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 100%;
-    background: linear-gradient(180deg, #f5f4ef 0%, #ede9df 50%, #e8e5dc 100%);
     overflow: hidden;
     position: relative;
     user-select: none;
     -webkit-user-select: none;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    animation: ss-crt-flicker 0.1s infinite;
+    image-rendering: pixelated;
   }
 
-  .ss-panel.ss-fever {
-    background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 50%, #fed7aa 100%);
+  .ss-retro::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 50;
+    animation: ss-scanline 0.5s linear infinite;
   }
 
-  .ss-top-bar {
+  .ss-retro.ss-fever-mode {
+    background: linear-gradient(270deg, #1a1a2e, #2d1b4e, #1a1a2e);
+    background-size: 400% 100%;
+    animation: ss-crt-flicker 0.1s infinite, ss-fever-bg 3s ease infinite;
+  }
+
+  /* ── Header ── */
+  .ss-hud {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    padding: 10px 16px 4px;
+    padding: 10px 14px 4px;
     flex-shrink: 0;
+    position: relative;
+    z-index: 5;
   }
 
-  .ss-score-block { text-align: left; }
+  .ss-score-col { text-align: left; }
 
-  .ss-score {
-    font-size: clamp(2.2rem, 9vw, 3.2rem);
+  .ss-score-val {
+    font-size: clamp(2rem, 8vw, 2.8rem);
     font-weight: 900;
-    color: #1f2937;
     line-height: 1;
     margin: 0;
-    text-shadow: 0 2px 0 rgba(0,0,0,0.08);
-    transition: transform 0.15s;
+    color: #fbbf24;
+    text-shadow: 0 0 8px rgba(251,191,36,0.5), 2px 2px 0 #000;
   }
 
-  .ss-score.ss-score-pop {
-    animation: ge-bounce-in 0.2s ease-out;
+  .ss-score-val.ss-score-bounce {
+    animation: ss-bounce-score 0.2s ease-out;
   }
 
-  .ss-best {
-    font-size: 0.7rem;
-    color: #9ca3af;
+  .ss-hiscore {
+    font-size: 0.65rem;
+    color: #6b7280;
     margin: 2px 0 0;
     font-weight: 600;
+    text-shadow: 1px 1px 0 #000;
   }
 
-  .ss-timer-block { text-align: right; }
+  .ss-timer-col { text-align: right; }
 
-  .ss-timer {
-    font-size: clamp(1.6rem, 6vw, 2.4rem);
+  .ss-time-val {
+    font-size: clamp(1.5rem, 5vw, 2rem);
     font-weight: 800;
-    color: #374151;
     line-height: 1;
     margin: 0;
-    transition: color 0.3s, text-shadow 0.3s;
+    color: #4ade80;
+    text-shadow: 0 0 6px rgba(74,222,128,0.4), 2px 2px 0 #000;
+    transition: color 0.3s;
   }
 
-  .ss-timer.low-time {
+  .ss-time-val.ss-low {
     color: #ef4444;
-    text-shadow: 0 0 12px rgba(239,68,68,0.5);
-    animation: ge-pulse 0.6s ease-in-out infinite;
+    text-shadow: 0 0 12px rgba(239,68,68,0.6), 2px 2px 0 #000;
+    animation: ge-pulse 0.5s infinite;
   }
 
-  .ss-meta-row {
+  .ss-sorted-lbl {
+    font-size: 0.65rem;
+    color: #6b7280;
+    margin: 2px 0 0;
+    text-shadow: 1px 1px 0 #000;
+  }
+
+  /* ── Progress bars ── */
+  .ss-bar-wrap {
+    margin: 2px 14px;
+    height: 6px;
+    background: #0f0f23;
+    border: 2px solid #333;
+    border-radius: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+    image-rendering: pixelated;
+  }
+
+  .ss-bar-fill {
+    height: 100%;
+    transition: width 0.1s linear;
+    image-rendering: pixelated;
+  }
+
+  /* ── Combo / Level row ── */
+  .ss-info-row {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 10px;
-    padding: 2px 16px;
-    min-height: 24px;
+    gap: 8px;
+    padding: 2px 0;
+    min-height: 22px;
     flex-shrink: 0;
   }
 
-  .ss-combo-count {
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: #6b7280;
-    margin: 0;
-  }
-
-  .ss-combo-count strong {
-    font-size: 1.1rem;
-    color: #f97316;
-  }
-
-  .ss-multiplier {
+  .ss-combo-lbl {
     font-size: 0.8rem;
-    color: #f59e0b;
-    font-weight: 800;
-    margin: 0;
-    animation: ge-pulse 0.8s ease-in-out infinite;
-  }
-
-  .ss-difficulty {
-    font-size: 0.65rem;
-    font-weight: 800;
-    padding: 1px 6px;
-    border-radius: 4px;
-    margin: 0;
-    letter-spacing: 0.5px;
-  }
-
-  .ss-sorted-count {
-    font-size: 0.7rem;
+    font-weight: 700;
     color: #9ca3af;
-    font-weight: 600;
     margin: 0;
+    text-shadow: 1px 1px 0 #000;
   }
 
-  .ss-combo-label {
+  .ss-combo-lbl strong {
+    color: #f97316;
+    font-size: 1rem;
+  }
+
+  .ss-mult-lbl {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #fbbf24;
+    margin: 0;
+    text-shadow: 0 0 6px rgba(251,191,36,0.5);
+    animation: ge-pulse 0.7s infinite;
+  }
+
+  .ss-lvl-badge {
+    font-size: 0.6rem;
+    font-weight: 900;
+    padding: 1px 5px;
+    border: 2px solid;
+    margin: 0;
+    letter-spacing: 1px;
+    text-shadow: 1px 1px 0 #000;
+  }
+
+  .ss-lvl-badge.ss-lvl-change {
+    animation: ss-level-up 0.4s ease-out;
+  }
+
+  /* ── Combo label big text ── */
+  .ss-combo-big {
     text-align: center;
     font-size: clamp(1.1rem, 4.5vw, 1.5rem);
     font-weight: 900;
     margin: 0;
     animation: ge-bounce-in 0.3s ease-out;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.25);
-    min-height: 22px;
+    text-shadow: 0 0 10px currentColor, 2px 2px 0 #000;
+    min-height: 20px;
     flex-shrink: 0;
   }
 
-  .ss-fever-banner {
-    text-align: center;
-    font-size: clamp(0.75rem, 3vw, 0.9rem);
+  /* ── Speed bonus popup ── */
+  .ss-speed-popup {
+    position: absolute;
+    z-index: 20;
+    font-size: 0.85rem;
     font-weight: 900;
-    color: #f97316;
+    pointer-events: none;
+    animation: ss-speed-flash 0.6s ease-out forwards;
+    text-shadow: 0 0 6px currentColor, 1px 1px 0 #000;
+  }
+
+  /* ── Fever banner ── */
+  .ss-fever-lbl {
+    text-align: center;
+    font-size: clamp(0.7rem, 2.5vw, 0.85rem);
+    font-weight: 900;
+    color: #fbbf24;
     margin: 0;
     padding: 2px 0;
-    animation: ge-pulse 0.5s ease-in-out infinite;
-    text-shadow: 0 0 8px rgba(249,115,22,0.5);
-    letter-spacing: 2px;
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(251,191,36,0.6), 2px 2px 0 #000;
+    animation: ge-pulse 0.5s infinite;
     flex-shrink: 0;
   }
 
-  .ss-rule-banner {
+  /* ── Power-up banner ── */
+  .ss-powerup-banner {
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 900;
+    margin: 0;
+    padding: 3px 0;
+    letter-spacing: 1px;
+    text-shadow: 0 0 8px currentColor, 1px 1px 0 #000;
+    flex-shrink: 0;
+  }
+
+  .ss-powerup-banner.ss-pu-active {
+    animation: ss-powerup-float 1s ease-in-out infinite;
+  }
+
+  .ss-powerup-banner.ss-pu-expiring {
+    animation: ss-powerup-expire 0.3s ease-in-out infinite;
+  }
+
+  /* ── Rule banner ── */
+  .ss-rule-box {
     display: flex;
     align-items: stretch;
-    margin: 4px 12px;
-    border-radius: 10px;
-    background: rgba(31,41,55,0.06);
-    border: 2px solid #d1d5db;
+    margin: 4px 14px;
+    border: 2px solid #444;
+    background: #0f0f23;
     overflow: hidden;
     flex-shrink: 0;
     transition: border-color 0.3s, background 0.3s;
-    min-height: 40px;
+    min-height: 38px;
   }
 
-  .ss-rule-banner.rule-flash {
+  .ss-rule-box.ss-rule-flash {
     border-color: #f97316;
     background: rgba(249,115,22,0.08);
     animation: ge-shake 0.3s ease-out;
   }
 
-  .ss-rule-side {
+  .ss-rule-box.ss-rule-danger {
+    animation: ss-rule-danger 0.5s ease-in-out infinite;
+  }
+
+  .ss-rule-half {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    padding: 6px 6px;
-    font-size: clamp(0.6rem, 2.2vw, 0.75rem);
+    padding: 5px 6px;
+    font-size: clamp(0.6rem, 2.2vw, 0.72rem);
     font-weight: 700;
-    color: #374151;
+    color: #d1d5db;
+    text-shadow: 1px 1px 0 #000;
   }
 
-  .ss-rule-side.left {
-    border-right: 2px solid #d1d5db;
+  .ss-rule-half.ss-rule-left {
+    border-right: 2px solid #444;
   }
 
-  .ss-rule-arrow {
+  .ss-rule-arr {
     font-size: 1rem;
     color: #f97316;
+    text-shadow: 0 0 4px rgba(249,115,22,0.5);
   }
 
-  .ss-progress-bar {
-    margin: 2px 12px;
-    height: 4px;
-    background: #e5e7eb;
-    border-radius: 2px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .ss-progress-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.1s linear, background 0.3s;
-  }
-
-  .ss-rule-timer {
-    margin: 0 12px;
+  .ss-rule-bar {
+    margin: 0 14px;
     height: 3px;
-    background: #e5e7eb;
-    border-radius: 2px;
+    background: #0f0f23;
+    border: 1px solid #333;
     overflow: hidden;
     flex-shrink: 0;
   }
 
-  .ss-rule-timer-fill {
+  .ss-rule-bar-fill {
     height: 100%;
     background: linear-gradient(90deg, #f97316, #ef4444);
-    border-radius: 2px;
     transition: width 0.1s linear;
   }
 
+  /* ── Arena ── */
   .ss-arena {
     flex: 1;
     display: flex;
@@ -335,7 +509,7 @@ const SPEED_SORT_CSS = `
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 32%;
+    width: 33%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -345,33 +519,28 @@ const SPEED_SORT_CSS = `
     touch-action: none;
   }
 
-  .ss-zone-left {
-    left: 0;
-    background: linear-gradient(90deg, rgba(249,115,22,0.06) 0%, transparent 100%);
-  }
-
-  .ss-zone-right {
-    right: 0;
-    background: linear-gradient(-90deg, rgba(249,115,22,0.06) 0%, transparent 100%);
-  }
+  .ss-zone-l { left: 0; }
+  .ss-zone-r { right: 0; }
 
   .ss-zone:active {
-    background: rgba(249,115,22,0.18);
+    background: rgba(249,115,22,0.12);
   }
 
   .ss-zone-arrow {
-    font-size: clamp(2.2rem, 9vw, 3.2rem);
-    color: rgba(249,115,22,0.25);
+    font-size: clamp(2.5rem, 10vw, 3.5rem);
+    color: rgba(249,115,22,0.2);
     font-weight: 900;
-    transition: color 0.12s, transform 0.12s;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+    transition: color 0.1s, transform 0.1s;
   }
 
   .ss-zone:active .ss-zone-arrow {
-    color: rgba(249,115,22,0.7);
-    transform: scale(1.4);
+    color: rgba(249,115,22,0.8);
+    transform: scale(1.5);
+    text-shadow: 0 0 12px rgba(249,115,22,0.6);
   }
 
-  .ss-character-area {
+  .ss-char-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -380,157 +549,119 @@ const SPEED_SORT_CSS = `
     position: relative;
   }
 
-  .ss-character {
+  .ss-char {
     display: flex;
     flex-direction: column;
     align-items: center;
   }
 
-  .ss-character-image {
-    width: clamp(160px, 50vw, 240px);
-    height: clamp(160px, 50vw, 240px);
+  .ss-char-img {
+    width: clamp(160px, 50vw, 250px);
+    height: clamp(160px, 50vw, 250px);
     object-fit: contain;
     image-rendering: pixelated;
-    filter: drop-shadow(0 6px 16px rgba(0,0,0,0.18));
+    filter: drop-shadow(0 0 12px rgba(251,191,36,0.25)) drop-shadow(3px 3px 0 #000);
   }
 
-  .ss-character-name {
-    font-size: clamp(1.3rem, 4.5vw, 1.7rem);
+  .ss-char-name {
+    font-size: clamp(1.3rem, 5vw, 1.8rem);
     font-weight: 900;
-    margin: 8px 0 0;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    margin: 6px 0 0;
+    text-shadow: 0 0 8px currentColor, 2px 2px 0 #000;
+    letter-spacing: 1px;
   }
 
-  .ss-streak-indicator {
-    font-size: 0.75rem;
+  .ss-streak-lbl {
+    font-size: 0.7rem;
     font-weight: 700;
     margin: 2px 0 0;
-    color: #22c55e;
+    color: #4ade80;
+    text-shadow: 0 0 4px rgba(74,222,128,0.5), 1px 1px 0 #000;
     animation: ge-bounce-in 0.2s ease-out;
   }
 
-  @keyframes ss-swipe-left {
-    0% { transform: translateX(0) rotate(0deg); opacity: 1; }
-    100% { transform: translateX(-220px) rotate(-30deg); opacity: 0; }
+  .ss-swipe-l { animation: ss-swipe-l 0.25s ease-in forwards; }
+  .ss-swipe-r { animation: ss-swipe-r 0.25s ease-in forwards; }
+  .ss-pixel-in { animation: ss-pixel-in 0.28s ease-out; }
+
+  .ss-arena.ss-fb-ok {
+    background: radial-gradient(circle at center, rgba(74,222,128,0.12) 0%, transparent 65%);
   }
 
-  @keyframes ss-swipe-right {
-    0% { transform: translateX(0) rotate(0deg); opacity: 1; }
-    100% { transform: translateX(220px) rotate(30deg); opacity: 0; }
+  .ss-arena.ss-fb-ng {
+    background: radial-gradient(circle at center, rgba(239,68,68,0.12) 0%, transparent 65%);
   }
 
-  @keyframes ss-spawn-in {
-    0% { transform: scale(0.2) translateY(40px); opacity: 0; }
-    50% { transform: scale(1.12) translateY(-6px); opacity: 1; }
-    100% { transform: scale(1) translateY(0); opacity: 1; }
+  /* ── Ripples ── */
+  .ss-ripple {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    pointer-events: none;
+    animation: ss-ripple-out 0.45s ease-out forwards;
+    z-index: 10;
+    border: 3px solid;
   }
 
-  .ss-swipe-left { animation: ss-swipe-left 0.26s ease-in forwards; }
-  .ss-swipe-right { animation: ss-swipe-right 0.26s ease-in forwards; }
-  .ss-spawn-in { animation: ss-spawn-in 0.28s ease-out; }
+  .ss-ripple-ok { border-color: #4ade80; background: rgba(74,222,128,0.15); }
+  .ss-ripple-ng { border-color: #ef4444; background: rgba(239,68,68,0.15); }
 
-  .ss-feedback-correct {
-    background: radial-gradient(circle at center, rgba(34,197,94,0.15) 0%, transparent 70%);
-  }
-
-  .ss-feedback-wrong {
-    background: radial-gradient(circle at center, rgba(239,68,68,0.15) 0%, transparent 70%);
-  }
-
-  .ss-button-row {
+  /* ── Buttons ── */
+  .ss-btn-row {
     display: flex;
-    gap: 12px;
-    padding: 8px 16px 14px;
+    gap: 10px;
+    padding: 6px 14px 12px;
     flex-shrink: 0;
   }
 
-  .ss-button {
+  .ss-btn {
     flex: 1;
-    min-height: clamp(56px, 14vw, 76px);
-    border: 3px solid #6b7280;
-    border-radius: 14px;
-    font-size: clamp(1.1rem, 4vw, 1.5rem);
+    min-height: clamp(54px, 13vw, 72px);
+    border: 3px solid #f97316;
+    border-radius: 0;
+    font-size: clamp(1rem, 3.5vw, 1.3rem);
     font-weight: 900;
+    font-family: 'Courier New', monospace;
     cursor: pointer;
-    transition: transform 0.08s, box-shadow 0.08s;
+    transition: transform 0.06s, box-shadow 0.06s;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
-    background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
-    color: #c2410c;
+    background: #1a1a2e;
+    color: #f97316;
+    text-shadow: 0 0 6px rgba(249,115,22,0.4), 1px 1px 0 #000;
+    box-shadow: 4px 4px 0 #000;
+    letter-spacing: 1px;
   }
 
-  .ss-button:active:not(:disabled) {
-    transform: scale(0.93);
-    box-shadow: inset 0 2px 8px rgba(0,0,0,0.15);
+  .ss-btn:active:not(:disabled) {
+    transform: translate(2px, 2px);
+    box-shadow: 2px 2px 0 #000;
   }
 
-  .ss-button:disabled {
-    opacity: 0.45;
+  .ss-btn:disabled {
+    opacity: 0.35;
     cursor: default;
   }
 
-  .ss-panel.ss-fever .ss-button {
-    border-color: #f97316;
-    background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
-    box-shadow: 0 0 12px rgba(249,115,22,0.3);
+  .ss-retro.ss-fever-mode .ss-btn {
+    border-color: #fbbf24;
+    color: #fbbf24;
+    box-shadow: 4px 4px 0 #000, 0 0 12px rgba(251,191,36,0.2);
   }
 
-  @keyframes ss-ripple-expand {
-    0% { transform: scale(0); opacity: 0.6; }
-    100% { transform: scale(3.5); opacity: 0; }
+  /* ── Streak glow ── */
+  .ss-retro.ss-glow {
+    box-shadow: inset 0 0 40px rgba(249,115,22,0.08);
   }
 
-  .ss-ripple {
-    position: absolute;
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    pointer-events: none;
-    animation: ss-ripple-expand 0.5s ease-out forwards;
-    z-index: 10;
+  .ss-retro.ss-low-time {
+    box-shadow: inset 0 0 40px rgba(239,68,68,0.1);
   }
-
-  .ss-ripple-correct { background: rgba(34,197,94,0.25); }
-  .ss-ripple-wrong { background: rgba(239,68,68,0.25); }
-
-  @keyframes ss-streak-glow {
-    0%, 100% { box-shadow: 0 0 0 rgba(249,115,22,0); }
-    50% { box-shadow: 0 0 30px rgba(249,115,22,0.3), inset 0 0 20px rgba(249,115,22,0.08); }
-  }
-
-  .ss-streak-glow { animation: ss-streak-glow 1.2s ease-in-out infinite; }
-
-  .ss-low-time-border {
-    animation: ge-rush-border 0.5s ease-in-out infinite alternate;
-    border: 3px solid rgba(239,68,68,0.5);
-  }
-
-  @keyframes ss-time-bonus-flash {
-    0% { background: rgba(34,197,94,0.25); }
-    100% { background: transparent; }
-  }
-
-  .ss-time-bonus { animation: ss-time-bonus-flash 0.6s ease-out; }
-
-  @keyframes ss-perfect-burst {
-    0% { transform: scale(1); }
-    30% { transform: scale(1.04); }
-    100% { transform: scale(1); }
-  }
-
-  .ss-perfect-burst { animation: ss-perfect-burst 0.5s ease-out; }
-
-  @keyframes ss-difficulty-change {
-    0% { transform: scale(1.4); opacity: 0; }
-    40% { transform: scale(0.9); opacity: 1; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-
-  .ss-difficulty-change { animation: ss-difficulty-change 0.4s ease-out; }
 `
 
 // ─── Component ──────────────────────────────────────────────────────
@@ -541,77 +672,86 @@ function SpeedSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [combo, setCombo] = useState(0)
   const [currentCharacter, setCurrentCharacter] = useState<Character>(() => pickRandomCharacter())
   const [rule, setRule] = useState<SortRule>(() => generateRule())
-  const [swipeDirection, setSwipeDirection] = useState<SortSide | null>(null)
-  const [feedbackKind, setFeedbackKind] = useState<'correct' | 'wrong' | null>(null)
+  const [swipeDir, setSwipeDir] = useState<SortSide | null>(null)
+  const [feedback, setFeedback] = useState<'ok' | 'ng' | null>(null)
   const [ruleFlash, setRuleFlash] = useState(false)
   const [isSpawning, setIsSpawning] = useState(false)
   const [sortCount, setSortCount] = useState(0)
-  const [timeBonusFlash, setTimeBonusFlash] = useState(false)
-  const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; correct: boolean }>>([])
-  const [characterJustSpawned, setCharacterJustSpawned] = useState(true)
+  const [timeBonusActive, setTimeBonusActive] = useState(false)
+  const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; ok: boolean }>>([])
+  const [justSpawned, setJustSpawned] = useState(true)
   const [isFever, setIsFever] = useState(false)
   const [streak, setStreak] = useState(0)
-  const [perfectBurst, setPerfectBurst] = useState(false)
-  const [scorePop, setScorePop] = useState(false)
-  const [difficultyChanged, setDifficultyChanged] = useState(false)
+  const [scoreBounce, setScoreBounce] = useState(false)
+  const [levelChanged, setLevelChanged] = useState(false)
+  const [speedPopups, setSpeedPopups] = useState<Array<{ id: number; label: string; color: string; x: number; y: number }>>([])
+  const [activePowerUp, setActivePowerUp] = useState<PowerUpKind | null>(null)
+  const [powerUpExpiring, setPowerUpExpiring] = useState(false)
+  const [ruleDanger, setRuleDanger] = useState(false)
 
-  const effects = useGameEffects({ maxParticles: 50 })
+  const effects = useGameEffects({ maxParticles: 60 })
 
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const comboRef = useRef(0)
   const streakRef = useRef(0)
   const ruleRef = useRef<SortRule>(rule)
-  const currentCharacterRef = useRef<Character>(currentCharacter)
+  const charRef = useRef<Character>(currentCharacter)
   const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const ruleSinceLastChangeRef = useRef(0)
+  const rafRef = useRef<number | null>(null)
+  const lastFrameRef = useRef<number | null>(null)
+  const ruleSinceChangeRef = useRef(0)
   const lastSortAtRef = useRef(0)
   const swipeTimerRef = useRef<number | null>(null)
   const feedbackTimerRef = useRef<number | null>(null)
   const spawnTimerRef = useRef<number | null>(null)
-  const lowTimeSecondRef = useRef<number | null>(null)
+  const lowTimeSecRef = useRef<number | null>(null)
   const rippleIdRef = useRef(0)
-  const prevDifficultyRef = useRef<string>(DIFFICULTY_LEVELS[0].label)
-  const audioPoolRef = useRef<Record<string, HTMLAudioElement | null>>({})
+  const speedPopIdRef = useRef(0)
+  const prevLevelRef = useRef<string>(LEVELS[0].name)
+  const audioRef = useRef<Record<string, HTMLAudioElement | null>>({})
+  const powerUpTimerRef = useRef<number | null>(null)
+  const charSpawnAtRef = useRef(performance.now())
 
-  const clearTimeoutSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
+  const clearTimer = (ref: { current: number | null }) => {
+    if (ref.current !== null) { window.clearTimeout(ref.current); ref.current = null }
   }
 
-  const playAudio = useCallback((key: string, volume: number, playbackRate = 1) => {
-    const audio = audioPoolRef.current[key]
-    if (audio === null || audio === undefined) return
-    audio.currentTime = 0
-    audio.volume = Math.min(1, Math.max(0, volume))
-    audio.playbackRate = playbackRate
-    void audio.play().catch(() => {})
+  const play = useCallback((key: string, vol: number, rate = 1) => {
+    const a = audioRef.current[key]
+    if (!a) return
+    a.currentTime = 0
+    a.volume = Math.min(1, Math.max(0, vol))
+    a.playbackRate = rate
+    void a.play().catch(() => {})
   }, [])
 
-  const addRipple = useCallback((x: number, y: number, correct: boolean) => {
+  const addRipple = useCallback((x: number, y: number, ok: boolean) => {
     rippleIdRef.current += 1
     const id = rippleIdRef.current
-    setRipples(prev => [...prev.slice(-5), { id, x, y, correct }])
-    window.setTimeout(() => {
-      setRipples(prev => prev.filter(r => r.id !== id))
-    }, 500)
+    setRipples(prev => [...prev.slice(-5), { id, x, y, ok }])
+    window.setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 450)
   }, [])
 
-  const spawnNextCharacter = useCallback((previousId: string) => {
+  const addSpeedPopup = useCallback((label: string, color: string, x: number, y: number) => {
+    speedPopIdRef.current += 1
+    const id = speedPopIdRef.current
+    setSpeedPopups(prev => [...prev.slice(-3), { id, label, color, x, y }])
+    window.setTimeout(() => setSpeedPopups(prev => prev.filter(p => p.id !== id)), 600)
+  }, [])
+
+  const spawnNext = useCallback((prevId: string) => {
     setIsSpawning(true)
-    setCharacterJustSpawned(false)
-    clearTimeoutSafe(spawnTimerRef)
+    setJustSpawned(false)
+    clearTimer(spawnTimerRef)
     spawnTimerRef.current = window.setTimeout(() => {
       spawnTimerRef.current = null
-      const next = pickRandomCharacter(previousId)
-      currentCharacterRef.current = next
+      const next = pickRandomCharacter(prevId)
+      charRef.current = next
       setCurrentCharacter(next)
       setIsSpawning(false)
-      setCharacterJustSpawned(true)
+      setJustSpawned(true)
+      charSpawnAtRef.current = performance.now()
     }, SPAWN_DELAY_MS)
   }, [])
 
@@ -620,452 +760,410 @@ function SpeedSortGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     ruleRef.current = nextRule
     setRule(nextRule)
     setRuleFlash(true)
-    playAudio('ruleChange', 0.45, 1.1)
+    setRuleDanger(false)
+    play('ruleChange', 0.5, 1.1)
     effects.triggerFlash('rgba(249,115,22,0.2)', 150)
     window.setTimeout(() => setRuleFlash(false), 600)
-  }, [playAudio, effects])
+  }, [play, effects])
 
-  const finishGame = useCallback(() => {
+  const activatePowerUp = useCallback(() => {
+    const kind = randomPowerUp()
+    setActivePowerUp(kind)
+    setPowerUpExpiring(false)
+    play('powerup', 0.55, 1.1)
+    effects.spawnParticles(5, 200, 200, [POWERUP_INFO[kind].emoji, '✨', '⚡'], 'emoji')
+    addSpeedPopup(POWERUP_INFO[kind].label, POWERUP_INFO[kind].color, 200, 160)
+
+    clearTimer(powerUpTimerRef)
+    // Start expiring warning
+    window.setTimeout(() => setPowerUpExpiring(true), POWERUP_DURATION_MS - 1000)
+    powerUpTimerRef.current = window.setTimeout(() => {
+      powerUpTimerRef.current = null
+      setActivePowerUp(null)
+      setPowerUpExpiring(false)
+    }, POWERUP_DURATION_MS)
+  }, [play, effects, addSpeedPopup])
+
+  const endGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
-    clearTimeoutSafe(swipeTimerRef)
-    clearTimeoutSafe(feedbackTimerRef)
-    clearTimeoutSafe(spawnTimerRef)
+    clearTimer(swipeTimerRef); clearTimer(feedbackTimerRef); clearTimer(spawnTimerRef); clearTimer(powerUpTimerRef)
     effects.cleanup()
-    playAudio('gameOver', 0.64, 0.95)
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
-    onFinish({ score: Math.max(0, scoreRef.current), durationMs: elapsedMs })
-  }, [onFinish, playAudio, effects])
+    play('gameOver', 0.64, 0.95)
+    onFinish({ score: Math.max(0, scoreRef.current), durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)) })
+  }, [onFinish, play, effects])
 
-  const handleSort = useCallback(
-    (side: SortSide) => {
-      if (finishedRef.current || swipeDirection !== null || isSpawning) return
+  const handleSort = useCallback((side: SortSide) => {
+    if (finishedRef.current || swipeDir !== null || isSpawning) return
 
-      const character = currentCharacterRef.current
-      const correctSide = getCorrectSide(character.id, ruleRef.current)
-      const isCorrect = side === correctSide
-      const now = performance.now()
+    const ch = charRef.current
+    const correct = getCorrectSide(ch.id, ruleRef.current)
+    const ok = side === correct
+    const now = performance.now()
 
-      setSwipeDirection(side)
+    setSwipeDir(side)
+    const rx = side === 'left' ? 80 : 320
+    addRipple(rx, 200, ok)
 
-      // Ripple at side
-      const rx = side === 'left' ? 80 : 320
-      addRipple(rx, 200, isCorrect)
+    if (ok) {
+      const dt = now - lastSortAtRef.current
+      const nextCombo = dt <= COMBO_DECAY_WINDOW_MS ? comboRef.current + 1 : 1
+      comboRef.current = nextCombo
+      setCombo(nextCombo)
 
-      if (isCorrect) {
-        const timeSinceLastSort = now - lastSortAtRef.current
-        const nextCombo = timeSinceLastSort <= COMBO_DECAY_WINDOW_MS ? comboRef.current + 1 : 1
-        comboRef.current = nextCombo
-        setCombo(nextCombo)
+      const nextStreak = streakRef.current + 1
+      streakRef.current = nextStreak
+      setStreak(nextStreak)
 
-        // Streak tracking
-        const nextStreak = streakRef.current + 1
-        streakRef.current = nextStreak
-        setStreak(nextStreak)
+      const enterFever = nextCombo >= FEVER_COMBO_THRESHOLD
+      if (enterFever) setIsFever(true)
 
-        // Fever mode
-        const enteringFever = nextCombo >= FEVER_COMBO_THRESHOLD
-        if (enteringFever) setIsFever(true)
-
-        // Score calculation
-        const comboMultiplier = 1 + Math.floor(nextCombo / COMBO_MULTIPLIER_STEP)
-        const feverMultiplier = enteringFever ? FEVER_SCORE_MULTIPLIER : 1
-        const comboBonus = Math.floor(nextCombo / 5)
-        const earned = (CORRECT_SCORE + comboBonus) * comboMultiplier * feverMultiplier
-
-        // Perfect streak bonus
-        let totalEarned = earned
-        if (nextStreak > 0 && nextStreak % PERFECT_STREAK_THRESHOLD === 0) {
-          totalEarned += PERFECT_STREAK_BONUS
-          setPerfectBurst(true)
-          window.setTimeout(() => setPerfectBurst(false), 500)
-          effects.spawnParticles(8, 200, 200, ['🏆', '⭐', '💎', '🌟'], 'emoji')
-          effects.triggerFlash('rgba(251,191,36,0.3)', 200)
-          playAudio('combo', 0.6, 1.3)
-        }
-
-        const prevScore = scoreRef.current
-        const nextScore = prevScore + totalEarned
-        scoreRef.current = nextScore
-        setScore(nextScore)
-
-        // Score pop animation
-        setScorePop(true)
-        window.setTimeout(() => setScorePop(false), 200)
-
-        // Difficulty change detection
-        const prevDiff = getDifficultyLevel(prevScore)
-        const nextDiff = getDifficultyLevel(nextScore)
-        if (prevDiff.label !== nextDiff.label && prevDifficultyRef.current !== nextDiff.label) {
-          prevDifficultyRef.current = nextDiff.label
-          setDifficultyChanged(true)
-          window.setTimeout(() => setDifficultyChanged(false), 400)
-          effects.spawnParticles(5, 200, 50, ['🔥', '⚡', '💪'], 'emoji')
-          playAudio('combo', 0.5, 1.2)
-        }
-
-        // Time bonus at high combos
-        if (nextCombo > 0 && nextCombo % COMBO_TIME_BONUS_THRESHOLD === 0) {
-          remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + COMBO_TIME_BONUS_MS)
-          setRemainingMs(remainingMsRef.current)
-          setTimeBonusFlash(true)
-          window.setTimeout(() => setTimeBonusFlash(false), 600)
-          playAudio('timeBonus', 0.55, 1.0)
-          effects.showScorePopup(0, 200, 80, '#22c55e')
-          effects.spawnParticles(6, 200, 80, ['⏱️', '💚', '✨'], 'emoji')
-        }
-
-        setFeedbackKind('correct')
-        playAudio('swipe', 0.4, 1 + nextCombo * 0.015)
-        playAudio('correct', 0.42, 1 + nextCombo * 0.02)
-
-        if (nextCombo > 0 && nextCombo % 5 === 0) {
-          playAudio('combo', 0.5, 0.9 + nextCombo * 0.01)
-        }
-
-        const cx = side === 'left' ? 100 : 300
-        effects.comboHitBurst(cx, 250, nextCombo, totalEarned, [character.emoji, '✨', '🔥', '⚡'])
-
-        if (nextCombo >= 10) {
-          effects.spawnParticles(Math.min(6, Math.floor(nextCombo / 10)), 200, 250, ['🌟', '💫', '🔥'], 'emoji')
-        }
-      } else {
-        comboRef.current = 0
-        streakRef.current = 0
-        setCombo(0)
-        setStreak(0)
-        setIsFever(false)
-
-        const nextScore = scoreRef.current - WRONG_PENALTY
-        scoreRef.current = nextScore
-        setScore(nextScore)
-        setFeedbackKind('wrong')
-
-        playAudio('wrong', 0.55, 0.8)
-        effects.triggerShake(8, 180)
-        effects.triggerFlash('rgba(239,68,68,0.35)', 120)
-        effects.spawnParticles(4, 200, 250, ['💢', '❌', '😵'], 'emoji')
-        effects.showScorePopup(-WRONG_PENALTY, 200, 280, '#ef4444')
+      // Speed bonus based on reaction time
+      const reactionMs = now - charSpawnAtRef.current
+      let speedExtra = 0
+      let speedLabel = ''
+      if (reactionMs <= SPEED_BONUS_INSTANT_MS) {
+        speedExtra = SPEED_BONUS_INSTANT_EXTRA
+        speedLabel = 'INSTANT!'
+        play('speedBonus', 0.5, 1.4)
+      } else if (reactionMs <= SPEED_BONUS_FAST_MS) {
+        speedExtra = SPEED_BONUS_FAST_EXTRA
+        speedLabel = 'FAST!'
+        play('speedBonus', 0.4, 1.2)
+      }
+      if (speedLabel) {
+        addSpeedPopup(speedLabel, '#22d3ee', side === 'left' ? 100 : 300, 180)
       }
 
-      lastSortAtRef.current = now
-      setSortCount((prev) => prev + 1)
+      // Score calc
+      const comboMul = 1 + Math.floor(nextCombo / COMBO_MULTIPLIER_STEP)
+      const feverMul = enterFever ? FEVER_SCORE_MULTIPLIER : 1
+      const doubleMul = activePowerUp === 'double' ? 2 : 1
+      const magnetExtra = activePowerUp === 'magnet' ? 2 : 0
+      const comboBonus = Math.floor(nextCombo / 5)
+      const earned = ((CORRECT_SCORE + comboBonus + speedExtra + magnetExtra) * comboMul * feverMul * doubleMul)
 
-      clearTimeoutSafe(feedbackTimerRef)
-      feedbackTimerRef.current = window.setTimeout(() => {
-        feedbackTimerRef.current = null
-        setFeedbackKind(null)
-      }, FEEDBACK_FLASH_DURATION_MS)
+      const prev = scoreRef.current
+      const next = prev + earned
+      scoreRef.current = next
+      setScore(next)
+      setScoreBounce(true)
+      window.setTimeout(() => setScoreBounce(false), 200)
 
-      clearTimeoutSafe(swipeTimerRef)
-      swipeTimerRef.current = window.setTimeout(() => {
-        swipeTimerRef.current = null
-        setSwipeDirection(null)
-        spawnNextCharacter(character.id)
-      }, SWIPE_ANIMATION_DURATION_MS)
-    },
-    [swipeDirection, isSpawning, playAudio, spawnNextCharacter, addRipple, effects],
-  )
+      // Level check
+      const prevLvl = getLevel(prev)
+      const nextLvl = getLevel(next)
+      if (prevLvl.name !== nextLvl.name && prevLevelRef.current !== nextLvl.name) {
+        prevLevelRef.current = nextLvl.name
+        setLevelChanged(true)
+        window.setTimeout(() => setLevelChanged(false), 400)
+        play('levelup', 0.55, 1.0)
+        effects.spawnParticles(8, 200, 50, ['🔥', '⚡', '💪', '🌟'], 'emoji')
+        effects.triggerFlash('rgba(251,191,36,0.25)', 200)
+        addSpeedPopup(`${nextLvl.name}!`, nextLvl.color, 200, 100)
+      }
 
-  const handleExit = useCallback(() => {
-    playAudio('swipe', 0.42, 1.02)
-    onExit()
-  }, [onExit, playAudio])
+      // Time bonus
+      if (nextCombo > 0 && nextCombo % COMBO_TIME_BONUS_THRESHOLD === 0) {
+        const freeze = activePowerUp === 'freeze'
+        const bonus = freeze ? COMBO_TIME_BONUS_MS * 2 : COMBO_TIME_BONUS_MS
+        remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + bonus)
+        setRemainingMs(remainingMsRef.current)
+        setTimeBonusActive(true)
+        window.setTimeout(() => setTimeBonusActive(false), 600)
+        play('timeBonus', 0.55)
+        effects.showScorePopup(0, 200, 70, '#4ade80')
+        effects.spawnParticles(6, 200, 70, ['⏱️', '💚', '✨'], 'emoji')
+      }
 
-  // Touch swipe on arena
-  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null)
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0]
-    touchStartRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() }
-  }, [])
+      // Power-up chance
+      if (activePowerUp === null && Math.random() < POWERUP_CHANCE && nextCombo >= 3) {
+        activatePowerUp()
+      }
 
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (touchStartRef.current === null) return
-    const touch = e.changedTouches[0]
-    const dx = touch.clientX - touchStartRef.current.x
-    const dy = touch.clientY - touchStartRef.current.y
-    const dt = Date.now() - touchStartRef.current.t
-    touchStartRef.current = null
-    // Quick swipe: at least 25px horizontal, mostly horizontal, within 500ms
-    if (Math.abs(dx) > 25 && Math.abs(dx) > Math.abs(dy) * 1.2 && dt < 500) {
-      handleSort(dx < 0 ? 'left' : 'right')
+      // Perfect streak
+      if (nextStreak > 0 && nextStreak % 10 === 0) {
+        play('perfect', 0.55, 1.1)
+        effects.spawnParticles(10, 200, 200, ['🏆', '⭐', '💎', '🌟', '✨'], 'emoji')
+        effects.triggerFlash('rgba(251,191,36,0.3)', 200)
+        addSpeedPopup(`PERFECT x${nextStreak}!`, '#fbbf24', 200, 140)
+      }
+
+      setFeedback('ok')
+      play('swipe', 0.35, 1 + nextCombo * 0.012)
+      play('correct', 0.4, 1 + nextCombo * 0.015)
+      if (nextCombo > 0 && nextCombo % 5 === 0) play('combo', 0.45, 0.9 + nextCombo * 0.01)
+
+      effects.comboHitBurst(side === 'left' ? 100 : 300, 250, nextCombo, earned, [ch.emoji, '✨', '🔥', '⚡'])
+      if (nextCombo >= 10) effects.spawnParticles(Math.min(6, Math.floor(nextCombo / 10)), 200, 250, ['🌟', '💫', '🔥'], 'emoji')
+    } else {
+      comboRef.current = 0
+      streakRef.current = 0
+      setCombo(0); setStreak(0); setIsFever(false)
+
+      const next = scoreRef.current - WRONG_PENALTY
+      scoreRef.current = next
+      setScore(next)
+      setFeedback('ng')
+
+      play('wrong', 0.55, 0.8)
+      play('danger', 0.3, 0.9)
+      effects.triggerShake(10, 200)
+      effects.triggerFlash('rgba(239,68,68,0.4)', 140)
+      effects.spawnParticles(5, 200, 250, ['💢', '❌', '😵', '💥'], 'emoji')
+      effects.showScorePopup(-WRONG_PENALTY, 200, 280, '#ef4444')
     }
+
+    lastSortAtRef.current = now
+    setSortCount(prev => prev + 1)
+
+    clearTimer(feedbackTimerRef)
+    feedbackTimerRef.current = window.setTimeout(() => { feedbackTimerRef.current = null; setFeedback(null) }, FEEDBACK_FLASH_DURATION_MS)
+
+    clearTimer(swipeTimerRef)
+    swipeTimerRef.current = window.setTimeout(() => {
+      swipeTimerRef.current = null
+      setSwipeDir(null)
+      spawnNext(ch.id)
+    }, SWIPE_ANIMATION_DURATION_MS)
+  }, [swipeDir, isSpawning, play, spawnNext, addRipple, addSpeedPopup, effects, activePowerUp, activatePowerUp])
+
+  // Touch swipe
+  const touchRef = useRef<{ x: number; t: number } | null>(null)
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    touchRef.current = { x: e.touches[0].clientX, t: Date.now() }
+  }, [])
+  const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchRef.current) return
+    const dx = e.changedTouches[0].clientX - touchRef.current.x
+    const dt = Date.now() - touchRef.current.t
+    touchRef.current = null
+    if (Math.abs(dx) > 25 && dt < 500) handleSort(dx < 0 ? 'left' : 'right')
   }, [handleSort])
 
-  // Init audio + preload images
+  // Init
   useEffect(() => {
-    for (const token of CHARACTER_POOL) {
-      const image = new Image()
-      image.decoding = 'sync'
-      image.src = token.imageSrc
-      void image.decode?.().catch(() => {})
+    for (const c of CHARACTER_POOL) {
+      const img = new Image(); img.src = c.imageSrc; void img.decode?.().catch(() => {})
     }
-
-    const audioMap: Record<string, string> = {
-      swipe: swipeSfx, correct: correctSfx, wrong: wrongSfx,
-      combo: comboSfx, ruleChange: ruleChangeSfx,
-      timeBonus: timeBonusSfx, gameOver: gameOverHitSfx,
+    const sfxMap: Record<string, string> = {
+      swipe: swipeSfx, correct: correctSfx, wrong: wrongSfx, combo: comboSfx,
+      ruleChange: ruleChangeSfx, timeBonus: timeBonusSfx, gameOver: gameOverHitSfx,
+      levelup: levelupSfx, perfect: perfectSfx, danger: dangerSfx,
+      powerup: powerupSfx, speedBonus: speedBonusSfx,
     }
-    for (const [key, src] of Object.entries(audioMap)) {
-      const audio = new Audio(src)
-      audio.preload = 'auto'
-      audioPoolRef.current[key] = audio
+    for (const [k, src] of Object.entries(sfxMap)) {
+      const a = new Audio(src); a.preload = 'auto'; audioRef.current[k] = a
     }
-
     return () => {
-      clearTimeoutSafe(swipeTimerRef)
-      clearTimeoutSafe(feedbackTimerRef)
-      clearTimeoutSafe(spawnTimerRef)
-      for (const key of Object.keys(audioPoolRef.current)) {
-        audioPoolRef.current[key] = null
-      }
+      clearTimer(swipeTimerRef); clearTimer(feedbackTimerRef); clearTimer(spawnTimerRef); clearTimer(powerUpTimerRef)
+      for (const k of Object.keys(audioRef.current)) audioRef.current[k] = null
     }
   }, [])
 
-  // Keyboard
+  // Keys
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') { event.preventDefault(); handleExit(); return }
-      if (event.code === 'ArrowLeft') { event.preventDefault(); handleSort('left'); return }
-      if (event.code === 'ArrowRight') { event.preventDefault(); handleSort('right') }
+    const kd = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); play('swipe', 0.4); onExit(); return }
+      if (e.code === 'ArrowLeft') { e.preventDefault(); handleSort('left'); return }
+      if (e.code === 'ArrowRight') { e.preventDefault(); handleSort('right') }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleSort, handleExit])
+    window.addEventListener('keydown', kd)
+    return () => window.removeEventListener('keydown', kd)
+  }, [handleSort, onExit, play])
 
   // Game loop
   useEffect(() => {
-    lastFrameAtRef.current = null
-    ruleSinceLastChangeRef.current = 0
+    lastFrameRef.current = null
+    ruleSinceChangeRef.current = 0
 
     const step = (now: number) => {
-      if (finishedRef.current) { animationFrameRef.current = null; return }
-      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
+      if (finishedRef.current) { rafRef.current = null; return }
+      if (lastFrameRef.current === null) lastFrameRef.current = now
 
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
+      const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameRef.current = now
 
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
+      // Freeze power-up slows time drain
+      const timeDrain = activePowerUp === 'freeze' ? dt * 0.3 : dt
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - timeDrain)
       setRemainingMs(remainingMsRef.current)
       effects.updateParticles()
 
-      const speedupSteps = Math.floor(scoreRef.current / 10)
-      const currentRuleInterval = Math.max(MIN_RULE_CHANGE_INTERVAL_MS, RULE_CHANGE_INTERVAL_MS - speedupSteps * RULE_CHANGE_SPEEDUP_PER_10)
-      ruleSinceLastChangeRef.current += deltaMs
-      if (ruleSinceLastChangeRef.current >= currentRuleInterval) {
-        ruleSinceLastChangeRef.current = 0
+      const speedup = Math.floor(scoreRef.current / 10)
+      const interval = Math.max(MIN_RULE_CHANGE_INTERVAL_MS, RULE_CHANGE_INTERVAL_MS - speedup * RULE_CHANGE_SPEEDUP_PER_10)
+      ruleSinceChangeRef.current += dt
+
+      // Rule danger warning at 80%
+      const ruleProgress = ruleSinceChangeRef.current / interval
+      if (ruleProgress >= 0.8 && ruleProgress < 1) {
+        setRuleDanger(true)
+      }
+
+      if (ruleSinceChangeRef.current >= interval) {
+        ruleSinceChangeRef.current = 0
         changeRule()
       }
 
       if (remainingMsRef.current > 0 && remainingMsRef.current <= LOW_TIME_THRESHOLD_MS) {
-        const nextLowTimeSecond = Math.ceil(remainingMsRef.current / 1000)
-        if (lowTimeSecondRef.current !== nextLowTimeSecond) {
-          lowTimeSecondRef.current = nextLowTimeSecond
-          playAudio('swipe', 0.2, 1.2 + (LOW_TIME_THRESHOLD_MS - remainingMsRef.current) / 10000)
+        const sec = Math.ceil(remainingMsRef.current / 1000)
+        if (lowTimeSecRef.current !== sec) {
+          lowTimeSecRef.current = sec
+          play('danger', 0.2, 1.1 + (LOW_TIME_THRESHOLD_MS - remainingMsRef.current) / 8000)
         }
       } else {
-        lowTimeSecondRef.current = null
+        lowTimeSecRef.current = null
       }
 
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
-
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (remainingMsRef.current <= 0) { endGame(); rafRef.current = null; return }
+      rafRef.current = window.requestAnimationFrame(step)
     }
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
+    rafRef.current = window.requestAnimationFrame(step)
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
+      if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }
+      lastFrameRef.current = null
     }
-  }, [changeRule, finishGame, playAudio, effects])
+  }, [changeRule, endGame, play, effects, activePowerUp])
 
-  // Derived display values
-  const displayedScore = Math.max(0, score)
-  const displayedBestScore = useMemo(() => Math.max(bestScore, displayedScore), [bestScore, displayedScore])
-  const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
-  const speedupStepsDisplay = Math.floor(Math.max(0, score) / 10)
-  const currentRuleIntervalDisplay = Math.max(MIN_RULE_CHANGE_INTERVAL_MS, RULE_CHANGE_INTERVAL_MS - speedupStepsDisplay * RULE_CHANGE_SPEEDUP_PER_10)
-  const ruleChangeProgress = Math.min(100, (ruleSinceLastChangeRef.current / currentRuleIntervalDisplay) * 100)
-  const comboMultiplierDisplay = 1 + Math.floor(combo / COMBO_MULTIPLIER_STEP)
-  const timePercent = (remainingMs / ROUND_DURATION_MS) * 100
-  const difficulty = getDifficultyLevel(displayedScore)
+  // Derived
+  const dScore = Math.max(0, score)
+  const dBest = useMemo(() => Math.max(bestScore, dScore), [bestScore, dScore])
+  const isLow = remainingMs <= LOW_TIME_THRESHOLD_MS
+  const speedup = Math.floor(Math.max(0, score) / 10)
+  const ruleInterval = Math.max(MIN_RULE_CHANGE_INTERVAL_MS, RULE_CHANGE_INTERVAL_MS - speedup * RULE_CHANGE_SPEEDUP_PER_10)
+  const ruleProgress = Math.min(100, (ruleSinceChangeRef.current / ruleInterval) * 100)
+  const comboMulD = 1 + Math.floor(combo / COMBO_MULTIPLIER_STEP)
+  const timeP = (remainingMs / ROUND_DURATION_MS) * 100
+  const lvl = getLevel(dScore)
 
-  const characterSwipeClass =
-    swipeDirection === 'left' ? 'ss-swipe-left'
-    : swipeDirection === 'right' ? 'ss-swipe-right'
-    : characterJustSpawned ? 'ss-spawn-in'
-    : ''
-
-  const feedbackClass =
-    feedbackKind === 'correct' ? 'ss-feedback-correct'
-    : feedbackKind === 'wrong' ? 'ss-feedback-wrong'
-    : ''
-
+  const charClass = swipeDir === 'left' ? 'ss-swipe-l' : swipeDir === 'right' ? 'ss-swipe-r' : justSpawned ? 'ss-pixel-in' : ''
+  const fbClass = feedback === 'ok' ? 'ss-fb-ok' : feedback === 'ng' ? 'ss-fb-ng' : ''
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
 
-  const panelClasses = [
-    'mini-game-panel',
-    'ss-panel',
-    isFever ? 'ss-fever' : '',
-    combo >= 10 ? 'ss-streak-glow' : '',
-    isLowTime ? 'ss-low-time-border' : '',
-    timeBonusFlash ? 'ss-time-bonus' : '',
-    perfectBurst ? 'ss-perfect-burst' : '',
+  const panelCls = [
+    'mini-game-panel', 'ss-retro',
+    isFever ? 'ss-fever-mode' : '',
+    combo >= 10 ? 'ss-glow' : '',
+    isLow ? 'ss-low-time' : '',
   ].filter(Boolean).join(' ')
+
+  const puInfo = activePowerUp ? POWERUP_INFO[activePowerUp] : null
 
   return (
     <section
-      className={panelClasses}
+      className={panelCls}
       aria-label="speed-sort-game"
-      style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', ...effects.getShakeStyle() }}
+      style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', '--lvl-color': lvl.color, ...effects.getShakeStyle() } as React.CSSProperties}
     >
-      <style>{SPEED_SORT_CSS}</style>
+      <style>{RETRO_CSS}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
       {ripples.map(r => (
-        <div
-          key={r.id}
-          className={`ss-ripple ${r.correct ? 'ss-ripple-correct' : 'ss-ripple-wrong'}`}
-          style={{ left: `${r.x - 30}px`, top: `${r.y - 30}px` }}
-        />
+        <div key={r.id} className={`ss-ripple ${r.ok ? 'ss-ripple-ok' : 'ss-ripple-ng'}`}
+          style={{ left: `${r.x - 25}px`, top: `${r.y - 25}px` }} />
       ))}
 
-      {/* Top bar */}
-      <div className="ss-top-bar">
-        <div className="ss-score-block">
-          <p className={`ss-score ${scorePop ? 'ss-score-pop' : ''}`}>{displayedScore.toLocaleString()}</p>
-          <p className="ss-best">BEST {displayedBestScore.toLocaleString()}</p>
+      {speedPopups.map(p => (
+        <span key={p.id} className="ss-speed-popup" style={{ left: `${p.x}px`, top: `${p.y}px`, color: p.color }}>
+          {p.label}
+        </span>
+      ))}
+
+      {/* HUD */}
+      <div className="ss-hud">
+        <div className="ss-score-col">
+          <p className={`ss-score-val ${scoreBounce ? 'ss-score-bounce' : ''}`}>{dScore.toLocaleString()}</p>
+          <p className="ss-hiscore">HI {dBest.toLocaleString()}</p>
         </div>
-        <div className="ss-timer-block">
-          <p className={`ss-timer ${isLowTime ? 'low-time' : ''}`}>
-            {(remainingMs / 1000).toFixed(1)}s
-          </p>
-          <p className="ss-sorted-count">Sorted {sortCount}</p>
+        <div className="ss-timer-col">
+          <p className={`ss-time-val ${isLow ? 'ss-low' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
+          <p className="ss-sorted-lbl">{sortCount} SORTED</p>
         </div>
       </div>
 
-      {/* Time progress */}
-      <div className="ss-progress-bar">
-        <div
-          className="ss-progress-fill"
-          style={{
-            width: `${timePercent}%`,
-            background: isLowTime
-              ? 'linear-gradient(90deg, #ef4444, #f97316)'
-              : isFever
-                ? 'linear-gradient(90deg, #f97316, #fbbf24)'
-                : 'linear-gradient(90deg, #22c55e, #3b82f6)',
-          }}
-        />
+      {/* Time bar */}
+      <div className="ss-bar-wrap">
+        <div className="ss-bar-fill" style={{
+          width: `${timeP}%`,
+          background: timeBonusActive ? '#4ade80' : isLow ? '#ef4444' : isFever ? '#fbbf24' : lvl.color,
+          boxShadow: `0 0 6px ${timeBonusActive ? '#4ade80' : isLow ? '#ef4444' : lvl.color}`,
+        }} />
       </div>
 
-      {/* Meta row: combo + difficulty + sorted */}
-      <div className="ss-meta-row">
-        <p className="ss-combo-count">COMBO <strong>{combo}</strong></p>
-        {comboMultiplierDisplay > 1 && (
-          <p className="ss-multiplier">x{comboMultiplierDisplay}{isFever ? ' FEVER' : ''}</p>
-        )}
-        <p
-          className={`ss-difficulty ${difficultyChanged ? 'ss-difficulty-change' : ''}`}
-          style={{ background: `${difficulty.color}20`, color: difficulty.color, border: `1px solid ${difficulty.color}40` }}
-        >
-          {difficulty.label}
+      {/* Info row */}
+      <div className="ss-info-row">
+        <p className="ss-combo-lbl">COMBO <strong>{combo}</strong></p>
+        {comboMulD > 1 && <p className="ss-mult-lbl">x{comboMulD}{isFever ? ' FEVER' : ''}</p>}
+        <p className={`ss-lvl-badge ${levelChanged ? 'ss-lvl-change' : ''}`}
+          style={{ borderColor: lvl.color, color: lvl.color, background: lvl.bg }}>
+          {lvl.name}
         </p>
       </div>
 
-      {/* Combo label */}
-      {comboLabel && (
-        <p className="ss-combo-label" style={{ color: comboColor }}>{comboLabel}</p>
+      {comboLabel && <p className="ss-combo-big" style={{ color: comboColor }}>{comboLabel}</p>}
+      {isFever && !comboLabel && <p className="ss-fever-lbl">FEVER MODE x{FEVER_SCORE_MULTIPLIER}</p>}
+
+      {/* Power-up */}
+      {puInfo && (
+        <p className={`ss-powerup-banner ${powerUpExpiring ? 'ss-pu-expiring' : 'ss-pu-active'}`}
+          style={{ color: puInfo.color }}>
+          {puInfo.emoji} {puInfo.label} {puInfo.emoji}
+        </p>
       )}
 
-      {/* Fever banner */}
-      {isFever && <p className="ss-fever-banner">FEVER MODE x{FEVER_SCORE_MULTIPLIER}</p>}
-
-      {/* Rule banner */}
-      <div className={`ss-rule-banner ${ruleFlash ? 'rule-flash' : ''}`}>
-        <div className="ss-rule-side left">
-          <span className="ss-rule-arrow">&larr;</span>
+      {/* Rule */}
+      <div className={`ss-rule-box ${ruleFlash ? 'ss-rule-flash' : ''} ${ruleDanger && !ruleFlash ? 'ss-rule-danger' : ''}`}>
+        <div className="ss-rule-half ss-rule-left">
+          <span className="ss-rule-arr">&larr;</span>
           <span>{rule.leftLabel}</span>
         </div>
-        <div className="ss-rule-side">
+        <div className="ss-rule-half">
           <span>{rule.rightLabel}</span>
-          <span className="ss-rule-arrow">&rarr;</span>
+          <span className="ss-rule-arr">&rarr;</span>
         </div>
       </div>
 
-      <div className="ss-rule-timer">
-        <div className="ss-rule-timer-fill" style={{ width: `${100 - ruleChangeProgress}%` }} />
+      <div className="ss-rule-bar">
+        <div className="ss-rule-bar-fill" style={{ width: `${100 - ruleProgress}%` }} />
       </div>
 
       {/* Arena */}
-      <div
-        className={`ss-arena ${feedbackClass}`}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        <div
-          className="ss-zone ss-zone-left"
-          aria-label="left-zone"
-          onClick={() => handleSort('left')}
-        >
+      <div className={`ss-arena ${fbClass}`} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <div className="ss-zone ss-zone-l" onClick={() => handleSort('left')}>
           <span className="ss-zone-arrow">&larr;</span>
         </div>
 
-        <div className="ss-character-area">
+        <div className="ss-char-wrap">
           {!isSpawning && (
-            <div className={`ss-character ${characterSwipeClass}`}>
-              <img
-                className="ss-character-image"
-                src={currentCharacter.imageSrc}
-                alt={currentCharacter.name}
-              />
-              <p className="ss-character-name" style={{ color: currentCharacter.color }}>
-                {currentCharacter.name}
-              </p>
+            <div className={`ss-char ${charClass}`}>
+              <img className="ss-char-img" src={currentCharacter.imageSrc} alt={currentCharacter.name} />
+              <p className="ss-char-name" style={{ color: currentCharacter.color }}>{currentCharacter.name}</p>
               {streak >= 3 && (
-                <p className="ss-streak-indicator">
-                  {streak} streak {streak >= PERFECT_STREAK_THRESHOLD ? '🏆' : '🔥'}
+                <p className="ss-streak-lbl">
+                  {streak >= 10 ? '🏆' : '🔥'} {streak} STREAK
                 </p>
               )}
             </div>
           )}
         </div>
 
-        <div
-          className="ss-zone ss-zone-right"
-          aria-label="right-zone"
-          onClick={() => handleSort('right')}
-        >
+        <div className="ss-zone ss-zone-r" onClick={() => handleSort('right')}>
           <span className="ss-zone-arrow">&rarr;</span>
         </div>
       </div>
 
       {/* Buttons */}
-      <div className="ss-button-row">
-        <button
-          className="ss-button"
-          type="button"
-          onClick={() => handleSort('left')}
-          disabled={swipeDirection !== null || isSpawning}
-        >
+      <div className="ss-btn-row">
+        <button className="ss-btn" type="button" onClick={() => handleSort('left')}
+          disabled={swipeDir !== null || isSpawning}>
           &larr; LEFT
         </button>
-        <button
-          className="ss-button"
-          type="button"
-          onClick={() => handleSort('right')}
-          disabled={swipeDirection !== null || isSpawning}
-        >
+        <button className="ss-btn" type="button" onClick={() => handleSort('right')}
+          disabled={swipeDir !== null || isSpawning}>
           RIGHT &rarr;
         </button>
       </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
@@ -8,673 +8,214 @@ import feverSfxSrc from '../../../assets/sounds/music-harmony-fever.mp3'
 import tapSfxSrc from '../../../assets/sounds/music-harmony-tap.mp3'
 import levelUpSfxSrc from '../../../assets/sounds/music-harmony-level-up.mp3'
 import warningSfxSrc from '../../../assets/sounds/music-harmony-warning.mp3'
+import comboSfxSrc from '../../../assets/sounds/music-harmony-combo.mp3'
+import gameoverSfxSrc from '../../../assets/sounds/music-harmony-gameover.mp3'
+import hintSfxSrc from '../../../assets/sounds/music-harmony-hint.mp3'
+import lifeLostSfxSrc from '../../../assets/sounds/music-harmony-life-lost.mp3'
+import streakSfxSrc from '../../../assets/sounds/music-harmony-streak.mp3'
 
-// ─── Constants ───────────────────────────────────────────────────
-const ROUND_DURATION_MS = 60000
-const LOW_TIME_THRESHOLD_MS = 8000
-const CHORD_DISPLAY_MS = 2500
-const CHORD_DISPLAY_MIN_MS = 1200
-const CHORD_SPEEDUP_PER_LEVEL = 80
-const ANSWER_TIMEOUT_MS = 6000
-const ANSWER_TIMEOUT_MIN_MS = 3000
-const ANSWER_SPEEDUP_PER_LEVEL = 120
-const RESULT_DISPLAY_MS = 700
-const TONE_DURATION_S = 0.45
-const TONE_VOLUME = 0.32
-const FEVER_COMBO_THRESHOLD = 6
-const FEVER_DURATION_MS = 10000
+const ROUND_DURATION_MS = 75000
+const LOW_TIME_THRESHOLD_MS = 10000
+const CHORD_DISPLAY_MS = 2800
+const CHORD_DISPLAY_MIN_MS = 1000
+const CHORD_SPEEDUP_PER_LEVEL = 100
+const ANSWER_TIMEOUT_MS = 7000
+const ANSWER_TIMEOUT_MIN_MS = 2500
+const ANSWER_SPEEDUP_PER_LEVEL = 150
+const RESULT_DISPLAY_MS = 600
+const TONE_DURATION_S = 0.4
+const TONE_VOLUME = 0.3
+const FEVER_COMBO_THRESHOLD = 5
+const FEVER_DURATION_MS = 12000
 const FEVER_SCORE_MULTIPLIER = 3
-const PERFECT_TIME_BONUS_MS = 1500
+const PERFECT_TIME_BONUS_MS = 2000
 const HARMONY_BONUS_MULTIPLIER = 1.5
 const MAX_NOTES = 7
 const CHORD_START_SIZE = 2
 const CHORD_GROWTH_INTERVAL = 3
+const MAX_HP = 3
+const HINTS_PER_GAME = 3
+const BOSS_INTERVAL = 5
+const BOSS_BONUS_MULTIPLIER = 2.5
 
-type Phase = 'listen' | 'select' | 'result-correct' | 'result-wrong' | 'game-over'
+type Phase = 'listen' | 'select' | 'result-correct' | 'result-wrong' | 'boss-intro' | 'game-over'
 
-interface NoteDefinition {
-  readonly id: string
-  readonly label: string
-  readonly frequency: number
-  readonly color: string
-  readonly activeColor: string
-  readonly emoji: string
-}
+interface NoteDefinition { readonly id: string; readonly label: string; readonly frequency: number; readonly color: string; readonly activeColor: string; readonly pixel: string }
 
 const NOTES: readonly NoteDefinition[] = [
-  { id: 'C', label: 'Do', frequency: 261.63, color: '#dc2626', activeColor: '#fca5a5', emoji: '🎵' },
-  { id: 'D', label: 'Re', frequency: 293.66, color: '#ea580c', activeColor: '#fdba74', emoji: '🎶' },
-  { id: 'E', label: 'Mi', frequency: 329.63, color: '#ca8a04', activeColor: '#fde047', emoji: '🎼' },
-  { id: 'F', label: 'Fa', frequency: 349.23, color: '#16a34a', activeColor: '#86efac', emoji: '🎹' },
-  { id: 'G', label: 'Sol', frequency: 392.00, color: '#2563eb', activeColor: '#93c5fd', emoji: '🎸' },
-  { id: 'A', label: 'La', frequency: 440.00, color: '#7c3aed', activeColor: '#c4b5fd', emoji: '🎺' },
-  { id: 'B', label: 'Si', frequency: 493.88, color: '#db2777', activeColor: '#f9a8d4', emoji: '🎻' },
+  { id: 'C', label: 'Do', frequency: 261.63, color: '#e74c3c', activeColor: '#ff7675', pixel: 'C' },
+  { id: 'D', label: 'Re', frequency: 293.66, color: '#e67e22', activeColor: '#ffa502', pixel: 'D' },
+  { id: 'E', label: 'Mi', frequency: 329.63, color: '#f1c40f', activeColor: '#ffeaa7', pixel: 'E' },
+  { id: 'F', label: 'Fa', frequency: 349.23, color: '#2ecc71', activeColor: '#55efc4', pixel: 'F' },
+  { id: 'G', label: 'Sol', frequency: 392.00, color: '#3498db', activeColor: '#74b9ff', pixel: 'G' },
+  { id: 'A', label: 'La', frequency: 440.00, color: '#9b59b6', activeColor: '#a29bfe', pixel: 'A' },
+  { id: 'B', label: 'Si', frequency: 493.88, color: '#e84393', activeColor: '#fd79a8', pixel: 'B' },
 ] as const
 
-// ─── Chord Progressions (predefined musical chords) ──────────
-interface ChordType {
-  readonly name: string
-  readonly intervals: readonly number[]
-  readonly color: string
-}
-
+interface ChordType { readonly name: string; readonly intervals: readonly number[] }
 const CHORD_TYPES: readonly ChordType[] = [
-  { name: 'Major', intervals: [0, 4, 7], color: '#f59e0b' },
-  { name: 'Minor', intervals: [0, 3, 7], color: '#6366f1' },
-  { name: 'Dim', intervals: [0, 3, 6], color: '#ef4444' },
-  { name: 'Aug', intervals: [0, 4, 8], color: '#10b981' },
-  { name: 'Sus4', intervals: [0, 5, 7], color: '#8b5cf6' },
-  { name: 'Power', intervals: [0, 7], color: '#f97316' },
-  { name: '7th', intervals: [0, 4, 7, 10], color: '#ec4899' },
+  { name: 'Major', intervals: [0, 4, 7] }, { name: 'Minor', intervals: [0, 3, 7] },
+  { name: 'Dim', intervals: [0, 3, 6] }, { name: 'Aug', intervals: [0, 4, 8] },
+  { name: 'Sus4', intervals: [0, 5, 7] }, { name: 'Power', intervals: [0, 7] },
+  { name: '7th', intervals: [0, 4, 7, 10] },
 ] as const
 
-function generateChord(level: number): { noteIndices: number[]; chordName: string } {
-  const chordSize = Math.min(MAX_NOTES, CHORD_START_SIZE + Math.floor(level / CHORD_GROWTH_INTERVAL))
+function generateChord(level: number): { noteIndices: number[]; chordName: string; isBoss: boolean } {
+  const isBoss = level > 1 && level % BOSS_INTERVAL === 0
+  const chordSize = Math.min(MAX_NOTES, CHORD_START_SIZE + Math.floor(level / CHORD_GROWTH_INTERVAL) + (isBoss ? 1 : 0))
   const rootIndex = Math.floor(Math.random() * NOTES.length)
-
-  if (level >= 5 && Math.random() < 0.5) {
-    const chordType = CHORD_TYPES[Math.floor(Math.random() * CHORD_TYPES.length)]
-    const indices = chordType.intervals
-      .slice(0, chordSize)
-      .map(interval => (rootIndex + interval) % NOTES.length)
-    const unique = [...new Set(indices)]
-    return { noteIndices: unique, chordName: `${NOTES[rootIndex].id} ${chordType.name}` }
+  if (level >= 4 && Math.random() < 0.5) {
+    const ct = CHORD_TYPES[Math.floor(Math.random() * CHORD_TYPES.length)]
+    const indices = ct.intervals.slice(0, chordSize).map(iv => (rootIndex + iv) % NOTES.length)
+    return { noteIndices: [...new Set(indices)], chordName: `${NOTES[rootIndex].id} ${ct.name}`, isBoss }
   }
-
   const indices = new Set<number>([rootIndex])
-  while (indices.size < chordSize) {
-    indices.add(Math.floor(Math.random() * NOTES.length))
-  }
-  return { noteIndices: [...indices], chordName: `${chordSize}-Note Chord` }
+  while (indices.size < chordSize) indices.add(Math.floor(Math.random() * NOTES.length))
+  return { noteIndices: [...indices], chordName: `${chordSize}-Note`, isBoss }
 }
 
-function playChord(audioContext: AudioContext, noteIndices: number[], duration: number, volume: number): void {
-  const now = audioContext.currentTime
+function playChord(ac: AudioContext, noteIndices: number[], dur: number, vol: number): void {
+  const now = ac.currentTime
   for (const idx of noteIndices) {
-    const note = NOTES[idx % NOTES.length]
-    const oscillator = audioContext.createOscillator()
-    const gainNode = audioContext.createGain()
-
-    oscillator.type = 'sine'
-    oscillator.frequency.setValueAtTime(note.frequency, now)
-
-    const noteVolume = volume / Math.sqrt(noteIndices.length)
-    gainNode.gain.setValueAtTime(noteVolume, now)
-    gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration)
-
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
-    oscillator.start(now)
-    oscillator.stop(now + duration)
+    const n = NOTES[idx % NOTES.length], o = ac.createOscillator(), g = ac.createGain()
+    o.type = 'square'; o.frequency.setValueAtTime(n.frequency, now)
+    const v = vol / Math.sqrt(noteIndices.length)
+    g.gain.setValueAtTime(v, now); g.gain.exponentialRampToValueAtTime(0.001, now + dur)
+    o.connect(g); g.connect(ac.destination); o.start(now); o.stop(now + dur)
   }
 }
 
 const SFX_CACHE = new Map<string, HTMLAudioElement>()
 function playSfx(src: string, volume = 0.5): void {
   try {
-    let audio = SFX_CACHE.get(src)
-    if (!audio) {
-      audio = new Audio(src)
-      SFX_CACHE.set(src, audio)
-    }
-    audio.volume = volume
-    audio.currentTime = 0
-    void audio.play().catch(() => {})
-  } catch {}
+    let a = SFX_CACHE.get(src)
+    if (!a) { a = new Audio(src); SFX_CACHE.set(src, a) }
+    a.volume = volume; a.currentTime = 0; void a.play().catch(() => {})
+  } catch { /* ignore */ }
 }
 
-function playNote(audioContext: AudioContext, frequency: number, duration: number, volume: number): void {
-  const now = audioContext.currentTime
-  const oscillator = audioContext.createOscillator()
-  const gainNode = audioContext.createGain()
-
-  oscillator.type = 'triangle'
-  oscillator.frequency.setValueAtTime(frequency, now)
-  gainNode.gain.setValueAtTime(volume, now)
-  gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration)
-
-  oscillator.connect(gainNode)
-  gainNode.connect(audioContext.destination)
-  oscillator.start(now)
-  oscillator.stop(now + duration)
+function playNote8bit(ac: AudioContext, freq: number, dur: number, vol: number): void {
+  const now = ac.currentTime, o = ac.createOscillator(), g = ac.createGain()
+  o.type = 'square'; o.frequency.setValueAtTime(freq, now)
+  g.gain.setValueAtTime(vol, now); g.gain.exponentialRampToValueAtTime(0.001, now + dur)
+  o.connect(g); g.connect(ac.destination); o.start(now); o.stop(now + dur)
 }
 
-function playSuccessJingle(audioContext: AudioContext): void {
-  const now = audioContext.currentTime
-  const freqs = [523.25, 659.25, 783.99]
-  freqs.forEach((freq, i) => {
-    const osc = audioContext.createOscillator()
-    const gain = audioContext.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(freq, now + i * 0.1)
-    gain.gain.setValueAtTime(0.2, now + i * 0.1)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.3)
-    osc.connect(gain)
-    gain.connect(audioContext.destination)
-    osc.start(now + i * 0.1)
-    osc.stop(now + i * 0.1 + 0.3)
+function play8bitJingle(ac: AudioContext, asc: boolean): void {
+  const now = ac.currentTime, freqs = asc ? [523, 659, 784, 1047] : [784, 523, 330, 262]
+  freqs.forEach((f, i) => {
+    const o = ac.createOscillator(), g = ac.createGain()
+    o.type = 'square'; o.frequency.setValueAtTime(f, now + i * 0.08)
+    g.gain.setValueAtTime(0.15, now + i * 0.08); g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.2)
+    o.connect(g); g.connect(ac.destination); o.start(now + i * 0.08); o.stop(now + i * 0.08 + 0.2)
   })
 }
 
-function playFailBuzz(audioContext: AudioContext): void {
-  const now = audioContext.currentTime
-  const osc = audioContext.createOscillator()
-  const gain = audioContext.createGain()
-  osc.type = 'sawtooth'
-  osc.frequency.setValueAtTime(120, now)
-  gain.gain.setValueAtTime(0.15, now)
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4)
-  osc.connect(gain)
-  gain.connect(audioContext.destination)
-  osc.start(now)
-  osc.stop(now + 0.4)
-}
-
-function playFeverStart(audioContext: AudioContext): void {
-  const now = audioContext.currentTime
-  const freqs = [392, 523.25, 659.25, 783.99, 1046.5]
-  freqs.forEach((freq, i) => {
-    const osc = audioContext.createOscillator()
-    const gain = audioContext.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(freq, now + i * 0.08)
-    gain.gain.setValueAtTime(0.18, now + i * 0.08)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35)
-    osc.connect(gain)
-    gain.connect(audioContext.destination)
-    osc.start(now + i * 0.08)
-    osc.stop(now + i * 0.08 + 0.35)
+function playBossIntro(ac: AudioContext): void {
+  const now = ac.currentTime
+  ;[262, 330, 392, 523, 392, 523, 659, 784].forEach((f, i) => {
+    const o = ac.createOscillator(), g = ac.createGain()
+    o.type = 'square'; o.frequency.setValueAtTime(f, now + i * 0.1)
+    g.gain.setValueAtTime(0.12, now + i * 0.1); g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.15)
+    o.connect(g); g.connect(ac.destination); o.start(now + i * 0.1); o.stop(now + i * 0.1 + 0.15)
   })
 }
 
-// ─── CSS ─────────────────────────────────────────────────────────
-const MUSIC_HARMONY_CSS = `
-  ${GAME_EFFECTS_CSS}
+const PIXEL_CSS = `${GAME_EFFECTS_CSS}
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+.mh-root{position:relative;width:100%;height:100%;max-width:432px;margin:0 auto;background:#1a1a2e;display:flex;flex-direction:column;overflow:hidden;font-family:'Press Start 2P',monospace,system-ui;user-select:none;touch-action:manipulation;image-rendering:pixelated}
+.mh-root::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);background-size:16px 16px;pointer-events:none;z-index:0}
+.mh-header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;z-index:10;gap:6px}
+.mh-score{font-size:1.1rem;color:#ffd700;text-shadow:2px 2px 0 #b8860b,0 0 8px rgba(255,215,0,.4);min-width:60px}
+.mh-hp{display:flex;gap:4px;align-items:center}
+.mh-heart{font-size:1.2rem;transition:transform .2s;filter:drop-shadow(0 0 4px rgba(255,0,0,.5))}
+.mh-heart.lost{filter:grayscale(1) opacity(.3);transform:scale(.8)}
+.mh-heart.hit{animation:mh-hb .4s ease}
+@keyframes mh-hb{0%{transform:scale(1)}30%{transform:scale(1.4) rotate(-10deg)}60%{transform:scale(.6) rotate(10deg)}100%{transform:scale(.8);filter:grayscale(1) opacity(.3)}}
+.mh-level-badge{background:#2d2d44;border:2px solid #4a4a6a;padding:3px 8px;font-size:.6rem;color:#a0a0cc}
+.mh-level-badge.boss{background:#4a1a1a;border-color:#ff4444;color:#ff6666;animation:mh-bp .5s ease infinite alternate}
+@keyframes mh-bp{0%{box-shadow:0 0 4px rgba(255,68,68,.3)}100%{box-shadow:0 0 12px rgba(255,68,68,.6)}}
+.mh-timer-bar{height:8px;background:#2d2d44;border:2px solid #4a4a6a;margin:4px 12px;overflow:hidden}
+.mh-timer-fill{height:100%;transition:width .1s linear}
+.mh-combo-row{text-align:center;font-size:.7rem;min-height:24px;line-height:24px;padding:2px 0;z-index:10}
+.mh-combo-text{display:inline-block;animation:mh-cb .3s ease}
+@keyframes mh-cb{0%{transform:scale(.5)}50%{transform:scale(1.3)}100%{transform:scale(1)}}
+.mh-chord-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 12px;min-height:0;z-index:10}
+.mh-chord-name{font-size:.8rem;color:#a0a0cc;margin-bottom:8px;letter-spacing:2px}
+.mh-chord-display{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;min-height:70px;padding:12px;background:#12122a;border:3px solid #3a3a5a;width:100%;max-width:380px;position:relative}
+.mh-chord-display::before{content:'LISTEN';position:absolute;top:-10px;left:12px;background:#1a1a2e;padding:0 6px;font-size:.5rem;color:#6a6a8a}
+.mh-chord-note{width:clamp(40px,11vw,52px);height:clamp(40px,11vw,52px);display:flex;align-items:center;justify-content:center;font-size:.8rem;color:#fff;border:3px solid rgba(255,255,255,.3);animation:mh-np .25s steps(4) both}
+.mh-chord-note.hidden{background:#2d2d44!important;border-color:#4a4a6a;color:transparent}
+.mh-chord-note.hidden::after{content:'?';color:#6a6a8a;font-size:.9rem}
+.mh-chord-note.hint-revealed{animation:mh-hg .8s ease infinite alternate}
+@keyframes mh-hg{0%{box-shadow:0 0 4px rgba(255,215,0,.3)}100%{box-shadow:0 0 16px rgba(255,215,0,.8);border-color:#ffd700}}
+@keyframes mh-np{0%{transform:scale(0);opacity:0}50%{transform:scale(1.1);opacity:.8}100%{transform:scale(1);opacity:1}}
+.mh-instruction{font-size:.55rem;color:#6a6a8a;text-align:center;margin:8px 0;letter-spacing:1px}
+.mh-waveform{display:flex;gap:2px;align-items:flex-end;height:36px;margin:8px 0;justify-content:center}
+.mh-wave-bar{width:4px;background:#ffd700;animation:mh-wd var(--dur) steps(3) infinite alternate;animation-delay:var(--delay)}
+@keyframes mh-wd{0%{height:4px;opacity:.4}100%{height:var(--max-h);opacity:1}}
+.mh-note-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px 10px;width:100%;z-index:10}
+.mh-note-btn{aspect-ratio:1;border:3px solid rgba(0,0,0,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:transform .05s steps(2);position:relative;overflow:hidden;touch-action:manipulation;min-height:64px;box-shadow:inset -3px -3px 0 rgba(0,0,0,.3),inset 3px 3px 0 rgba(255,255,255,.15)}
+.mh-note-btn:active{transform:scale(.9);box-shadow:inset 3px 3px 0 rgba(0,0,0,.3)}
+.mh-note-btn.selected{border-color:#ffd700;box-shadow:0 0 0 3px #ffd700,inset -3px -3px 0 rgba(0,0,0,.3);transform:scale(1.05)}
+.mh-note-btn.correct-flash{animation:mh-cf .4s steps(4)}
+.mh-note-btn.wrong-flash{animation:mh-wf .3s steps(4)}
+@keyframes mh-cf{0%,100%{filter:brightness(1)}25%{filter:brightness(2)}50%{filter:brightness(1.5)}75%{filter:brightness(2)}}
+@keyframes mh-wf{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.mh-note-letter{font-size:1.1rem;color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,.5)}
+.mh-note-name{font-size:.4rem;color:rgba(255,255,255,.7);margin-top:2px}
+.mh-bottom-row{display:flex;gap:6px;padding:6px 10px 12px;z-index:10}
+.mh-btn{flex:1;height:48px;border:3px solid rgba(0,0,0,.4);font-family:'Press Start 2P',monospace;font-size:.55rem;color:#fff;cursor:pointer;touch-action:manipulation;box-shadow:inset -3px -3px 0 rgba(0,0,0,.3),inset 3px 3px 0 rgba(255,255,255,.15);transition:transform .05s steps(2)}
+.mh-btn:active{transform:scale(.92);box-shadow:inset 3px 3px 0 rgba(0,0,0,.3)}
+.mh-btn.confirm{background:#2ecc71}.mh-btn.confirm:disabled{background:#2d2d44;color:#4a4a6a;cursor:default}
+.mh-btn.replay{background:#3498db;flex:.4}.mh-btn.hint{background:#f39c12;flex:.4}.mh-btn.hint:disabled{background:#2d2d44;color:#4a4a6a}
+.mh-answer-timer{height:6px;background:#2d2d44;border:2px solid #3a3a5a;margin:2px 10px;overflow:hidden}
+.mh-answer-timer-fill{height:100%;transition:width .1s linear}
+.mh-result-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:none}
+.mh-result-text{font-size:1.4rem;text-shadow:3px 3px 0 rgba(0,0,0,.5);animation:mh-rp .4s steps(5);letter-spacing:3px}
+.mh-result-sub{font-size:.6rem;color:#ffd700;margin-top:8px;animation:mh-rp .4s steps(5) .2s both}
+@keyframes mh-rp{0%{transform:scale(0);opacity:0}40%{transform:scale(1.3);opacity:1}100%{transform:scale(1);opacity:1}}
+.mh-fever-overlay{position:absolute;inset:0;pointer-events:none;z-index:5;border:4px solid rgba(255,215,0,.4);animation:mh-fb .5s steps(2) infinite alternate}
+@keyframes mh-fb{0%{border-color:rgba(255,215,0,.4)}100%{border-color:rgba(255,68,68,.4)}}
+.mh-fever-badge{position:absolute;top:44px;left:50%;transform:translateX(-50%);background:#ff4444;border:3px solid #ffd700;color:#ffd700;font-size:.65rem;padding:4px 12px;z-index:15;animation:mh-fbk .3s steps(2) infinite alternate;letter-spacing:2px}
+@keyframes mh-fbk{0%{opacity:1}100%{opacity:.6}}
+.mh-boss-intro{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.9);z-index:60;animation:mh-fi .3s steps(4)}
+.mh-boss-text{font-size:1.2rem;color:#ff4444;text-shadow:3px 3px 0 #8b0000;letter-spacing:4px;animation:mh-bz .8s steps(6) infinite alternate}
+.mh-boss-sub{font-size:.5rem;color:#ffd700;margin-top:12px;animation:mh-bbl .4s steps(2) infinite alternate}
+@keyframes mh-bz{0%{transform:scale(1)}100%{transform:scale(1.1)}}
+@keyframes mh-bbl{0%{opacity:1}100%{opacity:.3}}
+.mh-pixel-stars{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden}
+.mh-pixel-star{position:absolute;width:4px;height:4px;animation:mh-sb var(--dur) steps(2) infinite alternate;animation-delay:var(--delay)}
+@keyframes mh-sb{0%{opacity:.1}100%{opacity:.8}}
+.mh-level-up-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:55;pointer-events:none;animation:mh-luf .6s steps(3)}
+.mh-level-up-text{font-size:1.2rem;color:#ffd700;text-shadow:3px 3px 0 #b8860b;letter-spacing:3px;animation:mh-lug .6s steps(5)}
+@keyframes mh-luf{0%{background:rgba(255,215,0,.3)}50%{background:rgba(255,215,0,.1)}100%{background:transparent}}
+@keyframes mh-lug{0%{transform:scale(.3)}40%{transform:scale(1.5)}100%{transform:scale(1)}}
+@keyframes mh-fi{0%{opacity:0}100%{opacity:1}}
+.mh-game-over{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.92);z-index:100;animation:mh-fi .5s steps(5)}
+.mh-go-title{font-size:1.2rem;color:#ff4444;text-shadow:3px 3px 0 #8b0000;margin-bottom:16px;letter-spacing:3px}
+.mh-go-score{font-size:1.8rem;color:#ffd700;text-shadow:3px 3px 0 #b8860b;margin-bottom:8px}
+.mh-go-level{font-size:.6rem;color:#a0a0cc;margin-bottom:20px}
+.mh-go-stats{display:flex;gap:20px;margin-bottom:24px}
+.mh-go-stat{text-align:center}.mh-go-stat-val{font-size:1rem;color:#ffd700}.mh-go-stat-lbl{font-size:.4rem;color:#6a6a8a;margin-top:4px}
+.mh-scanlines{position:absolute;inset:0;pointer-events:none;z-index:200;background:repeating-linear-gradient(transparent 0px,transparent 2px,rgba(0,0,0,.08) 2px,rgba(0,0,0,.08) 4px)}
+.mh-note-btn::after{content:'';position:absolute;inset:0;background:rgba(255,255,255,.3);opacity:0;transition:opacity .1s}
+.mh-note-btn:active::after{opacity:1}`
 
-  .mh-root {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    max-width: 432px;
-    margin: 0 auto;
-    background: linear-gradient(180deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    user-select: none;
-    touch-action: manipulation;
-  }
-
-  .mh-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    z-index: 10;
-  }
-
-  .mh-score {
-    font-size: 2rem;
-    font-weight: 900;
-    color: #fbbf24;
-    text-shadow: 0 2px 8px rgba(251, 191, 36, 0.5);
-    min-width: 80px;
-  }
-
-  .mh-level-badge {
-    background: rgba(255,255,255,0.15);
-    border-radius: 20px;
-    padding: 4px 14px;
-    font-size: 1rem;
-    font-weight: 700;
-    color: #e2e8f0;
-    backdrop-filter: blur(4px);
-  }
-
-  .mh-timer-bar {
-    height: 6px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 3px;
-    margin: 0 16px;
-    overflow: hidden;
-  }
-
-  .mh-timer-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.1s linear;
-  }
-
-  .mh-combo {
-    text-align: center;
-    font-size: 1.4rem;
-    font-weight: 800;
-    min-height: 32px;
-    line-height: 32px;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  }
-
-  .mh-chord-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 16px;
-    min-height: 0;
-  }
-
-  .mh-chord-name {
-    font-size: 1.6rem;
-    font-weight: 800;
-    color: #e2e8f0;
-    margin-bottom: 12px;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
-  }
-
-  .mh-chord-display {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    min-height: 80px;
-    padding: 16px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 20px;
-    border: 2px solid rgba(255,255,255,0.1);
-    width: 100%;
-    max-width: 380px;
-  }
-
-  .mh-chord-note {
-    width: clamp(44px, 12vw, 56px);
-    height: clamp(44px, 12vw, 56px);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: #fff;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    animation: mh-note-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  }
-
-  .mh-chord-note.hidden {
-    background: rgba(255,255,255,0.2) !important;
-    color: transparent;
-    text-shadow: none;
-  }
-
-  .mh-chord-note.hidden::after {
-    content: '?';
-    color: rgba(255,255,255,0.6);
-    font-size: 1.4rem;
-  }
-
-  @keyframes mh-note-pop {
-    0% { transform: scale(0); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-
-  .mh-instruction {
-    font-size: 1.2rem;
-    color: rgba(255,255,255,0.7);
-    text-align: center;
-    margin: 12px 0;
-    font-weight: 600;
-  }
-
-  .mh-note-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    padding: 12px 16px 20px;
-    width: 100%;
-  }
-
-  .mh-note-grid.seven-notes {
-    grid-template-columns: repeat(4, 1fr);
-  }
-
-  .mh-note-btn {
-    aspect-ratio: 1;
-    border: none;
-    border-radius: 16px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.3rem;
-    font-weight: 800;
-    color: #fff;
-    cursor: pointer;
-    transition: transform 0.1s, box-shadow 0.1s;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3), inset 0 -3px 0 rgba(0,0,0,0.2);
-    position: relative;
-    overflow: hidden;
-    touch-action: manipulation;
-    min-height: 70px;
-  }
-
-  .mh-note-btn:active {
-    transform: scale(0.92);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(0,0,0,0.2);
-  }
-
-  .mh-note-btn.selected {
-    transform: scale(1.08);
-    box-shadow: 0 0 20px currentColor, 0 4px 12px rgba(0,0,0,0.3);
-    border: 3px solid rgba(255,255,255,0.8);
-  }
-
-  .mh-note-btn.correct-flash {
-    animation: mh-correct-pulse 0.5s ease;
-  }
-
-  .mh-note-btn.wrong-flash {
-    animation: mh-wrong-shake 0.4s ease;
-  }
-
-  .mh-note-label {
-    font-size: 0.75rem;
-    opacity: 0.8;
-    margin-top: 2px;
-  }
-
-  .mh-note-emoji {
-    font-size: 1.6rem;
-    line-height: 1;
-  }
-
-  @keyframes mh-correct-pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.15); filter: brightness(1.5); }
-  }
-
-  @keyframes mh-wrong-shake {
-    0%, 100% { transform: translateX(0); }
-    20% { transform: translateX(-6px); }
-    40% { transform: translateX(6px); }
-    60% { transform: translateX(-4px); }
-    80% { transform: translateX(4px); }
-  }
-
-  .mh-submit-row {
-    display: flex;
-    gap: 10px;
-    padding: 0 16px 16px;
-  }
-
-  .mh-submit-btn {
-    flex: 1;
-    height: 56px;
-    border: none;
-    border-radius: 14px;
-    font-size: 1.3rem;
-    font-weight: 800;
-    color: #fff;
-    cursor: pointer;
-    transition: transform 0.1s, opacity 0.2s;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    touch-action: manipulation;
-  }
-
-  .mh-submit-btn:active {
-    transform: scale(0.95);
-  }
-
-  .mh-submit-btn.confirm {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-  }
-
-  .mh-submit-btn.confirm:disabled {
-    background: rgba(255,255,255,0.15);
-    cursor: default;
-  }
-
-  .mh-submit-btn.replay {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
-    flex: 0.5;
-  }
-
-  .mh-result-overlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 50;
-    pointer-events: none;
-  }
-
-  .mh-result-text {
-    font-size: 3rem;
-    font-weight: 900;
-    text-shadow: 0 4px 16px rgba(0,0,0,0.5);
-    animation: mh-result-zoom 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  @keyframes mh-result-zoom {
-    0% { transform: scale(0.3); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-
-  .mh-fever-overlay {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 5;
-    background: linear-gradient(180deg,
-      rgba(251, 191, 36, 0.08) 0%,
-      transparent 30%,
-      transparent 70%,
-      rgba(251, 191, 36, 0.08) 100%
-    );
-    animation: mh-fever-pulse 1s ease-in-out infinite alternate;
-  }
-
-  @keyframes mh-fever-pulse {
-    0% { opacity: 0.5; }
-    100% { opacity: 1; }
-  }
-
-  .mh-fever-badge {
-    position: absolute;
-    top: 60px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: linear-gradient(135deg, #f59e0b, #ef4444);
-    color: #fff;
-    font-size: 1.4rem;
-    font-weight: 900;
-    padding: 6px 24px;
-    border-radius: 24px;
-    z-index: 15;
-    animation: mh-fever-bounce 0.6s ease infinite alternate;
-    box-shadow: 0 0 24px rgba(245, 158, 11, 0.6);
-    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-  }
-
-  @keyframes mh-fever-bounce {
-    0% { transform: translateX(-50%) scale(1); }
-    100% { transform: translateX(-50%) scale(1.08); }
-  }
-
-  .mh-answer-timer {
-    height: 4px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 2px;
-    margin: 4px 16px;
-    overflow: hidden;
-  }
-
-  .mh-answer-timer-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.1s linear;
-    background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
-  }
-
-  .mh-stars {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 1;
-    overflow: hidden;
-  }
-
-  .mh-star {
-    position: absolute;
-    width: 3px;
-    height: 3px;
-    background: rgba(255,255,255,0.6);
-    border-radius: 50%;
-    animation: mh-twinkle var(--dur) ease-in-out infinite alternate;
-    animation-delay: var(--delay);
-  }
-
-  @keyframes mh-twinkle {
-    0% { opacity: 0.2; transform: scale(0.5); }
-    100% { opacity: 1; transform: scale(1.2); }
-  }
-
-  .mh-wave-viz {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    pointer-events: none;
-    z-index: 2;
-    overflow: hidden;
-  }
-
-  .mh-wave-line {
-    position: absolute;
-    bottom: 0;
-    left: -10%;
-    width: 120%;
-    height: 40px;
-    border-radius: 50% 50% 0 0;
-    animation: mh-wave-float var(--dur) ease-in-out infinite alternate;
-    animation-delay: var(--delay);
-  }
-
-  @keyframes mh-wave-float {
-    0% { transform: translateY(0) scaleY(1); }
-    100% { transform: translateY(-8px) scaleY(0.7); }
-  }
-
-  .mh-game-over-screen {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0,0,0,0.85);
-    z-index: 100;
-    animation: mh-fade-in 0.5s ease;
-  }
-
-  @keyframes mh-fade-in {
-    0% { opacity: 0; }
-    100% { opacity: 1; }
-  }
-
-  .mh-game-over-title {
-    font-size: 2.8rem;
-    font-weight: 900;
-    color: #fbbf24;
-    text-shadow: 0 4px 16px rgba(251, 191, 36, 0.5);
-    margin-bottom: 16px;
-  }
-
-  .mh-game-over-score {
-    font-size: 3.5rem;
-    font-weight: 900;
-    color: #fff;
-    text-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    margin-bottom: 8px;
-  }
-
-  .mh-game-over-level {
-    font-size: 1.4rem;
-    color: rgba(255,255,255,0.7);
-    margin-bottom: 24px;
-  }
-
-  .mh-game-over-stats {
-    display: flex;
-    gap: 24px;
-    margin-bottom: 32px;
-  }
-
-  .mh-stat {
-    text-align: center;
-  }
-
-  .mh-stat-value {
-    font-size: 2rem;
-    font-weight: 900;
-    color: #fbbf24;
-  }
-
-  .mh-stat-label {
-    font-size: 0.85rem;
-    color: rgba(255,255,255,0.6);
-  }
-
-  .mh-listening-anim {
-    display: flex;
-    gap: 6px;
-    align-items: flex-end;
-    height: 50px;
-    margin: 16px 0;
-  }
-
-  .mh-listening-bar {
-    width: 8px;
-    background: linear-gradient(180deg, #fbbf24, #f59e0b);
-    border-radius: 4px;
-    animation: mh-listening-bounce var(--dur) ease-in-out infinite alternate;
-    animation-delay: var(--delay);
-  }
-
-  @keyframes mh-listening-bounce {
-    0% { height: 12px; }
-    100% { height: var(--max-h); }
-  }
-`
-
-// ─── Background Stars ────────────────────────────────────────────
-const BG_STARS = Array.from({ length: 30 }, (_, i) => ({
-  left: `${Math.random() * 100}%`,
-  top: `${Math.random() * 100}%`,
-  delay: `${Math.random() * 4}s`,
-  dur: `${2 + Math.random() * 3}s`,
+const PIXEL_STARS = Array.from({ length: 40 }, () => ({
+  left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`,
+  delay: `${Math.random() * 5}s`, dur: `${1.5 + Math.random() * 3}s`,
+  color: ['#ffd700', '#ff4444', '#3498db', '#2ecc71', '#e84393', '#fff'][Math.floor(Math.random() * 6)],
 }))
 
-const WAVE_LINES = [
-  { color: 'rgba(99, 102, 241, 0.15)', dur: '3s', delay: '0s' },
-  { color: 'rgba(168, 85, 247, 0.1)', dur: '4s', delay: '0.5s' },
-  { color: 'rgba(236, 72, 153, 0.08)', dur: '3.5s', delay: '1s' },
-]
-
-const LISTENING_BARS = Array.from({ length: 7 }, (_, i) => ({
-  delay: `${i * 0.12}s`,
-  dur: `${0.4 + Math.random() * 0.3}s`,
-  maxH: `${20 + Math.random() * 30}px`,
+const WAVEFORM_BARS = Array.from({ length: 16 }, (_, i) => ({
+  delay: `${i * 0.06}s`, dur: `${0.3 + Math.random() * 0.25}s`, maxH: `${8 + Math.random() * 28}px`,
 }))
 
-// ─── Component ───────────────────────────────────────────────────
-function MusicHarmonyGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+function MusicHarmonyGame({ onFinish, onExit: _onExit, bestScore: _bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [level, setLevel] = useState(1)
+  const [hp, setHp] = useState(MAX_HP)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [phase, setPhase] = useState<Phase>('listen')
   const [currentChord, setCurrentChord] = useState<number[]>([])
@@ -687,14 +228,19 @@ function MusicHarmonyGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [answerTimerMs, setAnswerTimerMs] = useState(ANSWER_TIMEOUT_MS)
   const [correctCount, setCorrectCount] = useState(0)
   const [wrongCount, setWrongCount] = useState(0)
-  const [showListening, setShowListening] = useState(true)
   const [noteFlash, setNoteFlash] = useState<Record<number, 'correct' | 'wrong'>>({})
   const [perfectStreak, setPerfectStreak] = useState(0)
+  const [hintsLeft, setHintsLeft] = useState(HINTS_PER_GAME)
+  const [hintRevealed, setHintRevealed] = useState<number | null>(null)
+  const [isBossRound, setIsBossRound] = useState(false)
+  const [showLevelUp, setShowLevelUp] = useState(false)
+  const [heartHitIdx, setHeartHitIdx] = useState<number | null>(null)
+  const [lastScoreGain, setLastScoreGain] = useState(0)
 
   const effects = useGameEffects()
-
   const scoreRef = useRef(0)
   const levelRef = useRef(1)
+  const hpRef = useRef(MAX_HP)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const phaseRef = useRef<Phase>('listen')
   const currentChordRef = useRef<number[]>([])
@@ -710,477 +256,236 @@ function MusicHarmonyGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const correctCountRef = useRef(0)
   const lowTimeSecondRef = useRef<number | null>(null)
   const perfectStreakRef = useRef(0)
+  const hintsLeftRef = useRef(HINTS_PER_GAME)
+  const isBossRef = useRef(false)
 
-  const getAudioContext = useCallback((): AudioContext => {
-    if (audioCtxRef.current === null || audioCtxRef.current.state === 'closed') {
-      audioCtxRef.current = new AudioContext()
-    }
-    if (audioCtxRef.current.state === 'suspended') {
-      void audioCtxRef.current.resume().catch(() => {})
-    }
+  const getAc = useCallback((): AudioContext => {
+    if (audioCtxRef.current === null || audioCtxRef.current.state === 'closed') audioCtxRef.current = new AudioContext()
+    if (audioCtxRef.current.state === 'suspended') void audioCtxRef.current.resume().catch(() => {})
     return audioCtxRef.current
   }, [])
 
-  const getAnswerTimeout = useCallback(() => {
-    return Math.max(ANSWER_TIMEOUT_MIN_MS, ANSWER_TIMEOUT_MS - (levelRef.current - 1) * ANSWER_SPEEDUP_PER_LEVEL)
+  const getAnsTimeout = useCallback(() => {
+    const base = isBossRef.current ? ANSWER_TIMEOUT_MS + 2000 : ANSWER_TIMEOUT_MS
+    return Math.max(ANSWER_TIMEOUT_MIN_MS, base - (levelRef.current - 1) * ANSWER_SPEEDUP_PER_LEVEL)
   }, [])
 
-  const getChordDisplayTime = useCallback(() => {
-    return Math.max(CHORD_DISPLAY_MIN_MS, CHORD_DISPLAY_MS - (levelRef.current - 1) * CHORD_SPEEDUP_PER_LEVEL)
+  const getDispTime = useCallback(() => {
+    const base = isBossRef.current ? CHORD_DISPLAY_MS + 500 : CHORD_DISPLAY_MS
+    return Math.max(CHORD_DISPLAY_MIN_MS, base - (levelRef.current - 1) * CHORD_SPEEDUP_PER_LEVEL)
   }, [])
+
+  const beginChordPhase = useCallback((noteIndices: number[], name: string) => {
+    currentChordRef.current = noteIndices
+    setCurrentChord(noteIndices); setChordName(name)
+    selectedNotesRef.current = new Set(); setSelectedNotes(new Set()); setNoteFlash({})
+    phaseRef.current = 'listen'; setPhase('listen')
+    const t = getAnsTimeout(); answerTimerMsRef.current = t; setAnswerTimerMs(t)
+    try { playChord(getAc(), noteIndices, TONE_DURATION_S, TONE_VOLUME) } catch { /* */ }
+    const dt = getDispTime()
+    setTimeout(() => { if (phaseRef.current === 'listen' && !finishedRef.current) { phaseRef.current = 'select'; setPhase('select') } }, dt)
+  }, [getAc, getAnsTimeout, getDispTime])
 
   const startNewChord = useCallback(() => {
-    const { noteIndices, chordName: name } = generateChord(levelRef.current)
-    currentChordRef.current = noteIndices
-    setCurrentChord(noteIndices)
-    setChordName(name)
-    selectedNotesRef.current = new Set()
-    setSelectedNotes(new Set())
-    setNoteFlash({})
-    phaseRef.current = 'listen'
-    setPhase('listen')
-    setShowListening(true)
+    const { noteIndices, chordName: name, isBoss } = generateChord(levelRef.current)
+    isBossRef.current = isBoss; setIsBossRound(isBoss); setHintRevealed(null)
+    if (isBoss) {
+      phaseRef.current = 'boss-intro'; setPhase('boss-intro')
+      try { playBossIntro(getAc()) } catch { /* */ }
+      setTimeout(() => { if (!finishedRef.current) beginChordPhase(noteIndices, name) }, 1200)
+      return
+    }
+    beginChordPhase(noteIndices, name)
+  }, [getAc, beginChordPhase])
 
-    const answerTimeout = getAnswerTimeout()
-    answerTimerMsRef.current = answerTimeout
-    setAnswerTimerMs(answerTimeout)
-
-    try {
-      const ctx = getAudioContext()
-      playChord(ctx, noteIndices, TONE_DURATION_S, TONE_VOLUME)
-    } catch {}
-
-    const displayTime = getChordDisplayTime()
-    setTimeout(() => {
-      if (phaseRef.current === 'listen' && !finishedRef.current) {
-        phaseRef.current = 'select'
-        setPhase('select')
-        setShowListening(false)
-      }
-    }, displayTime)
-  }, [getAudioContext, getAnswerTimeout, getChordDisplayTime])
+  const endGame = useCallback(() => {
+    if (finishedRef.current) return
+    finishedRef.current = true; phaseRef.current = 'game-over'; setPhase('game-over')
+    if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current)
+    try { play8bitJingle(getAc(), false) } catch { /* */ }
+    playSfx(gameoverSfxSrc, 0.5)
+    setTimeout(() => onFinish({ score: scoreRef.current, durationMs: ROUND_DURATION_MS }), 2500)
+  }, [onFinish, getAc])
 
   const handleCorrect = useCallback(() => {
-    const newCombo = comboRef.current + 1
-    comboRef.current = newCombo
-    setCombo(newCombo)
-    if (newCombo > (maxCombo)) setMaxCombo(newCombo)
-
-    correctCountRef.current += 1
-    setCorrectCount(correctCountRef.current)
-
-    const basePoints = 100 * currentChordRef.current.length
-    const comboBonus = Math.floor(basePoints * (newCombo * 0.15))
-    const isHarmonyBonus = currentChordRef.current.length >= 3
-    const harmonyPoints = isHarmonyBonus ? Math.floor(basePoints * HARMONY_BONUS_MULTIPLIER) : basePoints
-    const feverMul = feverRef.current ? FEVER_SCORE_MULTIPLIER : 1
-    const totalPoints = (harmonyPoints + comboBonus) * feverMul
-
-    const perfect = answerTimerMsRef.current > getAnswerTimeout() * 0.7
-    if (perfect) {
-      perfectStreakRef.current += 1
-      setPerfectStreak(perfectStreakRef.current)
+    const nc = comboRef.current + 1; comboRef.current = nc; setCombo(nc)
+    if (nc > maxCombo) setMaxCombo(nc)
+    correctCountRef.current += 1; setCorrectCount(correctCountRef.current)
+    const bp = 100 * currentChordRef.current.length
+    const cb = Math.floor(bp * (nc * 0.2))
+    const hb = currentChordRef.current.length >= 3
+    const hp2 = hb ? Math.floor(bp * HARMONY_BONUS_MULTIPLIER) : bp
+    const fm = feverRef.current ? FEVER_SCORE_MULTIPLIER : 1
+    const bm = isBossRef.current ? BOSS_BONUS_MULTIPLIER : 1
+    const tp = Math.floor((hp2 + cb) * fm * bm)
+    const perf = answerTimerMsRef.current > getAnsTimeout() * 0.65
+    if (perf) {
+      perfectStreakRef.current += 1; setPerfectStreak(perfectStreakRef.current)
       remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + PERFECT_TIME_BONUS_MS)
-    } else {
-      perfectStreakRef.current = 0
-      setPerfectStreak(0)
-    }
-
-    scoreRef.current += totalPoints
-    setScore(scoreRef.current)
-
+      if (perfectStreakRef.current >= 3) playSfx(streakSfxSrc, 0.4)
+    } else { perfectStreakRef.current = 0; setPerfectStreak(0) }
+    scoreRef.current += tp; setScore(scoreRef.current); setLastScoreGain(tp)
     effects.spawnParticles(50, 50, NOTES[currentChordRef.current[0]].color)
-    effects.addScorePopup(totalPoints, 50, 40)
-    if (isHarmonyBonus) effects.triggerFlash('#fbbf24')
-
-    try {
-      playSuccessJingle(getAudioContext())
-    } catch {}
+    effects.showScorePopup(tp, 50, 35)
+    if (hb) effects.triggerFlash('#ffd700')
+    try { play8bitJingle(getAc(), true) } catch { /* */ }
     playSfx(correctSfxSrc, 0.4)
-
-    if (!feverRef.current && newCombo >= FEVER_COMBO_THRESHOLD) {
-      feverRef.current = true
-      feverRemainingMsRef.current = FEVER_DURATION_MS
-      setIsFever(true)
-      setFeverRemainingMs(FEVER_DURATION_MS)
-      try { playFeverStart(getAudioContext()) } catch {}
-      playSfx(feverSfxSrc, 0.5)
+    if (nc >= 3 && nc % 3 === 0) playSfx(comboSfxSrc, 0.4)
+    if (!feverRef.current && nc >= FEVER_COMBO_THRESHOLD) {
+      feverRef.current = true; feverRemainingMsRef.current = FEVER_DURATION_MS
+      setIsFever(true); setFeverRemainingMs(FEVER_DURATION_MS); playSfx(feverSfxSrc, 0.5)
     }
-
-    const newLevel = Math.floor(correctCountRef.current / 3) + 1
-    if (newLevel > levelRef.current) {
-      levelRef.current = newLevel
-      setLevel(newLevel)
-      playSfx(levelUpSfxSrc, 0.45)
+    const nl = Math.floor(correctCountRef.current / 3) + 1
+    if (nl > levelRef.current) {
+      levelRef.current = nl; setLevel(nl); playSfx(levelUpSfxSrc, 0.45)
+      setShowLevelUp(true); setTimeout(() => setShowLevelUp(false), 800)
     }
-
-    phaseRef.current = 'result-correct'
-    setPhase('result-correct')
-
-    // flash correct notes
-    const flash: Record<number, 'correct'> = {}
-    for (const idx of currentChordRef.current) flash[idx] = 'correct'
-    setNoteFlash(flash)
-
-    setTimeout(() => {
-      if (!finishedRef.current) startNewChord()
-    }, RESULT_DISPLAY_MS)
-  }, [effects, getAudioContext, getAnswerTimeout, maxCombo, startNewChord])
+    phaseRef.current = 'result-correct'; setPhase('result-correct')
+    const fl: Record<number, 'correct'> = {}
+    for (const idx of currentChordRef.current) fl[idx] = 'correct'
+    setNoteFlash(fl)
+    setTimeout(() => { if (!finishedRef.current) startNewChord() }, RESULT_DISPLAY_MS)
+  }, [effects, getAc, getAnsTimeout, maxCombo, startNewChord])
 
   const handleWrong = useCallback(() => {
-    comboRef.current = 0
-    setCombo(0)
-    perfectStreakRef.current = 0
-    setPerfectStreak(0)
+    comboRef.current = 0; setCombo(0); perfectStreakRef.current = 0; setPerfectStreak(0)
     setWrongCount(prev => prev + 1)
+    hpRef.current -= 1; const nh = hpRef.current; setHp(nh)
+    setHeartHitIdx(nh); setTimeout(() => setHeartHitIdx(null), 500)
+    effects.triggerShake(); effects.triggerFlash('#ff4444')
+    try { play8bitJingle(getAc(), false) } catch { /* */ }
+    playSfx(wrongSfxSrc, 0.4); playSfx(lifeLostSfxSrc, 0.35)
+    phaseRef.current = 'result-wrong'; setPhase('result-wrong')
+    const fl: Record<number, 'correct' | 'wrong'> = {}
+    for (const idx of currentChordRef.current) fl[idx] = 'correct'
+    for (const idx of selectedNotesRef.current) { if (!currentChordRef.current.includes(idx)) fl[idx] = 'wrong' }
+    setNoteFlash(fl)
+    if (nh <= 0) { setTimeout(() => endGame(), RESULT_DISPLAY_MS); return }
+    setTimeout(() => { if (!finishedRef.current) startNewChord() }, RESULT_DISPLAY_MS)
+  }, [effects, getAc, startNewChord, endGame])
 
-    effects.triggerShake()
-    effects.triggerFlash('#ef4444')
-
-    try { playFailBuzz(getAudioContext()) } catch {}
-    playSfx(wrongSfxSrc, 0.4)
-
-    phaseRef.current = 'result-wrong'
-    setPhase('result-wrong')
-
-    // flash wrong notes (selected but wrong)
-    const flash: Record<number, 'correct' | 'wrong'> = {}
-    for (const idx of currentChordRef.current) flash[idx] = 'correct'
-    for (const idx of selectedNotesRef.current) {
-      if (!currentChordRef.current.includes(idx)) flash[idx] = 'wrong'
-    }
-    setNoteFlash(flash)
-
-    setTimeout(() => {
-      if (!finishedRef.current) startNewChord()
-    }, RESULT_DISPLAY_MS)
-  }, [effects, getAudioContext, startNewChord])
-
-  const handleNoteToggle = useCallback((noteIndex: number) => {
+  const handleNoteToggle = useCallback((ni: number) => {
     if (phaseRef.current !== 'select' || finishedRef.current) return
-
-    try {
-      playNote(getAudioContext(), NOTES[noteIndex].frequency, 0.25, 0.25)
-    } catch {}
+    try { playNote8bit(getAc(), NOTES[ni].frequency, 0.2, 0.2) } catch { /* */ }
     playSfx(tapSfxSrc, 0.3)
-
-    const newSet = new Set(selectedNotesRef.current)
-    if (newSet.has(noteIndex)) {
-      newSet.delete(noteIndex)
-    } else {
-      newSet.add(noteIndex)
-    }
-    selectedNotesRef.current = newSet
-    setSelectedNotes(new Set(newSet))
-  }, [getAudioContext])
+    const ns = new Set(selectedNotesRef.current)
+    if (ns.has(ni)) ns.delete(ni); else ns.add(ni)
+    selectedNotesRef.current = ns; setSelectedNotes(new Set(ns))
+  }, [getAc])
 
   const handleSubmit = useCallback(() => {
-    if (phaseRef.current !== 'select' || finishedRef.current) return
-    if (selectedNotesRef.current.size === 0) return
-
-    const target = new Set(currentChordRef.current)
-    const selected = selectedNotesRef.current
-
-    if (target.size === selected.size && [...target].every(n => selected.has(n))) {
-      handleCorrect()
-    } else {
-      handleWrong()
-    }
+    if (phaseRef.current !== 'select' || finishedRef.current || selectedNotesRef.current.size === 0) return
+    const tgt = new Set(currentChordRef.current), sel = selectedNotesRef.current
+    if (tgt.size === sel.size && [...tgt].every(n => sel.has(n))) handleCorrect(); else handleWrong()
   }, [handleCorrect, handleWrong])
 
   const handleReplay = useCallback(() => {
     if (phaseRef.current !== 'select' || finishedRef.current) return
-    try {
-      const ctx = getAudioContext()
-      playChord(ctx, currentChordRef.current, TONE_DURATION_S, TONE_VOLUME)
-    } catch {}
-  }, [getAudioContext])
+    try { playChord(getAc(), currentChordRef.current, TONE_DURATION_S, TONE_VOLUME) } catch { /* */ }
+  }, [getAc])
 
-  const endGame = useCallback(() => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    phaseRef.current = 'game-over'
-    setPhase('game-over')
+  const handleHint = useCallback(() => {
+    if (phaseRef.current !== 'select' || finishedRef.current || hintsLeftRef.current <= 0) return
+    hintsLeftRef.current -= 1; setHintsLeft(hintsLeftRef.current)
+    const us = currentChordRef.current.filter(idx => !selectedNotesRef.current.has(idx))
+    if (us.length > 0) {
+      const ri = us[Math.floor(Math.random() * us.length)]
+      setHintRevealed(ri)
+      try { playNote8bit(getAc(), NOTES[ri].frequency, 0.4, 0.25) } catch { /* */ }
+      playSfx(hintSfxSrc, 0.4)
+    }
+  }, [getAc])
 
-    if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current)
-
-    setTimeout(() => {
-      onFinish({ score: scoreRef.current, durationMs: ROUND_DURATION_MS })
-    }, 2000)
-  }, [onFinish])
-
-  // Game loop
   useEffect(() => {
     startNewChord()
-
     const loop = (now: number) => {
       if (finishedRef.current) return
-
-      const last = lastFrameRef.current ?? now
-      lastFrameRef.current = now
+      const last = lastFrameRef.current ?? now; lastFrameRef.current = now
       let delta = now - last
       if (delta > MAX_FRAME_DELTA_MS) delta = DEFAULT_FRAME_MS
       if (delta <= 0) { animFrameRef.current = requestAnimationFrame(loop); return }
-
-      // Timer
-      remainingMsRef.current -= delta
-      setRemainingMs(Math.max(0, remainingMsRef.current))
-
-      if (remainingMsRef.current <= 0) {
-        endGame()
-        return
-      }
-
-      // Low time warning
+      remainingMsRef.current -= delta; setRemainingMs(Math.max(0, remainingMsRef.current))
+      if (remainingMsRef.current <= 0) { endGame(); return }
       if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS) {
-        const currentSecond = Math.ceil(remainingMsRef.current / 1000)
-        if (lowTimeSecondRef.current !== currentSecond) {
-          lowTimeSecondRef.current = currentSecond
-          try {
-            const ctx = getAudioContext()
-            const osc = ctx.createOscillator()
-            const gain = ctx.createGain()
-            osc.type = 'sine'
-            osc.frequency.setValueAtTime(880, ctx.currentTime)
-            gain.gain.setValueAtTime(0.1, ctx.currentTime)
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1)
-            osc.connect(gain)
-            gain.connect(ctx.destination)
-            osc.start(ctx.currentTime)
-            osc.stop(ctx.currentTime + 0.1)
-          } catch {}
-          playSfx(warningSfxSrc, 0.3)
+        const sec = Math.ceil(remainingMsRef.current / 1000)
+        if (lowTimeSecondRef.current !== sec) {
+          lowTimeSecondRef.current = sec
+          try { const ctx = getAc(), o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'square'; o.frequency.setValueAtTime(880, ctx.currentTime); g.gain.setValueAtTime(0.08, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08); o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.08) } catch { /* */ }
+          playSfx(warningSfxSrc, 0.25)
         }
       }
-
-      // Fever timer
-      if (feverRef.current) {
-        feverRemainingMsRef.current -= delta
-        setFeverRemainingMs(Math.max(0, feverRemainingMsRef.current))
-        if (feverRemainingMsRef.current <= 0) {
-          feverRef.current = false
-          setIsFever(false)
-        }
-      }
-
-      // Answer timer
-      if (phaseRef.current === 'select') {
-        answerTimerMsRef.current -= delta
-        setAnswerTimerMs(Math.max(0, answerTimerMsRef.current))
-        if (answerTimerMsRef.current <= 0) {
-          handleWrong()
-        }
-      }
-
+      if (feverRef.current) { feverRemainingMsRef.current -= delta; setFeverRemainingMs(Math.max(0, feverRemainingMsRef.current)); if (feverRemainingMsRef.current <= 0) { feverRef.current = false; setIsFever(false) } }
+      if (phaseRef.current === 'select') { answerTimerMsRef.current -= delta; setAnswerTimerMs(Math.max(0, answerTimerMsRef.current)); if (answerTimerMsRef.current <= 0) handleWrong() }
       animFrameRef.current = requestAnimationFrame(loop)
     }
-
     animFrameRef.current = requestAnimationFrame(loop)
-
-    return () => {
-      if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current)
-      if (audioCtxRef.current) {
-        try { void audioCtxRef.current.close() } catch {}
-      }
-    }
+    return () => { if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current); if (audioCtxRef.current) { try { void audioCtxRef.current.close() } catch { /* */ } } }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const timerPct = (remainingMs / ROUND_DURATION_MS) * 100
-  const timerColor = remainingMs <= LOW_TIME_THRESHOLD_MS ? '#ef4444' : remainingMs <= 20000 ? '#eab308' : '#22c55e'
-  const answerPct = (answerTimerMs / getAnswerTimeout()) * 100
-  const comboLabel = combo >= 2 ? getComboLabel(combo) : ''
-  const comboColor = combo >= 2 ? getComboColor(combo) : '#fff'
+  const timerColor = remainingMs <= LOW_TIME_THRESHOLD_MS ? '#ff4444' : remainingMs <= 25000 ? '#f39c12' : '#2ecc71'
+  const answerPct = (answerTimerMs / getAnsTimeout()) * 100
+  const answerColor = answerPct > 60 ? '#2ecc71' : answerPct > 30 ? '#f39c12' : '#ff4444'
+  const comboLbl = combo >= 2 ? getComboLabel(combo) : ''
+  const comboCl = combo >= 2 ? getComboColor(combo) : '#fff'
+  const canPlay = phase === 'select'
 
   return (
     <>
-      <style>{MUSIC_HARMONY_CSS}</style>
-      <div className="mh-root" style={effects.isShaking ? { animation: 'game-fx-shake 0.3s ease' } : undefined}>
-        {/* Background stars */}
-        <div className="mh-stars">
-          {BG_STARS.map((s, i) => (
-            <div key={i} className="mh-star" style={{
-              left: s.left, top: s.top,
-              '--delay': s.delay, '--dur': s.dur,
-            } as React.CSSProperties} />
-          ))}
+      <style>{PIXEL_CSS}</style>
+      <div className="mh-root" style={effects.isShaking ? { animation: 'game-fx-shake 0.3s steps(3)' } : undefined}>
+        <div className="mh-scanlines" />
+        <div className="mh-pixel-stars">
+          {PIXEL_STARS.map((s, i) => (<div key={i} className="mh-pixel-star" style={{ left: s.left, top: s.top, background: s.color, '--delay': s.delay, '--dur': s.dur } as React.CSSProperties} />))}
         </div>
-
-        {/* Wave visualization */}
-        <div className="mh-wave-viz">
-          {WAVE_LINES.map((w, i) => (
-            <div key={i} className="mh-wave-line" style={{
-              background: w.color,
-              '--dur': w.dur, '--delay': w.delay,
-            } as React.CSSProperties} />
-          ))}
-        </div>
-
-        {/* Fever overlay */}
         {isFever && <div className="mh-fever-overlay" />}
-        {isFever && (
-          <div className="mh-fever-badge">
-            FEVER x{FEVER_SCORE_MULTIPLIER} ({Math.ceil(feverRemainingMs / 1000)}s)
-          </div>
-        )}
-
-        {/* Header */}
-        <div className="mh-header" style={{ zIndex: 10 }}>
+        {isFever && <div className="mh-fever-badge">FEVER x{FEVER_SCORE_MULTIPLIER} {Math.ceil(feverRemainingMs / 1000)}s</div>}
+        <div className="mh-header">
           <div className="mh-score">{score.toLocaleString()}</div>
-          <div className="mh-level-badge">Lv.{level}</div>
-          <div className="mh-level-badge" style={{ background: 'rgba(251,191,36,0.2)', color: '#fbbf24' }}>
-            {combo}x
+          <div className="mh-hp">
+            {Array.from({ length: MAX_HP }, (_, i) => (<span key={i} className={`mh-heart ${i >= hp ? 'lost' : ''} ${heartHitIdx === i ? 'hit' : ''}`}>{i < hp ? '\u2665' : '\u2661'}</span>))}
           </div>
+          <div className={`mh-level-badge ${isBossRound ? 'boss' : ''}`}>{isBossRound ? 'BOSS' : `Lv${level}`}</div>
         </div>
-
-        {/* Timer bar */}
-        <div className="mh-timer-bar">
-          <div className="mh-timer-fill" style={{
-            width: `${timerPct}%`,
-            background: timerColor,
-          }} />
+        <div className="mh-timer-bar"><div className="mh-timer-fill" style={{ width: `${timerPct}%`, background: timerColor }} /></div>
+        <div className="mh-combo-row">
+          {comboLbl && <span className="mh-combo-text" key={combo} style={{ color: comboCl }}>{combo}x {comboLbl}</span>}
+          {perfectStreak >= 2 && <span style={{ color: '#ffd700', marginLeft: 6, fontSize: '0.5rem' }}>PERFECT x{perfectStreak}</span>}
         </div>
-
-        {/* Combo label */}
-        <div className="mh-combo" style={{ color: comboColor }}>
-          {comboLabel}
-          {perfectStreak >= 2 && <span style={{ color: '#fbbf24', marginLeft: 8 }}>Perfect x{perfectStreak}</span>}
-        </div>
-
-        {/* Chord display area */}
         <div className="mh-chord-area">
           <div className="mh-chord-name">{chordName}</div>
-
-          {/* Listening animation */}
-          {phase === 'listen' && showListening && (
-            <div className="mh-listening-anim">
-              {LISTENING_BARS.map((b, i) => (
-                <div key={i} className="mh-listening-bar" style={{
-                  '--delay': b.delay, '--dur': b.dur, '--max-h': b.maxH,
-                } as React.CSSProperties} />
-              ))}
-            </div>
-          )}
-
-          {/* Chord notes display */}
+          {phase === 'listen' && (<div className="mh-waveform">{WAVEFORM_BARS.map((b, i) => (<div key={i} className="mh-wave-bar" style={{ '--delay': b.delay, '--dur': b.dur, '--max-h': b.maxH } as React.CSSProperties} />))}</div>)}
           <div className="mh-chord-display">
             {currentChord.map((noteIdx, i) => {
-              const note = NOTES[noteIdx]
-              const isListening = phase === 'listen'
-              const isResult = phase === 'result-correct' || phase === 'result-wrong'
-              const showNote = isListening || isResult
-              const flashClass = noteFlash[noteIdx] === 'correct' ? 'correct-flash' : noteFlash[noteIdx] === 'wrong' ? 'wrong-flash' : ''
-              return (
-                <div
-                  key={`${noteIdx}-${i}`}
-                  className={`mh-chord-note ${showNote ? '' : 'hidden'} ${flashClass}`}
-                  style={{
-                    background: showNote ? note.color : undefined,
-                    animationDelay: `${i * 0.08}s`,
-                  }}
-                >
-                  {showNote ? note.label : ''}
-                </div>
-              )
+              const note = NOTES[noteIdx], show = phase === 'listen' || phase === 'result-correct' || phase === 'result-wrong'
+              const isHinted = hintRevealed === noteIdx && phase === 'select'
+              const fc = noteFlash[noteIdx] === 'correct' ? 'correct-flash' : noteFlash[noteIdx] === 'wrong' ? 'wrong-flash' : ''
+              return (<div key={`${noteIdx}-${i}`} className={`mh-chord-note ${show ? '' : 'hidden'} ${fc} ${isHinted ? 'hint-revealed' : ''}`} style={{ background: show || isHinted ? note.color : undefined, animationDelay: `${i * 0.06}s` }}>{(show || isHinted) ? note.pixel : ''}</div>)
             })}
           </div>
-
-          {phase === 'listen' && (
-            <div className="mh-instruction">Listen to the chord...</div>
-          )}
-          {phase === 'select' && (
-            <div className="mh-instruction">Select the notes you heard!</div>
-          )}
+          {phase === 'listen' && <div className="mh-instruction">LISTENING...</div>}
+          {phase === 'select' && <div className="mh-instruction">SELECT THE NOTES!</div>}
         </div>
-
-        {/* Answer timer bar */}
-        {phase === 'select' && (
-          <div className="mh-answer-timer">
-            <div className="mh-answer-timer-fill" style={{ width: `${answerPct}%` }} />
-          </div>
-        )}
-
-        {/* Note selection grid */}
-        <div className={`mh-note-grid ${NOTES.length > 6 ? 'seven-notes' : ''}`}>
+        {canPlay && <div className="mh-answer-timer"><div className="mh-answer-timer-fill" style={{ width: `${answerPct}%`, background: answerColor }} /></div>}
+        <div className="mh-note-grid">
           {NOTES.map((note, idx) => {
-            const isSelected = selectedNotes.has(idx)
-            const flash = noteFlash[idx]
-            const flashClass = flash === 'correct' ? 'correct-flash' : flash === 'wrong' ? 'wrong-flash' : ''
-            return (
-              <button
-                key={note.id}
-                className={`mh-note-btn ${isSelected ? 'selected' : ''} ${flashClass}`}
-                style={{
-                  background: isSelected ? note.activeColor : note.color,
-                  color: '#fff',
-                  opacity: phase === 'select' ? 1 : 0.5,
-                }}
-                disabled={phase !== 'select'}
-                onPointerDown={() => handleNoteToggle(idx)}
-              >
-                <span className="mh-note-emoji">{note.emoji}</span>
-                <span className="mh-note-label">{note.label}</span>
-              </button>
-            )
+            const sel = selectedNotes.has(idx), fc = noteFlash[idx] === 'correct' ? 'correct-flash' : noteFlash[idx] === 'wrong' ? 'wrong-flash' : ''
+            return (<button key={note.id} className={`mh-note-btn ${sel ? 'selected' : ''} ${fc}`} style={{ background: sel ? note.activeColor : note.color, opacity: canPlay ? 1 : 0.4 }} disabled={!canPlay} onPointerDown={() => handleNoteToggle(idx)}><span className="mh-note-letter">{note.pixel}</span><span className="mh-note-name">{note.label}</span></button>)
           })}
         </div>
-
-        {/* Submit row */}
-        <div className="mh-submit-row">
-          <button
-            className="mh-submit-btn replay"
-            disabled={phase !== 'select'}
-            onPointerDown={handleReplay}
-          >
-            Replay
-          </button>
-          <button
-            className="mh-submit-btn confirm"
-            disabled={phase !== 'select' || selectedNotes.size === 0}
-            onPointerDown={handleSubmit}
-          >
-            Confirm ({selectedNotes.size}/{currentChord.length})
-          </button>
+        <div className="mh-bottom-row">
+          <button className="mh-btn replay" disabled={!canPlay} onPointerDown={handleReplay}>REPLAY</button>
+          <button className="mh-btn hint" disabled={!canPlay || hintsLeft <= 0} onPointerDown={handleHint}>HINT({hintsLeft})</button>
+          <button className="mh-btn confirm" disabled={!canPlay || selectedNotes.size === 0} onPointerDown={handleSubmit}>OK {selectedNotes.size}/{currentChord.length}</button>
         </div>
-
-        {/* Result overlays */}
-        {phase === 'result-correct' && (
-          <div className="mh-result-overlay">
-            <div className="mh-result-text" style={{ color: '#22c55e' }}>CORRECT!</div>
-          </div>
-        )}
-        {phase === 'result-wrong' && (
-          <div className="mh-result-overlay">
-            <div className="mh-result-text" style={{ color: '#ef4444' }}>WRONG!</div>
-          </div>
-        )}
-
-        {/* Game over screen */}
-        {phase === 'game-over' && (
-          <div className="mh-game-over-screen">
-            <div className="mh-game-over-title">GAME OVER</div>
-            <div className="mh-game-over-score">{score.toLocaleString()}</div>
-            <div className="mh-game-over-level">Level {level}</div>
-            <div className="mh-game-over-stats">
-              <div className="mh-stat">
-                <div className="mh-stat-value">{correctCount}</div>
-                <div className="mh-stat-label">Correct</div>
-              </div>
-              <div className="mh-stat">
-                <div className="mh-stat-value">{maxCombo}</div>
-                <div className="mh-stat-label">Max Combo</div>
-              </div>
-              <div className="mh-stat">
-                <div className="mh-stat-value">{wrongCount}</div>
-                <div className="mh-stat-label">Wrong</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Effects */}
+        {phase === 'result-correct' && (<div className="mh-result-overlay"><div className="mh-result-text" style={{ color: '#2ecc71' }}>CORRECT!</div>{lastScoreGain > 0 && <div className="mh-result-sub">+{lastScoreGain.toLocaleString()}</div>}{isBossRound && <div className="mh-result-sub" style={{ color: '#ff4444' }}>BOSS CLEAR!</div>}</div>)}
+        {phase === 'result-wrong' && (<div className="mh-result-overlay"><div className="mh-result-text" style={{ color: '#ff4444' }}>MISS!</div><div className="mh-result-sub" style={{ color: '#ff4444' }}>HP -1</div></div>)}
+        {phase === 'boss-intro' && (<div className="mh-boss-intro"><div className="mh-boss-text">BOSS!</div><div className="mh-boss-sub">x{BOSS_BONUS_MULTIPLIER} BONUS</div></div>)}
+        {showLevelUp && (<div className="mh-level-up-overlay"><div className="mh-level-up-text">LEVEL {level}!</div></div>)}
+        {phase === 'game-over' && (<div className="mh-game-over"><div className="mh-go-title">GAME OVER</div><div className="mh-go-score">{score.toLocaleString()}</div><div className="mh-go-level">LEVEL {level}</div><div className="mh-go-stats"><div className="mh-go-stat"><div className="mh-go-stat-val">{correctCount}</div><div className="mh-go-stat-lbl">CORRECT</div></div><div className="mh-go-stat"><div className="mh-go-stat-val">{maxCombo}</div><div className="mh-go-stat-lbl">MAX COMBO</div></div><div className="mh-go-stat"><div className="mh-go-stat-val">{wrongCount}</div><div className="mh-go-stat-lbl">MISS</div></div></div></div>)}
         <ParticleRenderer particles={effects.particles} />
         <ScorePopupRenderer popups={effects.scorePopups} />
-        <FlashOverlay color={effects.flashColor} />
+        <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       </div>
     </>
   )
@@ -1190,7 +495,7 @@ export const musicHarmonyModule: MiniGameModule = {
   manifest: {
     id: 'music-harmony',
     title: 'Music Harmony',
-    description: 'Listen to chords and pick the right notes! Build combos for fever mode!',
+    description: '8-bit chord matching! Listen and pick the notes. Boss rounds every 5 levels!',
     unlockCost: 80,
     baseReward: 25,
     scoreRewardMultiplier: 0.04,

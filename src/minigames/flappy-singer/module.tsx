@@ -15,72 +15,106 @@ import powerupSfxUrl from '../../../assets/sounds/flappy-singer-powerup.mp3'
 import nearmissSfxUrl from '../../../assets/sounds/flappy-singer-nearmiss.mp3'
 import milestoneSfxUrl from '../../../assets/sounds/flappy-singer-milestone.mp3'
 import magnetSfxUrl from '../../../assets/sounds/flappy-singer-magnet.mp3'
+import lifelostSfxUrl from '../../../assets/sounds/flappy-singer-lifelost.mp3'
+import streakSfxUrl from '../../../assets/sounds/flappy-singer-streak.mp3'
+import windSfxUrl from '../../../assets/sounds/flappy-singer-wind.mp3'
+import goldenSfxUrl from '../../../assets/sounds/flappy-singer-golden.mp3'
 
 // ─── Character Pool ─────────────────────────────────────────
 const CHARACTER_SPRITES = [kimYeonjaSprite, parkSangminSprite, parkWankyuSprite, seoTaijiSprite]
 
 // ─── Game Constants ──────────────────────────────────────────
-const VIEWBOX_WIDTH = 288
-const VIEWBOX_HEIGHT = 512
+const VW = 288
+const VH = 512
 
 const GRAVITY = 0.0013
-const FLAP_VELOCITY = -0.42
+const FLAP_VELOCITY = -0.40
 const MAX_FALL_VELOCITY = 0.55
-const CHARACTER_X = 72
-const CHARACTER_SIZE = 40
-const CHARACTER_HITBOX_SHRINK = 7
+const CHAR_X = 72
+const CHAR_SIZE = 40
+const HITBOX_SHRINK = 7
 
-const PIPE_WIDTH = 44
-const PIPE_SPEED = 0.14
-const PIPE_SPAWN_INTERVAL_MS = 1700
-const INITIAL_GAP_HEIGHT = 145
-const MIN_GAP_HEIGHT = 88
-const GAP_SHRINK_PER_SCORE = 1.8
+const PIPE_W = 44
+const PIPE_SPEED_BASE = 0.13
+const PIPE_INTERVAL_MS = 1700
+const INITIAL_GAP = 148
+const MIN_GAP = 90
+const GAP_SHRINK = 1.5
 const PIPE_MIN_TOP = 55
-const PIPE_CAP_HEIGHT = 12
-const PIPE_CAP_OVERHANG = 4
+const PIPE_CAP_H = 12
+const PIPE_CAP_OH = 4
 
-const GROUND_HEIGHT = 40
-const CEILING_Y = 0
-const GAME_TIMEOUT_MS = 120000
+const GROUND_H = 40
+const TIMEOUT_MS = 120000
 
-const PIPE_SPEED_INCREASE_PER_SCORE = 0.003
-const MAX_PIPE_SPEED = 0.30
+const PIPE_SPEED_INC = 0.0025
+const MAX_PIPE_SPEED = 0.28
 
-const COIN_RADIUS = 9
+const COIN_R = 9
 const COIN_SCORE = 3
-const COIN_SPAWN_CHANCE = 0.55
+const COIN_CHANCE = 0.55
 
-const MULTIPLIER_TRIGGER_INTERVAL = 10
-const MULTIPLIER_DURATION = 5
-const MULTIPLIER_VALUE = 2
+// ─── HP System ──────────────────────────────────────────────
+const MAX_HP = 3
+const INVINCIBLE_MS = 1500
 
-// ─── Power-up constants ─────────────────────────────────────
-const POWERUP_SPAWN_CHANCE = 0.18
-const SHIELD_DURATION_MS = 6000
-const MAGNET_DURATION_MS = 8000
+// ─── Combo streak ───────────────────────────────────────────
+const STREAK_THRESHOLDS = [5, 10, 15, 20, 30]
+const STREAK_LABELS = ['NICE!', 'GREAT!', 'AWESOME!', 'AMAZING!', 'GODLIKE!']
+
+// ─── Multiplier ─────────────────────────────────────────────
+const MULTI_TRIGGER = 10
+const MULTI_DURATION = 5
+const MULTI_VALUE = 2
+
+// ─── Power-ups ──────────────────────────────────────────────
+const PU_CHANCE = 0.18
+const SHIELD_DUR = 6000
+const MAGNET_DUR = 8000
 const MAGNET_RANGE = 100
-const POWERUP_SIZE = 18
-const STAR_POWERUP_SCORE = 5
+const PU_SIZE = 18
+const STAR_PU_SCORE = 5
 
-// ─── Near-miss ─────────────────────────────────────────────
-const NEAR_MISS_THRESHOLD = 12
-const NEAR_MISS_BONUS = 2
+// ─── Near-miss ──────────────────────────────────────────────
+const NM_THRESHOLD = 12
+const NM_BONUS = 2
 
 // ─── Moving pipe ────────────────────────────────────────────
-const MOVING_PIPE_START_SCORE = 12
-const MOVING_PIPE_CHANCE = 0.25
-const MOVING_PIPE_SPEED = 0.03
-const MOVING_PIPE_RANGE = 40
+const MOVING_START = 12
+const MOVING_CHANCE = 0.25
+const MOVING_SPEED = 0.03
+const MOVING_RANGE = 40
 
-// ─── Milestone ──────────────────────────────────────────────
+// ─── Golden pipe ────────────────────────────────────────────
+const GOLDEN_START = 8
+const GOLDEN_CHANCE = 0.12
+const GOLDEN_BONUS = 3
+
+// ─── Wind zones ─────────────────────────────────────────────
+const WIND_START = 20
+const WIND_CHANCE = 0.15
+const WIND_FORCE = 0.0004
+const WIND_ZONE_W = 60
+const WIND_ZONE_H = 120
+
+// ─── Milestones ─────────────────────────────────────────────
 const MILESTONES = [10, 25, 50, 75, 100]
 
-// ─── Time-of-day thresholds ─────────────────────────────────
-const SUNSET_SCORE = 15
-const NIGHT_SCORE = 30
+// ─── Time-of-day ────────────────────────────────────────────
+const SUNSET_AT = 15
+const NIGHT_AT = 30
 
-// ─── Cloud/Star background ──────────────────────────────────
+// ─── Mountains (parallax) ───────────────────────────────────
+const MOUNTAINS = [
+  { x: 0, h: 80, w: 120, speed: 0.008 },
+  { x: 100, h: 65, w: 90, speed: 0.008 },
+  { x: 220, h: 55, w: 100, speed: 0.008 },
+  { x: 50, h: 45, w: 80, speed: 0.012 },
+  { x: 160, h: 50, w: 110, speed: 0.012 },
+  { x: 270, h: 40, w: 85, speed: 0.012 },
+]
+
+// ─── Clouds ─────────────────────────────────────────────────
 const CLOUDS = [
   { x: 30, y: 50, w: 55, h: 18, speed: 0.02 },
   { x: 150, y: 100, w: 45, h: 16, speed: 0.015 },
@@ -90,14 +124,13 @@ const CLOUDS = [
 ]
 
 const STARS = Array.from({ length: 18 }, (_, i) => ({
-  x: (i * 59 + 13) % VIEWBOX_WIDTH,
-  y: (i * 41 + 19) % (VIEWBOX_HEIGHT - GROUND_HEIGHT - 80) + 16,
-  r: 1 + (i % 3),
-  twinkleSpeed: 1.5 + (i % 4) * 0.5,
+  x: (i * 59 + 13) % VW,
+  y: (i * 41 + 19) % (VH - GROUND_H - 80) + 16,
+  s: 2 + (i % 2),
 }))
 
 // ─── Types ──────────────────────────────────────────────────
-type PowerUpType = 'shield' | 'magnet' | 'star'
+type PUType = 'shield' | 'magnet' | 'star'
 
 interface Pipe {
   readonly id: number
@@ -106,9 +139,10 @@ interface Pipe {
   readonly gapBottom: number
   scored: boolean
   readonly moving: boolean
-  readonly moveOffset: number
+  moveOffset: number
   movePhase: number
   nearMissAwarded: boolean
+  readonly golden: boolean
 }
 
 interface Coin {
@@ -122,8 +156,15 @@ interface PowerUp {
   readonly id: number
   x: number
   readonly y: number
-  readonly type: PowerUpType
+  readonly type: PUType
   collected: boolean
+}
+
+interface WindZone {
+  readonly id: number
+  x: number
+  readonly y: number
+  readonly direction: 1 | -1
 }
 
 interface NoteTrail {
@@ -142,378 +183,172 @@ interface SpeedLine {
   opacity: number
 }
 
+interface DeathPixel {
+  readonly id: number
+  x: number
+  y: number
+  vx: number
+  vy: number
+  readonly color: string
+  readonly size: number
+  life: number
+}
+
 // ─── Pure helpers ───────────────────────────────────────────
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
-}
+function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)) }
+function gapH(score: number) { return Math.max(MIN_GAP, INITIAL_GAP - score * GAP_SHRINK) }
 
-function computeGapHeight(score: number): number {
-  return Math.max(MIN_GAP_HEIGHT, INITIAL_GAP_HEIGHT - score * GAP_SHRINK_PER_SCORE)
-}
-
-function createPipe(id: number, score: number): Pipe {
-  const gapHeight = computeGapHeight(score)
-  const maxGapTop = VIEWBOX_HEIGHT - GROUND_HEIGHT - gapHeight - PIPE_MIN_TOP
-  const gapTop = PIPE_MIN_TOP + Math.random() * Math.max(0, maxGapTop - PIPE_MIN_TOP)
-  const isMoving = score >= MOVING_PIPE_START_SCORE && Math.random() < MOVING_PIPE_CHANCE
+function mkPipe(id: number, score: number): Pipe {
+  const gap = gapH(score)
+  const maxTop = VH - GROUND_H - gap - PIPE_MIN_TOP
+  const gapTop = PIPE_MIN_TOP + Math.random() * Math.max(0, maxTop - PIPE_MIN_TOP)
+  const mov = score >= MOVING_START && Math.random() < MOVING_CHANCE
+  const gold = score >= GOLDEN_START && Math.random() < GOLDEN_CHANCE
   return {
-    id, x: VIEWBOX_WIDTH + PIPE_WIDTH,
-    gapTop, gapBottom: gapTop + gapHeight,
+    id, x: VW + PIPE_W,
+    gapTop, gapBottom: gapTop + gap,
     scored: false,
-    moving: isMoving,
-    moveOffset: isMoving ? (Math.random() - 0.5) * 2 * MOVING_PIPE_RANGE : 0,
+    moving: mov,
+    moveOffset: mov ? (Math.random() - 0.5) * 2 * MOVING_RANGE : 0,
     movePhase: Math.random() * Math.PI * 2,
     nearMissAwarded: false,
+    golden: gold,
   }
 }
 
-function checkCollision(characterY: number, pipes: Pipe[]): boolean {
-  const charTop = characterY - CHARACTER_SIZE / 2 + CHARACTER_HITBOX_SHRINK
-  const charBottom = characterY + CHARACTER_SIZE / 2 - CHARACTER_HITBOX_SHRINK
-  const charLeft = CHARACTER_X - CHARACTER_SIZE / 2 + CHARACTER_HITBOX_SHRINK
-  const charRight = CHARACTER_X + CHARACTER_SIZE / 2 - CHARACTER_HITBOX_SHRINK
-
-  if (charTop <= CEILING_Y || charBottom >= VIEWBOX_HEIGHT - GROUND_HEIGHT) return true
-
-  for (const pipe of pipes) {
-    const pipeLeft = pipe.x
-    const pipeRight = pipe.x + PIPE_WIDTH
-    if (charRight > pipeLeft && charLeft < pipeRight) {
-      const effectiveGapTop = pipe.gapTop + (pipe.moving ? pipe.moveOffset : 0)
-      const effectiveGapBottom = pipe.gapBottom + (pipe.moving ? pipe.moveOffset : 0)
-      if (charTop < effectiveGapTop || charBottom > effectiveGapBottom) return true
+function hitTest(cy: number, pipes: Pipe[]): boolean {
+  const t = cy - CHAR_SIZE / 2 + HITBOX_SHRINK
+  const b = cy + CHAR_SIZE / 2 - HITBOX_SHRINK
+  const l = CHAR_X - CHAR_SIZE / 2 + HITBOX_SHRINK
+  const r = CHAR_X + CHAR_SIZE / 2 - HITBOX_SHRINK
+  if (t <= 0 || b >= VH - GROUND_H) return true
+  for (const p of pipes) {
+    if (r > p.x && l < p.x + PIPE_W) {
+      const gt = p.gapTop + (p.moving ? p.moveOffset : 0)
+      const gb = p.gapBottom + (p.moving ? p.moveOffset : 0)
+      if (t < gt || b > gb) return true
     }
   }
   return false
 }
 
-function checkNearMiss(characterY: number, pipe: Pipe): boolean {
-  const effectiveGapTop = pipe.gapTop + (pipe.moving ? pipe.moveOffset : 0)
-  const effectiveGapBottom = pipe.gapBottom + (pipe.moving ? pipe.moveOffset : 0)
-  const charTop = characterY - CHARACTER_SIZE / 2 + CHARACTER_HITBOX_SHRINK
-  const charBottom = characterY + CHARACTER_SIZE / 2 - CHARACTER_HITBOX_SHRINK
-  const distTop = charTop - effectiveGapTop
-  const distBottom = effectiveGapBottom - charBottom
-  return (distTop > 0 && distTop < NEAR_MISS_THRESHOLD) || (distBottom > 0 && distBottom < NEAR_MISS_THRESHOLD)
+function nearMiss(cy: number, p: Pipe): boolean {
+  const gt = p.gapTop + (p.moving ? p.moveOffset : 0)
+  const gb = p.gapBottom + (p.moving ? p.moveOffset : 0)
+  const t = cy - CHAR_SIZE / 2 + HITBOX_SHRINK
+  const b = cy + CHAR_SIZE / 2 - HITBOX_SHRINK
+  const dt = t - gt, db = gb - b
+  return (dt > 0 && dt < NM_THRESHOLD) || (db > 0 && db < NM_THRESHOLD)
 }
 
-function getSkyColors(score: number): { top: string; bottom: string } {
-  if (score >= NIGHT_SCORE) return { top: '#0f172a', bottom: '#1e293b' }
-  if (score >= SUNSET_SCORE) return { top: '#f97316', bottom: '#fbbf24' }
-  return { top: '#7dd3fc', bottom: '#bae6fd' }
+function skyCol(s: number) {
+  if (s >= NIGHT_AT) return { t: '#0f172a', b: '#1e293b' }
+  if (s >= SUNSET_AT) return { t: '#f97316', b: '#fbbf24' }
+  return { t: '#7dd3fc', b: '#bae6fd' }
+}
+function pipeCol(s: number) {
+  if (s >= NIGHT_AT) return { body: '#166534', cap: '#14532d', border: '#052e16' }
+  if (s >= SUNSET_AT) return { body: '#16a34a', cap: '#15803d', border: '#14532d' }
+  return { body: '#22c55e', cap: '#16a34a', border: '#15803d' }
+}
+function groundCol(s: number) {
+  if (s >= NIGHT_AT) return { t: '#365314', b: '#1a2e05', l: '#1a2e05' }
+  if (s >= SUNSET_AT) return { t: '#65a30d', b: '#4d7c0f', l: '#3f6212' }
+  return { t: '#84cc16', b: '#65a30d', l: '#4d7c0f' }
+}
+function mtCol(s: number) {
+  if (s >= NIGHT_AT) return ['#1e293b', '#0f172a']
+  if (s >= SUNSET_AT) return ['#c2410c', '#9a3412']
+  return ['#a7f3d0', '#6ee7b7']
 }
 
-function getPipeColor(score: number): string {
-  if (score >= NIGHT_SCORE) return '#166534'
-  if (score >= SUNSET_SCORE) return '#16a34a'
-  return '#22c55e'
-}
+const PU_COL: Record<PUType, string> = { shield: '#3b82f6', magnet: '#a855f7', star: '#fbbf24' }
+const PU_ICON: Record<PUType, string> = { shield: 'S', magnet: 'M', star: '*' }
 
-function getPipeCapColor(score: number): string {
-  if (score >= NIGHT_SCORE) return '#14532d'
-  if (score >= SUNSET_SCORE) return '#15803d'
-  return '#16a34a'
-}
+function pickSprite() { return CHARACTER_SPRITES[Math.floor(Math.random() * CHARACTER_SPRITES.length)] }
 
-function getPipeBorder(score: number): string {
-  if (score >= NIGHT_SCORE) return '#052e16'
-  if (score >= SUNSET_SCORE) return '#14532d'
-  return '#15803d'
-}
-
-function getGroundColors(score: number): { top: string; bottom: string; line: string } {
-  if (score >= NIGHT_SCORE) return { top: '#365314', bottom: '#1a2e05', line: '#1a2e05' }
-  if (score >= SUNSET_SCORE) return { top: '#65a30d', bottom: '#4d7c0f', line: '#3f6212' }
-  return { top: '#84cc16', bottom: '#65a30d', line: '#4d7c0f' }
-}
-
-const POWERUP_COLORS: Record<PowerUpType, string> = { shield: '#3b82f6', magnet: '#a855f7', star: '#fbbf24' }
-const POWERUP_ICONS: Record<PowerUpType, string> = { shield: 'S', magnet: 'M', star: '*' }
-
-function pickCharacterSprite(): string {
-  return CHARACTER_SPRITES[Math.floor(Math.random() * CHARACTER_SPRITES.length)]
+function streakLabel(streak: number): string | null {
+  for (let i = STREAK_THRESHOLDS.length - 1; i >= 0; i--) {
+    if (streak >= STREAK_THRESHOLDS[i]) return STREAK_LABELS[i]
+  }
+  return null
 }
 
 // ─── Game CSS ───────────────────────────────────────────────
-const FLAPPY_CSS = `
-.flappy-singer-panel {
-  width: 100%;
-  height: 100%;
-  max-width: 432px;
-  margin: 0 auto;
-  overflow: hidden;
-  position: relative;
-  background: #000;
-  touch-action: manipulation;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.flappy-singer-board {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-.flappy-singer-svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-.flappy-singer-hud {
-  position: absolute;
-  top: 10px;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  pointer-events: none;
-  text-align: center;
-}
-.flappy-singer-score {
-  font-size: clamp(2.5rem, 10vw, 3.5rem);
-  font-weight: 900;
-  color: #fff;
-  text-shadow: 3px 3px 0 #1f2937, -1px -1px 0 #1f2937, 1px -1px 0 #1f2937, -1px 1px 0 #1f2937;
-  margin: 0;
-  line-height: 1;
-  font-family: monospace;
-  image-rendering: pixelated;
-}
-.flappy-singer-best {
-  font-size: clamp(0.6rem, 2.5vw, 0.8rem);
-  color: #fbbf24;
-  text-shadow: 1px 1px 0 #1f2937;
-  margin: 2px 0 0;
-  font-family: monospace;
-}
-.flappy-singer-powerup-bar {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-.flappy-singer-powerup-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: clamp(0.55rem, 2vw, 0.7rem);
-  font-weight: 800;
-  font-family: monospace;
-  color: #fff;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
-  animation: flappy-pulse 0.6s ease-in-out infinite alternate;
-}
-.flappy-singer-start-overlay, .flappy-singer-gameover-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 20;
-  pointer-events: none;
-}
-.flappy-singer-start-text {
-  font-size: clamp(1.6rem, 7vw, 2.2rem);
-  font-weight: 900;
-  color: #fff;
-  text-shadow: 3px 3px 0 #1f2937;
-  margin: 0;
-  font-family: monospace;
-  animation: flappy-bounce 1s ease-in-out infinite;
-}
-.flappy-singer-start-sub {
-  font-size: clamp(0.6rem, 2.5vw, 0.8rem);
-  color: #e2e8f0;
-  text-shadow: 1px 1px 0 #1f2937;
-  margin: 8px 0 0;
-  font-family: monospace;
-}
-.flappy-singer-gameover-text {
-  font-size: clamp(2rem, 9vw, 3rem);
-  font-weight: 900;
-  color: #ef4444;
-  text-shadow: 3px 3px 0 #1f2937;
-  margin: 0;
-  font-family: monospace;
-  animation: flappy-shake 0.4s ease-out;
-}
-.flappy-singer-gameover-score {
-  font-size: clamp(1.2rem, 5vw, 1.6rem);
-  font-weight: 700;
-  color: #fbbf24;
-  text-shadow: 2px 2px 0 #1f2937;
-  margin: 8px 0 0;
-  font-family: monospace;
-}
-.flappy-singer-overlay-actions {
-  position: absolute;
-  bottom: 14px;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  z-index: 20;
-}
-.flappy-singer-action-button {
-  padding: 10px 20px;
-  font-size: clamp(0.65rem, 2.5vw, 0.8rem);
-  font-weight: 700;
-  border: 2px solid #6b7280;
-  border-radius: 6px;
-  background: rgba(31,41,55,0.85);
-  color: #f9fafb;
-  cursor: pointer;
-  box-shadow: 2px 2px 0 #374151;
-  min-height: 44px;
-  font-family: monospace;
-}
-.flappy-singer-action-button.ghost {
-  background: rgba(31,41,55,0.5);
-  border-color: #4b5563;
-  color: #9ca3af;
-}
-.flappy-singer-multiplier {
-  font-size: clamp(0.7rem, 3vw, 0.9rem);
-  font-weight: 800;
-  color: #fbbf24;
-  text-shadow: 2px 2px 0 #1f2937;
-  text-align: center;
-  margin: 2px 0;
-  font-family: monospace;
-  animation: flappy-pulse 0.5s ease-in-out infinite alternate;
-}
-.flappy-singer-fever-border {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 5;
-  border: 3px solid rgba(251,191,36,0.6);
-  box-shadow: inset 0 0 30px rgba(251,191,36,0.15);
-  animation: flappy-fever-glow 0.8s ease-in-out infinite alternate;
-}
-.flappy-singer-shield-border {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 5;
-  border: 3px solid rgba(59,130,246,0.5);
-  box-shadow: inset 0 0 20px rgba(59,130,246,0.12);
-  animation: flappy-shield-glow 1s ease-in-out infinite alternate;
-}
-.flappy-singer-milestone-flash {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: flappy-milestone-anim 1.2s ease-out forwards;
-}
-.flappy-singer-milestone-text {
-  font-size: clamp(2rem, 8vw, 3rem);
-  font-weight: 900;
-  color: #fbbf24;
-  text-shadow: 3px 3px 0 #92400e, 0 0 20px rgba(251,191,36,0.6);
-  font-family: monospace;
-}
-.flappy-singer-nearmiss {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 15;
-  font-size: clamp(0.8rem, 3vw, 1rem);
-  font-weight: 900;
-  color: #22d3ee;
-  text-shadow: 2px 2px 0 #0e7490;
-  font-family: monospace;
-  animation: flappy-nearmiss 0.8s ease-out forwards;
-}
-@keyframes flappy-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
-@keyframes flappy-shake {
-  0% { transform: translateX(0); }
-  20% { transform: translateX(-8px); }
-  40% { transform: translateX(8px); }
-  60% { transform: translateX(-4px); }
-  80% { transform: translateX(4px); }
-  100% { transform: translateX(0); }
-}
-@keyframes flappy-pulse {
-  from { transform: scale(1); }
-  to { transform: scale(1.08); }
-}
-@keyframes flappy-fever-glow {
-  from { border-color: rgba(251,191,36,0.4); box-shadow: inset 0 0 20px rgba(251,191,36,0.1); }
-  to { border-color: rgba(251,191,36,0.8); box-shadow: inset 0 0 40px rgba(251,191,36,0.25); }
-}
-@keyframes flappy-shield-glow {
-  from { border-color: rgba(59,130,246,0.3); box-shadow: inset 0 0 15px rgba(59,130,246,0.08); }
-  to { border-color: rgba(59,130,246,0.6); box-shadow: inset 0 0 25px rgba(59,130,246,0.18); }
-}
-@keyframes flappy-star-twinkle {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-@keyframes flappy-milestone-anim {
-  0% { opacity: 0; transform: scale(0.3); }
-  30% { opacity: 1; transform: scale(1.15); }
-  60% { transform: scale(0.95); }
-  80% { transform: scale(1.02); }
-  100% { opacity: 0; transform: scale(1) translateY(-20px); }
-}
-@keyframes flappy-nearmiss {
-  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.5); }
-  40% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
-  100% { opacity: 0; transform: translate(-50%, -80%) scale(0.8); }
-}
-@keyframes flappy-coin-spin {
-  0%, 100% { transform: scaleX(1); }
-  50% { transform: scaleX(0.3); }
-}
+const CSS = `
+.fs-panel{width:100%;height:100%;max-width:432px;margin:0 auto;overflow:hidden;position:relative;background:#000;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.fs-board{position:relative;width:100%;height:100%}
+.fs-svg{display:block;width:100%;height:100%}
+.fs-hud{position:absolute;top:8px;left:0;right:0;z-index:10;pointer-events:none;text-align:center}
+.fs-score{font-size:clamp(2.5rem,10vw,3.5rem);font-weight:900;color:#fff;text-shadow:3px 3px 0 #1f2937,-1px -1px 0 #1f2937,1px -1px 0 #1f2937,-1px 1px 0 #1f2937;margin:0;line-height:1;font-family:monospace}
+.fs-best{font-size:clamp(0.55rem,2.3vw,0.75rem);color:#fbbf24;text-shadow:1px 1px 0 #1f2937;margin:1px 0 0;font-family:monospace}
+.fs-hp{display:flex;justify-content:center;gap:2px;margin:3px 0}
+.fs-hp-heart{width:16px;height:16px;font-size:14px;line-height:16px;text-align:center;image-rendering:pixelated}
+.fs-hp-heart.lost{opacity:0.25}
+.fs-streak{font-size:clamp(0.8rem,3.5vw,1.1rem);font-weight:900;color:#f97316;text-shadow:2px 2px 0 #7c2d12;margin:2px 0;font-family:monospace;animation:fs-pulse .4s ease-in-out infinite alternate}
+.fs-pu-bar{display:flex;justify-content:center;gap:5px;margin-top:3px}
+.fs-pu-ind{display:inline-flex;align-items:center;gap:2px;padding:2px 7px;border-radius:3px;font-size:clamp(0.5rem,2vw,0.65rem);font-weight:800;font-family:monospace;color:#fff;text-shadow:1px 1px 0 rgba(0,0,0,.5);animation:fs-pulse .6s ease-in-out infinite alternate}
+.fs-start,.fs-gameover{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;pointer-events:none}
+.fs-start-txt{font-size:clamp(1.6rem,7vw,2.2rem);font-weight:900;color:#fff;text-shadow:3px 3px 0 #1f2937;font-family:monospace;animation:fs-bounce 1s ease-in-out infinite}
+.fs-start-sub{font-size:clamp(0.55rem,2.3vw,0.75rem);color:#e2e8f0;text-shadow:1px 1px 0 #1f2937;margin:6px 0 0;font-family:monospace}
+.fs-go-txt{font-size:clamp(2rem,9vw,3rem);font-weight:900;color:#ef4444;text-shadow:3px 3px 0 #1f2937;font-family:monospace;animation:fs-shake .4s ease-out}
+.fs-go-score{font-size:clamp(1.2rem,5vw,1.6rem);font-weight:700;color:#fbbf24;text-shadow:2px 2px 0 #1f2937;margin:6px 0 0;font-family:monospace}
+.fs-btns{position:absolute;bottom:12px;left:0;right:0;display:flex;justify-content:center;gap:8px;z-index:20}
+.fs-btn{padding:8px 18px;font-size:clamp(0.6rem,2.5vw,0.75rem);font-weight:700;border:2px solid #6b7280;border-radius:5px;background:rgba(31,41,55,.85);color:#f9fafb;cursor:pointer;box-shadow:2px 2px 0 #374151;min-height:40px;font-family:monospace}
+.fs-btn.ghost{background:rgba(31,41,55,.5);border-color:#4b5563;color:#9ca3af}
+.fs-multi{font-size:clamp(0.7rem,3vw,0.9rem);font-weight:800;color:#fbbf24;text-shadow:2px 2px 0 #1f2937;text-align:center;margin:1px 0;font-family:monospace;animation:fs-pulse .5s ease-in-out infinite alternate}
+.fs-fever{position:absolute;inset:0;pointer-events:none;z-index:5;border:3px solid rgba(251,191,36,.6);box-shadow:inset 0 0 30px rgba(251,191,36,.15);animation:fs-fglow .8s ease-in-out infinite alternate}
+.fs-shield-border{position:absolute;inset:0;pointer-events:none;z-index:5;border:3px solid rgba(59,130,246,.5);box-shadow:inset 0 0 20px rgba(59,130,246,.12);animation:fs-sglow 1s ease-in-out infinite alternate}
+.fs-milestone{position:absolute;inset:0;pointer-events:none;z-index:25;display:flex;align-items:center;justify-content:center;animation:fs-ms 1.2s ease-out forwards}
+.fs-ms-txt{font-size:clamp(2rem,8vw,3rem);font-weight:900;color:#fbbf24;text-shadow:3px 3px 0 #92400e,0 0 20px rgba(251,191,36,.6);font-family:monospace}
+.fs-nm{position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:15;font-size:clamp(0.8rem,3vw,1rem);font-weight:900;color:#22d3ee;text-shadow:2px 2px 0 #0e7490;font-family:monospace;animation:fs-nm .8s ease-out forwards}
+.fs-scanline{position:absolute;inset:0;pointer-events:none;z-index:4;background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0px,rgba(0,0,0,0) 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);mix-blend-mode:multiply}
+.fs-vignette{position:absolute;inset:0;pointer-events:none;z-index:3;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.25) 100%)}
+.fs-dmg-flash{position:absolute;inset:0;pointer-events:none;z-index:30;animation:fs-dmg .3s ease-out forwards}
+@keyframes fs-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes fs-shake{0%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}100%{transform:translateX(0)}}
+@keyframes fs-pulse{from{transform:scale(1)}to{transform:scale(1.08)}}
+@keyframes fs-fglow{from{border-color:rgba(251,191,36,.4);box-shadow:inset 0 0 20px rgba(251,191,36,.1)}to{border-color:rgba(251,191,36,.8);box-shadow:inset 0 0 40px rgba(251,191,36,.25)}}
+@keyframes fs-sglow{from{border-color:rgba(59,130,246,.3)}to{border-color:rgba(59,130,246,.6)}}
+@keyframes fs-twinkle{0%,100%{opacity:.3}50%{opacity:1}}
+@keyframes fs-ms{0%{opacity:0;transform:scale(.3)}30%{opacity:1;transform:scale(1.15)}60%{transform:scale(.95)}80%{transform:scale(1.02)}100%{opacity:0;transform:scale(1) translateY(-20px)}}
+@keyframes fs-nm{0%{opacity:1;transform:translate(-50%,-50%) scale(.5)}40%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-80%) scale(.8)}}
+@keyframes fs-coin{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.3)}}
+@keyframes fs-dmg{0%{background:rgba(239,68,68,.35)}100%{background:transparent}}
 `
 
-// ─── Pixel art pipe rendering helpers ───────────────────────
-function PixelPipe({ pipe, score, viewHeight, groundHeight }: {
-  pipe: Pipe; score: number; viewHeight: number; groundHeight: number
-}) {
-  const pipeColor = getPipeColor(score)
-  const capColor = getPipeCapColor(score)
-  const border = getPipeBorder(score)
-  const moveY = pipe.moving ? pipe.moveOffset : 0
-  const gapTop = pipe.gapTop + moveY
-  const gapBottom = pipe.gapBottom + moveY
-  const isMoving = pipe.moving
-
+// ─── Pixel Pipe ─────────────────────────────────────────────
+function PPipe({ p, score }: { p: Pipe; score: number }) {
+  const c = pipeCol(score)
+  const my = p.moving ? p.moveOffset : 0
+  const gt = p.gapTop + my, gb = p.gapBottom + my
+  const bodyFill = p.golden ? '#fbbf24' : c.body
+  const capFill = p.golden ? '#f59e0b' : c.cap
+  const borderFill = p.golden ? '#92400e' : c.border
   return (
     <g shapeRendering="crispEdges">
-      {/* Top pipe body */}
-      <rect x={pipe.x} y={0} width={PIPE_WIDTH} height={Math.max(0, gapTop)} fill={pipeColor} stroke={border} strokeWidth="1.5" />
-      {/* Top pipe cap */}
-      <rect x={pipe.x - PIPE_CAP_OVERHANG} y={gapTop - PIPE_CAP_HEIGHT} width={PIPE_WIDTH + PIPE_CAP_OVERHANG * 2} height={PIPE_CAP_HEIGHT} fill={capColor} stroke={border} strokeWidth="1.5" />
-      {/* Pixel highlight on top pipe */}
-      <rect x={pipe.x + 4} y={2} width={4} height={Math.max(0, gapTop - PIPE_CAP_HEIGHT - 4)} fill="rgba(255,255,255,0.18)" />
-      <rect x={pipe.x + 10} y={2} width={2} height={Math.max(0, gapTop - PIPE_CAP_HEIGHT - 4)} fill="rgba(255,255,255,0.08)" />
-
-      {/* Bottom pipe body */}
-      <rect x={pipe.x} y={gapBottom} width={PIPE_WIDTH} height={Math.max(0, viewHeight - groundHeight - gapBottom)} fill={pipeColor} stroke={border} strokeWidth="1.5" />
-      {/* Bottom pipe cap */}
-      <rect x={pipe.x - PIPE_CAP_OVERHANG} y={gapBottom} width={PIPE_WIDTH + PIPE_CAP_OVERHANG * 2} height={PIPE_CAP_HEIGHT} fill={capColor} stroke={border} strokeWidth="1.5" />
-      {/* Pixel highlight on bottom pipe */}
-      <rect x={pipe.x + 4} y={gapBottom + PIPE_CAP_HEIGHT + 2} width={4} height={Math.max(0, viewHeight - groundHeight - gapBottom - PIPE_CAP_HEIGHT - 4)} fill="rgba(255,255,255,0.18)" />
-
-      {/* Moving pipe indicator - pixel arrow markers */}
-      {isMoving && (
+      <rect x={p.x} y={0} width={PIPE_W} height={Math.max(0, gt)} fill={bodyFill} stroke={borderFill} strokeWidth="1.5" />
+      <rect x={p.x - PIPE_CAP_OH} y={gt - PIPE_CAP_H} width={PIPE_W + PIPE_CAP_OH * 2} height={PIPE_CAP_H} fill={capFill} stroke={borderFill} strokeWidth="1.5" />
+      <rect x={p.x + 4} y={2} width={4} height={Math.max(0, gt - PIPE_CAP_H - 4)} fill="rgba(255,255,255,.18)" />
+      <rect x={p.x + 10} y={2} width={2} height={Math.max(0, gt - PIPE_CAP_H - 4)} fill="rgba(255,255,255,.08)" />
+      {/* Brick pattern every 16px */}
+      {Array.from({ length: Math.floor(gt / 16) }, (_, i) => (
+        <line key={`bt-${i}`} x1={p.x} y1={i * 16} x2={p.x + PIPE_W} y2={i * 16} stroke={borderFill} strokeWidth="0.5" opacity="0.3" />
+      ))}
+      <rect x={p.x} y={gb} width={PIPE_W} height={Math.max(0, VH - GROUND_H - gb)} fill={bodyFill} stroke={borderFill} strokeWidth="1.5" />
+      <rect x={p.x - PIPE_CAP_OH} y={gb} width={PIPE_W + PIPE_CAP_OH * 2} height={PIPE_CAP_H} fill={capFill} stroke={borderFill} strokeWidth="1.5" />
+      <rect x={p.x + 4} y={gb + PIPE_CAP_H + 2} width={4} height={Math.max(0, VH - GROUND_H - gb - PIPE_CAP_H - 4)} fill="rgba(255,255,255,.18)" />
+      {Array.from({ length: Math.floor((VH - GROUND_H - gb) / 16) }, (_, i) => (
+        <line key={`bb-${i}`} x1={p.x} y1={gb + i * 16} x2={p.x + PIPE_W} y2={gb + i * 16} stroke={borderFill} strokeWidth="0.5" opacity="0.3" />
+      ))}
+      {p.moving && (
         <>
-          <rect x={pipe.x + PIPE_WIDTH / 2 - 3} y={gapTop - PIPE_CAP_HEIGHT - 6} width={6} height={3} fill="#fbbf24" opacity="0.7" />
-          <rect x={pipe.x + PIPE_WIDTH / 2 - 3} y={gapBottom + PIPE_CAP_HEIGHT + 3} width={6} height={3} fill="#fbbf24" opacity="0.7" />
+          <rect x={p.x + PIPE_W / 2 - 3} y={gt - PIPE_CAP_H - 6} width={6} height={3} fill="#fbbf24" opacity=".7" />
+          <rect x={p.x + PIPE_W / 2 - 3} y={gb + PIPE_CAP_H + 3} width={6} height={3} fill="#fbbf24" opacity=".7" />
         </>
+      )}
+      {p.golden && (
+        <rect x={p.x - 1} y={gt} width={PIPE_W + 2} height={gb - gt} fill="rgba(251,191,36,.08)" />
       )}
     </g>
   )
@@ -522,667 +357,588 @@ function PixelPipe({ pipe, score, viewHeight, groundHeight }: {
 // ─── Component ──────────────────────────────────────────────
 function FlappySingerGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
-  const [characterY, setCharacterY] = useState(VIEWBOX_HEIGHT / 2)
-  const [velocity, setVelocity] = useState(0)
+  const [charY, setCharY] = useState(VH / 2)
+  const [vel, setVel] = useState(0)
   const [pipes, setPipes] = useState<Pipe[]>([])
   const [coins, setCoins] = useState<Coin[]>([])
-  const [powerUps, setPowerUps] = useState<PowerUp[]>([])
-  const [gameStarted, setGameStarted] = useState(false)
-  const [gameOver, setGameOver] = useState(false)
-  const [, setElapsedMs] = useState(0)
-  const [isMultiplierActive, setIsMultiplierActive] = useState(false)
-  const [wingPhase, setWingPhase] = useState(0)
-  const [cloudOffsets, setCloudOffsets] = useState(() => CLOUDS.map(() => 0))
-  const [shieldActive, setShieldActive] = useState(false)
-  const [magnetActive, setMagnetActive] = useState(false)
-  const [noteTrails, setNoteTrails] = useState<NoteTrail[]>([])
-  const [speedLines, setSpeedLines] = useState<SpeedLine[]>([])
-  const [milestoneText, setMilestoneText] = useState<string | null>(null)
-  const [nearMissShow, setNearMissShow] = useState(false)
-  const [groundScrollX, setGroundScrollX] = useState(0)
-  const [characterSprite] = useState(pickCharacterSprite)
+  const [pups, setPups] = useState<PowerUp[]>([])
+  const [winds, setWinds] = useState<WindZone[]>([])
+  const [started, setStarted] = useState(false)
+  const [over, setOver] = useState(false)
+  const [, setTick] = useState(0)
+  const [multiActive, setMultiActive] = useState(false)
+  const [wingPh, setWingPh] = useState(0)
+  const [cloudOff, setCloudOff] = useState(() => CLOUDS.map(() => 0))
+  const [mtOff, setMtOff] = useState(() => MOUNTAINS.map(() => 0))
+  const [shieldOn, setShieldOn] = useState(false)
+  const [magnetOn, setMagnetOn] = useState(false)
+  const [notes, setNotes] = useState<NoteTrail[]>([])
+  const [slines, setSlines] = useState<SpeedLine[]>([])
+  const [msTxt, setMsTxt] = useState<string | null>(null)
+  const [nmShow, setNmShow] = useState(false)
+  const [gndX, setGndX] = useState(0)
+  const [sprite] = useState(pickSprite)
+  const [hp, setHp] = useState(MAX_HP)
+  const [streak, setStreak] = useState(0)
+  const [dmgFlash, setDmgFlash] = useState(false)
+  const [deathPx, setDeathPx] = useState<DeathPixel[]>([])
+  const [invincible, setInvincible] = useState(false)
 
-  const effects = useGameEffects()
+  const fx = useGameEffects()
 
-  const scoreRef = useRef(0)
-  const characterYRef = useRef(VIEWBOX_HEIGHT / 2)
-  const velocityRef = useRef(0)
-  const pipesRef = useRef<Pipe[]>([])
-  const coinsRef = useRef<Coin[]>([])
-  const powerUpsRef = useRef<PowerUp[]>([])
-  const gameStartedRef = useRef(false)
-  const finishedRef = useRef(false)
-  const elapsedMsRef = useRef(0)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const timeSinceLastPipeRef = useRef(0)
-  const nextPipeIdRef = useRef(0)
-  const multiplierPipesLeftRef = useRef(0)
-  const wingPhaseRef = useRef(0)
-  const cloudOffsetsRef = useRef(CLOUDS.map(() => 0))
-  const shieldEndRef = useRef(0)
-  const magnetEndRef = useRef(0)
-  const noteTrailsRef = useRef<NoteTrail[]>([])
-  const speedLinesRef = useRef<SpeedLine[]>([])
-  const nextTrailIdRef = useRef(0)
-  const milestonesHitRef = useRef(new Set<number>())
-  const nearMissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const groundScrollRef = useRef(0)
+  // ─── Refs ─────────────────────────────────────────────────
+  const R = useRef({
+    score: 0, charY: VH / 2, vel: 0, pipes: [] as Pipe[], coins: [] as Coin[],
+    pups: [] as PowerUp[], winds: [] as WindZone[], started: false, finished: false,
+    elapsed: 0, lastFrame: null as number | null, sinceLastPipe: 0, nextId: 0,
+    multiLeft: 0, wingPh: 0, cloudOff: CLOUDS.map(() => 0), mtOff: MOUNTAINS.map(() => 0),
+    shieldEnd: 0, magnetEnd: 0, notes: [] as NoteTrail[], slines: [] as SpeedLine[],
+    trailId: 0, msHit: new Set<number>(), nmTimer: null as ReturnType<typeof setTimeout> | null,
+    gndX: 0, hp: MAX_HP, streak: 0, invEnd: 0,
+    deathPx: [] as DeathPixel[], raf: null as number | null,
+  })
 
-  const flapAudioRef = useRef<HTMLAudioElement | null>(null)
-  const scoreAudioRef = useRef<HTMLAudioElement | null>(null)
-  const coinAudioRef = useRef<HTMLAudioElement | null>(null)
-  const crashAudioRef = useRef<HTMLAudioElement | null>(null)
-  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
-  const powerupAudioRef = useRef<HTMLAudioElement | null>(null)
-  const nearmissAudioRef = useRef<HTMLAudioElement | null>(null)
-  const milestoneAudioRef = useRef<HTMLAudioElement | null>(null)
-  const magnetAudioRef = useRef<HTMLAudioElement | null>(null)
+  // ─── Audio refs ───────────────────────────────────────────
+  const A = useRef({
+    flap: null as HTMLAudioElement | null, score: null as HTMLAudioElement | null,
+    coin: null as HTMLAudioElement | null, crash: null as HTMLAudioElement | null,
+    fever: null as HTMLAudioElement | null, pu: null as HTMLAudioElement | null,
+    nm: null as HTMLAudioElement | null, ms: null as HTMLAudioElement | null,
+    mag: null as HTMLAudioElement | null, life: null as HTMLAudioElement | null,
+    streak: null as HTMLAudioElement | null, wind: null as HTMLAudioElement | null,
+    golden: null as HTMLAudioElement | null,
+  })
 
-  const playSfx = useCallback((source: HTMLAudioElement | null, volume: number, playbackRate = 1) => {
-    if (source === null) return
-    source.currentTime = 0
-    source.volume = volume
-    source.playbackRate = playbackRate
-    void source.play().catch(() => {})
+  const sfx = useCallback((s: HTMLAudioElement | null, vol: number, rate = 1) => {
+    if (!s) return; s.currentTime = 0; s.volume = vol; s.playbackRate = rate; void s.play().catch(() => {})
   }, [])
 
-  const finishRound = useCallback(() => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    effects.cleanup()
-    const finalDurationMs = elapsedMsRef.current > 0 ? Math.round(elapsedMsRef.current) : Math.round(DEFAULT_FRAME_MS)
-    onFinish({ score: scoreRef.current, durationMs: finalDurationMs })
-  }, [onFinish, effects])
+  const finish = useCallback(() => {
+    if (R.current.finished) return
+    R.current.finished = true; fx.cleanup()
+    onFinish({ score: R.current.score, durationMs: R.current.elapsed > 0 ? Math.round(R.current.elapsed) : Math.round(DEFAULT_FRAME_MS) })
+  }, [onFinish, fx])
 
-  const handleFlap = useCallback(() => {
-    if (finishedRef.current) return
-    if (!gameStartedRef.current) {
-      gameStartedRef.current = true
-      setGameStarted(true)
-    }
-    velocityRef.current = FLAP_VELOCITY
-    setVelocity(FLAP_VELOCITY)
-    playSfx(flapAudioRef.current, 0.45, 1.1)
-    effects.spawnParticles(3, CHARACTER_X - 10, characterYRef.current + 20)
+  const flap = useCallback(() => {
+    if (R.current.finished) return
+    if (!R.current.started) { R.current.started = true; setStarted(true) }
+    R.current.vel = FLAP_VELOCITY; setVel(FLAP_VELOCITY)
+    sfx(A.current.flap, 0.4, 1.1)
+    fx.spawnParticles(3, CHAR_X - 10, R.current.charY + 20)
+    const nn = ['♪', '♫', '♬', '♩']
+    const t: NoteTrail = { id: R.current.trailId++, x: CHAR_X + 15 + Math.random() * 10, y: R.current.charY - 5 + Math.random() * 10, opacity: 1, note: nn[Math.floor(Math.random() * nn.length)] }
+    R.current.notes = [...R.current.notes, t].slice(-8); setNotes([...R.current.notes])
+  }, [sfx, fx])
 
-    // Spawn note trail
-    const notes = ['♪', '♫', '♬', '♩']
-    const trail: NoteTrail = {
-      id: nextTrailIdRef.current++,
-      x: CHARACTER_X + 15 + Math.random() * 10,
-      y: characterYRef.current - 5 + Math.random() * 10,
-      opacity: 1,
-      note: notes[Math.floor(Math.random() * notes.length)],
-    }
-    noteTrailsRef.current = [...noteTrailsRef.current, trail].slice(-8)
-    setNoteTrails([...noteTrailsRef.current])
-  }, [playSfx, effects])
-
-  const handleTap = useCallback((event: React.PointerEvent | React.MouseEvent) => {
-    event.preventDefault()
-    handleFlap()
-  }, [handleFlap])
-
-  const rotationDeg = useMemo(() => clampNumber(velocity * 120, -30, 70), [velocity])
+  const tap = useCallback((e: React.PointerEvent | React.MouseEvent) => { e.preventDefault(); flap() }, [flap])
+  const rot = useMemo(() => clamp(vel * 120, -30, 70), [vel])
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') { event.preventDefault(); onExit(); return }
-      if (event.code === 'Space' || event.code === 'ArrowUp') { event.preventDefault(); handleFlap() }
+    const kd = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); flap() }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleFlap, onExit])
+    window.addEventListener('keydown', kd); return () => window.removeEventListener('keydown', kd)
+  }, [flap, onExit])
 
   useEffect(() => {
-    const audios: HTMLAudioElement[] = []
-    const load = (url: string) => { const a = new Audio(url); a.preload = 'auto'; audios.push(a); return a }
-    flapAudioRef.current = load(flapSfxUrl)
-    scoreAudioRef.current = load(scoreSfxUrl)
-    coinAudioRef.current = load(coinSfxUrl)
-    crashAudioRef.current = load(crashSfxUrl)
-    feverAudioRef.current = load(feverSfxUrl)
-    powerupAudioRef.current = load(powerupSfxUrl)
-    nearmissAudioRef.current = load(nearmissSfxUrl)
-    milestoneAudioRef.current = load(milestoneSfxUrl)
-    magnetAudioRef.current = load(magnetSfxUrl)
-    return () => {
-      effects.cleanup()
-      for (const a of audios) { a.pause(); a.currentTime = 0 }
-    }
+    const aa: HTMLAudioElement[] = []
+    const ld = (u: string) => { const a = new Audio(u); a.preload = 'auto'; aa.push(a); return a }
+    A.current.flap = ld(flapSfxUrl); A.current.score = ld(scoreSfxUrl)
+    A.current.coin = ld(coinSfxUrl); A.current.crash = ld(crashSfxUrl)
+    A.current.fever = ld(feverSfxUrl); A.current.pu = ld(powerupSfxUrl)
+    A.current.nm = ld(nearmissSfxUrl); A.current.ms = ld(milestoneSfxUrl)
+    A.current.mag = ld(magnetSfxUrl); A.current.life = ld(lifelostSfxUrl)
+    A.current.streak = ld(streakSfxUrl); A.current.wind = ld(windSfxUrl)
+    A.current.golden = ld(goldenSfxUrl)
+    return () => { fx.cleanup(); for (const a of aa) { a.pause(); a.currentTime = 0 } }
   }, [])
 
+  // ─── Game Loop ────────────────────────────────────────────
   useEffect(() => {
-    lastFrameAtRef.current = null
-
+    R.current.lastFrame = null
     const step = (now: number) => {
-      if (finishedRef.current) { animationFrameRef.current = null; return }
-      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
+      const r = R.current
+      if (r.finished) { r.raf = null; return }
+      if (r.lastFrame === null) r.lastFrame = now
+      const dt = Math.min(now - r.lastFrame, MAX_FRAME_DELTA_MS)
+      r.lastFrame = now
 
-      // Wing animation
-      wingPhaseRef.current = (wingPhaseRef.current + deltaMs * 0.008) % (Math.PI * 2)
-      setWingPhase(wingPhaseRef.current)
+      r.wingPh = (r.wingPh + dt * 0.008) % (Math.PI * 2); setWingPh(r.wingPh)
 
-      // Cloud scroll
-      const nextCloudOffsets = cloudOffsetsRef.current.map((offset, i) => {
-        const newX = offset + CLOUDS[i].speed * deltaMs
-        return newX > VIEWBOX_WIDTH + CLOUDS[i].w ? -CLOUDS[i].w : newX
-      })
-      cloudOffsetsRef.current = nextCloudOffsets
-      setCloudOffsets([...nextCloudOffsets])
+      // Cloud & mountain scroll
+      r.cloudOff = r.cloudOff.map((o, i) => { const n = o + CLOUDS[i].speed * dt; return n > VW + CLOUDS[i].w ? -CLOUDS[i].w : n })
+      setCloudOff([...r.cloudOff])
+      r.mtOff = r.mtOff.map((o, i) => { const n = o + MOUNTAINS[i].speed * dt; return n > VW + MOUNTAINS[i].w ? -MOUNTAINS[i].w : n })
+      setMtOff([...r.mtOff])
 
-      if (!gameStartedRef.current) {
-        animationFrameRef.current = window.requestAnimationFrame(step)
-        return
-      }
+      if (!r.started) { r.raf = requestAnimationFrame(step); return }
 
-      elapsedMsRef.current += deltaMs
-      setElapsedMs(elapsedMsRef.current)
-      effects.updateParticles()
+      r.elapsed += dt; setTick(r.elapsed); fx.updateParticles()
+      if (r.elapsed >= TIMEOUT_MS) { setOver(true); finish(); r.raf = null; return }
 
-      if (elapsedMsRef.current >= GAME_TIMEOUT_MS) {
-        setGameOver(true); finishRound(); animationFrameRef.current = null; return
+      // Death pixel update
+      if (r.deathPx.length > 0) {
+        r.deathPx = r.deathPx.map(px => ({ ...px, x: px.x + px.vx * dt, y: px.y + px.vy * dt, vy: px.vy + 0.001 * dt, life: px.life - dt * 0.002 })).filter(px => px.life > 0)
+        setDeathPx([...r.deathPx])
       }
 
       // Physics
-      const nextVelocity = Math.min(MAX_FALL_VELOCITY, velocityRef.current + GRAVITY * deltaMs)
-      velocityRef.current = nextVelocity
-      setVelocity(nextVelocity)
+      let nv = Math.min(MAX_FALL_VELOCITY, r.vel + GRAVITY * dt)
 
-      const nextY = characterYRef.current + nextVelocity * deltaMs
-      characterYRef.current = nextY
-      setCharacterY(nextY)
-
-      const currentPipeSpeed = Math.min(MAX_PIPE_SPEED, PIPE_SPEED + scoreRef.current * PIPE_SPEED_INCREASE_PER_SCORE)
-
-      // Ground scroll
-      groundScrollRef.current = (groundScrollRef.current + currentPipeSpeed * deltaMs) % 16
-      setGroundScrollX(groundScrollRef.current)
-
-      // Speed lines when fast
-      if (currentPipeSpeed > 0.2 && Math.random() < 0.15) {
-        const sl: SpeedLine = {
-          id: nextTrailIdRef.current++,
-          x: VIEWBOX_WIDTH,
-          y: 20 + Math.random() * (VIEWBOX_HEIGHT - GROUND_HEIGHT - 40),
-          length: 20 + Math.random() * 30,
-          opacity: 0.4 + Math.random() * 0.3,
-        }
-        speedLinesRef.current = [...speedLinesRef.current, sl].slice(-6)
-      }
-
-      // Update speed lines
-      const updatedSL = speedLinesRef.current
-        .map(sl => ({ ...sl, x: sl.x - currentPipeSpeed * deltaMs * 2, opacity: sl.opacity - 0.008 }))
-        .filter(sl => sl.opacity > 0 && sl.x + sl.length > 0)
-      speedLinesRef.current = updatedSL
-      setSpeedLines([...updatedSL])
-
-      // Update note trails (fade and drift)
-      const updatedTrails = noteTrailsRef.current
-        .map(nt => ({ ...nt, x: nt.x + 0.3, y: nt.y - 0.5, opacity: nt.opacity - 0.015 }))
-        .filter(nt => nt.opacity > 0)
-      noteTrailsRef.current = updatedTrails
-      setNoteTrails([...updatedTrails])
-
-      // Check power-up timers
-      if (shieldEndRef.current > 0 && now >= shieldEndRef.current) {
-        shieldEndRef.current = 0
-        setShieldActive(false)
-      }
-      if (magnetEndRef.current > 0 && now >= magnetEndRef.current) {
-        magnetEndRef.current = 0
-        setMagnetActive(false)
-      }
-
-      // Pipe spawning
-      timeSinceLastPipeRef.current += deltaMs
-      const nextPipes = [...pipesRef.current]
-      const nextCoins = [...coinsRef.current]
-      const nextPowerUps = [...powerUpsRef.current]
-
-      if (timeSinceLastPipeRef.current >= PIPE_SPAWN_INTERVAL_MS) {
-        timeSinceLastPipeRef.current -= PIPE_SPAWN_INTERVAL_MS
-        const newPipe = createPipe(nextPipeIdRef.current, scoreRef.current)
-        nextPipeIdRef.current += 1
-        nextPipes.push(newPipe)
-
-        if (Math.random() < COIN_SPAWN_CHANCE) {
-          const coinY = newPipe.gapTop + (newPipe.gapBottom - newPipe.gapTop) / 2
-          nextCoins.push({ id: nextPipeIdRef.current + 10000, x: newPipe.x + PIPE_WIDTH / 2, y: coinY, collected: false })
-        }
-
-        if (Math.random() < POWERUP_SPAWN_CHANCE) {
-          const types: PowerUpType[] = ['shield', 'magnet', 'star']
-          const puType = types[Math.floor(Math.random() * types.length)]
-          const puY = newPipe.gapTop + (newPipe.gapBottom - newPipe.gapTop) * (0.3 + Math.random() * 0.4)
-          nextPowerUps.push({ id: nextPipeIdRef.current + 20000, x: newPipe.x + PIPE_WIDTH + 30, y: puY, type: puType, collected: false })
+      // Wind effect
+      for (const w of r.winds) {
+        const wl = w.x, wr = w.x + WIND_ZONE_W
+        if (CHAR_X > wl && CHAR_X < wr && r.charY > w.y && r.charY < w.y + WIND_ZONE_H) {
+          nv += WIND_FORCE * w.direction * dt
         }
       }
 
-      // Move pipes
-      const movedDistance = currentPipeSpeed * deltaMs
-      for (const pipe of nextPipes) {
-        pipe.x -= movedDistance
-        if (pipe.moving) {
-          pipe.movePhase += MOVING_PIPE_SPEED * deltaMs
-          pipe.moveOffset = Math.sin(pipe.movePhase) * MOVING_PIPE_RANGE
-        }
-      }
-      for (const coin of nextCoins) coin.x -= movedDistance
-      for (const pu of nextPowerUps) pu.x -= movedDistance
+      r.vel = nv; setVel(nv)
+      const ny = r.charY + nv * dt; r.charY = ny; setCharY(ny)
+      const pipeSpd = Math.min(MAX_PIPE_SPEED, PIPE_SPEED_BASE + r.score * PIPE_SPEED_INC)
 
-      // Magnet effect: attract coins
-      if (magnetEndRef.current > 0) {
-        for (const coin of nextCoins) {
-          if (coin.collected) continue
-          const dx = CHARACTER_X - coin.x
-          const dy = characterYRef.current - coin.y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < MAGNET_RANGE && dist > 5) {
-            const pull = 0.12 * deltaMs / dist
-            coin.x += dx * pull
-            coin.y += dy * pull
+      r.gndX = (r.gndX + pipeSpd * dt) % 16; setGndX(r.gndX)
+
+      // Speed lines
+      if (pipeSpd > 0.19 && Math.random() < 0.15) {
+        r.slines = [...r.slines, { id: r.trailId++, x: VW, y: 20 + Math.random() * (VH - GROUND_H - 40), length: 20 + Math.random() * 30, opacity: 0.35 + Math.random() * 0.3 }].slice(-6)
+      }
+      r.slines = r.slines.map(s => ({ ...s, x: s.x - pipeSpd * dt * 2, opacity: s.opacity - 0.008 })).filter(s => s.opacity > 0 && s.x + s.length > 0)
+      setSlines([...r.slines])
+
+      // Note trails
+      r.notes = r.notes.map(n => ({ ...n, x: n.x + 0.3, y: n.y - 0.5, opacity: n.opacity - 0.015 })).filter(n => n.opacity > 0)
+      setNotes([...r.notes])
+
+      // Power-up timers
+      if (r.shieldEnd > 0 && now >= r.shieldEnd) { r.shieldEnd = 0; setShieldOn(false) }
+      if (r.magnetEnd > 0 && now >= r.magnetEnd) { r.magnetEnd = 0; setMagnetOn(false) }
+
+      // Invincibility timer
+      if (r.invEnd > 0 && now >= r.invEnd) { r.invEnd = 0; setInvincible(false) }
+
+      // Spawning
+      r.sinceLastPipe += dt
+      const np = [...r.pipes], nc = [...r.coins], npu = [...r.pups], nw = [...r.winds]
+
+      if (r.sinceLastPipe >= PIPE_INTERVAL_MS) {
+        r.sinceLastPipe -= PIPE_INTERVAL_MS
+        const pipe = mkPipe(r.nextId, r.score); r.nextId++; np.push(pipe)
+        if (Math.random() < COIN_CHANCE) {
+          const cy = pipe.gapTop + (pipe.gapBottom - pipe.gapTop) / 2
+          nc.push({ id: r.nextId + 10000, x: pipe.x + PIPE_W / 2, y: cy, collected: false })
+          // Extra coins in arc pattern every 3rd pipe
+          if (r.nextId % 3 === 0) {
+            const arcN = 3
+            for (let ai = 1; ai <= arcN; ai++) {
+              nc.push({ id: r.nextId + 10000 + ai, x: pipe.x + PIPE_W / 2 + ai * 18, y: cy - Math.sin(ai / arcN * Math.PI) * 25, collected: false })
+            }
           }
+        }
+        if (Math.random() < PU_CHANCE) {
+          const types: PUType[] = ['shield', 'magnet', 'star']
+          npu.push({ id: r.nextId + 20000, x: pipe.x + PIPE_W + 30, y: pipe.gapTop + (pipe.gapBottom - pipe.gapTop) * (0.3 + Math.random() * 0.4), type: types[Math.floor(Math.random() * types.length)], collected: false })
+        }
+        // Wind zone
+        if (r.score >= WIND_START && Math.random() < WIND_CHANCE) {
+          nw.push({ id: r.nextId + 30000, x: pipe.x + PIPE_W + 40, y: PIPE_MIN_TOP + Math.random() * (VH - GROUND_H - PIPE_MIN_TOP * 2 - WIND_ZONE_H), direction: Math.random() < 0.5 ? 1 : -1 })
+          sfx(A.current.wind, 0.3, 1)
+        }
+      }
+
+      // Move
+      const md = pipeSpd * dt
+      for (const p of np) { p.x -= md; if (p.moving) { p.movePhase += MOVING_SPEED * dt; p.moveOffset = Math.sin(p.movePhase) * MOVING_RANGE } }
+      for (const c of nc) c.x -= md
+      for (const pu of npu) pu.x -= md
+      for (const w of nw) w.x -= md
+
+      // Magnet
+      if (r.magnetEnd > 0) {
+        for (const c of nc) {
+          if (c.collected) continue
+          const dx = CHAR_X - c.x, dy = r.charY - c.y, d = Math.sqrt(dx * dx + dy * dy)
+          if (d < MAGNET_RANGE && d > 5) { const pull = 0.12 * dt / d; c.x += dx * pull; c.y += dy * pull }
         }
       }
 
       // Score pipes
-      let nextScore = scoreRef.current
-      for (const pipe of nextPipes) {
-        if (!pipe.scored && pipe.x + PIPE_WIDTH < CHARACTER_X) {
-          pipe.scored = true
+      let ns = r.score, nStreak = r.streak
+      for (const p of np) {
+        if (!p.scored && p.x + PIPE_W < CHAR_X) {
+          p.scored = true
+          nStreak++
 
-          // Near-miss check
-          if (!pipe.nearMissAwarded && checkNearMiss(characterYRef.current, pipe)) {
-            pipe.nearMissAwarded = true
-            nextScore += NEAR_MISS_BONUS
-            playSfx(nearmissAudioRef.current, 0.5, 1.2)
-            effects.showScorePopup(NEAR_MISS_BONUS, CHARACTER_X, characterYRef.current - 30, '#22d3ee')
-            setNearMissShow(true)
-            if (nearMissTimerRef.current) clearTimeout(nearMissTimerRef.current)
-            nearMissTimerRef.current = setTimeout(() => setNearMissShow(false), 800)
+          // Near-miss
+          if (!p.nearMissAwarded && nearMiss(r.charY, p)) {
+            p.nearMissAwarded = true; ns += NM_BONUS
+            sfx(A.current.nm, 0.5, 1.2)
+            fx.showScorePopup(NM_BONUS, CHAR_X, r.charY - 30, '#22d3ee')
+            setNmShow(true)
+            if (r.nmTimer) clearTimeout(r.nmTimer)
+            r.nmTimer = setTimeout(() => setNmShow(false), 800)
           }
 
-          if (multiplierPipesLeftRef.current > 0) {
-            multiplierPipesLeftRef.current -= 1
-            nextScore += MULTIPLIER_VALUE
-            if (multiplierPipesLeftRef.current <= 0) setIsMultiplierActive(false)
-          } else {
-            nextScore += 1
+          // Golden bonus
+          if (p.golden) {
+            ns += GOLDEN_BONUS
+            sfx(A.current.golden, 0.55, 1)
+            fx.showScorePopup(GOLDEN_BONUS, CHAR_X + 20, r.charY - 15, '#fbbf24')
+            fx.triggerFlash('rgba(251,191,36,.25)', 150)
           }
 
-          if (nextScore > 0 && nextScore % MULTIPLIER_TRIGGER_INTERVAL === 0 && multiplierPipesLeftRef.current <= 0) {
-            multiplierPipesLeftRef.current = MULTIPLIER_DURATION
-            setIsMultiplierActive(true)
-            effects.triggerFlash('rgba(251,191,36,0.35)', 100)
-            playSfx(feverAudioRef.current, 0.55, 1)
+          // Multiplier
+          if (r.multiLeft > 0) { r.multiLeft--; ns += MULTI_VALUE; if (r.multiLeft <= 0) setMultiActive(false) }
+          else { ns += 1 }
+
+          if (ns > 0 && ns % MULTI_TRIGGER === 0 && r.multiLeft <= 0) {
+            r.multiLeft = MULTI_DURATION; setMultiActive(true)
+            fx.triggerFlash('rgba(251,191,36,.35)', 100); sfx(A.current.fever, 0.55, 1)
           }
 
-          playSfx(scoreAudioRef.current, 0.45, 1 + nextScore * 0.012)
-          const scoreDisplay = multiplierPipesLeftRef.current > 0 ? MULTIPLIER_VALUE : 1
-          effects.comboHitBurst(CHARACTER_X + 25, characterYRef.current - 25, nextScore, scoreDisplay)
+          sfx(A.current.score, 0.4, 1 + ns * 0.01)
+          fx.comboHitBurst(CHAR_X + 25, r.charY - 25, ns, r.multiLeft > 0 ? MULTI_VALUE : 1)
+
+          // Streak sound
+          const sl = streakLabel(nStreak)
+          if (sl && !streakLabel(nStreak - 1)) {
+            sfx(A.current.streak, 0.5, 1 + nStreak * 0.01)
+            fx.triggerFlash('rgba(249,115,22,.2)', 120)
+          }
         }
       }
 
       // Coin collection
-      const charTop = characterYRef.current - CHARACTER_SIZE / 2 + CHARACTER_HITBOX_SHRINK
-      const charBottom = characterYRef.current + CHARACTER_SIZE / 2 - CHARACTER_HITBOX_SHRINK
-      const charLeft = CHARACTER_X - CHARACTER_SIZE / 2 + CHARACTER_HITBOX_SHRINK
-      const charRight = CHARACTER_X + CHARACTER_SIZE / 2 - CHARACTER_HITBOX_SHRINK
-      for (const coin of nextCoins) {
-        if (coin.collected) continue
-        if (coin.x + COIN_RADIUS > charLeft && coin.x - COIN_RADIUS < charRight &&
-            coin.y + COIN_RADIUS > charTop && coin.y - COIN_RADIUS < charBottom) {
-          coin.collected = true
-          nextScore += COIN_SCORE
-          playSfx(coinAudioRef.current, 0.5, 1.3)
-          effects.showScorePopup(COIN_SCORE, CHARACTER_X + 15, characterYRef.current - 20, '#fbbf24')
-          effects.spawnParticles(4, coin.x, coin.y)
+      const ct = r.charY - CHAR_SIZE / 2 + HITBOX_SHRINK, cb = r.charY + CHAR_SIZE / 2 - HITBOX_SHRINK
+      const cl = CHAR_X - CHAR_SIZE / 2 + HITBOX_SHRINK, cr = CHAR_X + CHAR_SIZE / 2 - HITBOX_SHRINK
+      for (const c of nc) {
+        if (c.collected) continue
+        if (c.x + COIN_R > cl && c.x - COIN_R < cr && c.y + COIN_R > ct && c.y - COIN_R < cb) {
+          c.collected = true; ns += COIN_SCORE
+          sfx(A.current.coin, 0.5, 1.3)
+          fx.showScorePopup(COIN_SCORE, CHAR_X + 15, r.charY - 20, '#fbbf24')
+          fx.spawnParticles(4, c.x, c.y)
         }
       }
 
       // Power-up collection
-      for (const pu of nextPowerUps) {
+      for (const pu of npu) {
         if (pu.collected) continue
-        if (pu.x + POWERUP_SIZE > charLeft && pu.x - POWERUP_SIZE < charRight &&
-            pu.y + POWERUP_SIZE > charTop && pu.y - POWERUP_SIZE < charBottom) {
-          pu.collected = true
-          playSfx(powerupAudioRef.current, 0.55, 1)
-          effects.triggerFlash(POWERUP_COLORS[pu.type] + '40', 150)
-          effects.spawnParticles(6, pu.x, pu.y)
-          if (pu.type === 'shield') {
-            shieldEndRef.current = now + SHIELD_DURATION_MS
-            setShieldActive(true)
-          } else if (pu.type === 'magnet') {
-            magnetEndRef.current = now + MAGNET_DURATION_MS
-            setMagnetActive(true)
-            playSfx(magnetAudioRef.current, 0.4, 1)
+        if (pu.x + PU_SIZE > cl && pu.x - PU_SIZE < cr && pu.y + PU_SIZE > ct && pu.y - PU_SIZE < cb) {
+          pu.collected = true; sfx(A.current.pu, 0.5, 1)
+          fx.triggerFlash(PU_COL[pu.type] + '40', 150); fx.spawnParticles(6, pu.x, pu.y)
+          if (pu.type === 'shield') { r.shieldEnd = now + SHIELD_DUR; setShieldOn(true) }
+          else if (pu.type === 'magnet') { r.magnetEnd = now + MAGNET_DUR; setMagnetOn(true); sfx(A.current.mag, 0.4, 1) }
+          else { ns += STAR_PU_SCORE; fx.showScorePopup(STAR_PU_SCORE, pu.x, pu.y - 15, '#fbbf24') }
+        }
+      }
+
+      // Milestones
+      for (const m of MILESTONES) {
+        if (ns >= m && !r.msHit.has(m)) {
+          r.msHit.add(m); sfx(A.current.ms, 0.6, 1)
+          fx.triggerFlash('rgba(251,191,36,.3)', 200); fx.triggerShake(8)
+          setMsTxt(`${m} SCORE!`); setTimeout(() => setMsTxt(null), 1200)
+        }
+      }
+
+      // Filter
+      r.pipes = np.filter(p => p.x + PIPE_W > -10); setPipes([...r.pipes])
+      r.coins = nc.filter(c => !c.collected && c.x + COIN_R > -10); setCoins([...r.coins])
+      r.pups = npu.filter(p => !p.collected && p.x + PU_SIZE > -10); setPups([...r.pups])
+      r.winds = nw.filter(w => w.x + WIND_ZONE_W > -10); setWinds([...r.winds])
+
+      if (ns !== r.score) { r.score = ns; setScore(ns) }
+      if (nStreak !== r.streak) { r.streak = nStreak; setStreak(nStreak) }
+
+      // Collision
+      if (hitTest(ny, r.pipes) && r.invEnd <= 0) {
+        if (r.shieldEnd > 0) {
+          r.shieldEnd = 0; setShieldOn(false)
+          fx.triggerFlash('rgba(59,130,246,.5)', 200); fx.triggerShake(6)
+          sfx(A.current.pu, 0.5, 0.8)
+          r.vel = FLAP_VELOCITY * 0.7; setVel(FLAP_VELOCITY * 0.7)
+        } else {
+          r.hp--; setHp(r.hp)
+          nStreak = 0; r.streak = 0; setStreak(0)
+
+          if (r.hp <= 0) {
+            // Death - spawn pixel explosion
+            const colors = ['#ef4444', '#f97316', '#fbbf24', '#22c55e', '#3b82f6', '#a855f7']
+            const dpx: DeathPixel[] = Array.from({ length: 16 }, (_, i) => ({
+              id: i, x: CHAR_X, y: ny, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
+              color: colors[i % colors.length], size: 3 + Math.random() * 4, life: 1,
+            }))
+            r.deathPx = dpx; setDeathPx(dpx)
+            setOver(true); sfx(A.current.crash, 0.65, 0.95)
+            fx.triggerShake(16); fx.triggerFlash('rgba(239,68,68,.5)')
+            finish(); r.raf = null; return
           } else {
-            nextScore += STAR_POWERUP_SCORE
-            effects.showScorePopup(STAR_POWERUP_SCORE, pu.x, pu.y - 15, '#fbbf24')
+            // Damage but alive
+            sfx(A.current.life, 0.55, 1)
+            fx.triggerShake(10); setDmgFlash(true)
+            setTimeout(() => setDmgFlash(false), 300)
+            r.invEnd = now + INVINCIBLE_MS; setInvincible(true)
+            r.vel = FLAP_VELOCITY * 0.8; setVel(FLAP_VELOCITY * 0.8)
           }
         }
       }
 
-      // Milestone check
-      for (const ms of MILESTONES) {
-        if (nextScore >= ms && !milestonesHitRef.current.has(ms)) {
-          milestonesHitRef.current.add(ms)
-          playSfx(milestoneAudioRef.current, 0.6, 1)
-          effects.triggerFlash('rgba(251,191,36,0.3)', 200)
-          effects.triggerShake(8)
-          setMilestoneText(`${ms} SCORE!`)
-          setTimeout(() => setMilestoneText(null), 1200)
-        }
-      }
-
-      // Filter offscreen
-      const visiblePipes = nextPipes.filter(p => p.x + PIPE_WIDTH > -10)
-      pipesRef.current = visiblePipes
-      setPipes([...visiblePipes])
-
-      const visibleCoins = nextCoins.filter(c => !c.collected && c.x + COIN_RADIUS > -10)
-      coinsRef.current = visibleCoins
-      setCoins([...visibleCoins])
-
-      const visiblePU = nextPowerUps.filter(p => !p.collected && p.x + POWERUP_SIZE > -10)
-      powerUpsRef.current = visiblePU
-      setPowerUps([...visiblePU])
-
-      if (nextScore !== scoreRef.current) {
-        scoreRef.current = nextScore
-        setScore(nextScore)
-      }
-
-      // Collision
-      if (checkCollision(nextY, visiblePipes)) {
-        if (shieldEndRef.current > 0) {
-          // Shield absorbs hit
-          shieldEndRef.current = 0
-          setShieldActive(false)
-          effects.triggerFlash('rgba(59,130,246,0.5)', 200)
-          effects.triggerShake(6)
-          playSfx(powerupAudioRef.current, 0.5, 0.8)
-          // Bounce character away from danger
-          velocityRef.current = FLAP_VELOCITY * 0.7
-          setVelocity(FLAP_VELOCITY * 0.7)
-        } else {
-          setGameOver(true)
-          playSfx(crashAudioRef.current, 0.65, 0.95)
-          effects.triggerShake(14)
-          effects.triggerFlash('rgba(239,68,68,0.5)')
-          finishRound()
-          animationFrameRef.current = null
-          return
-        }
-      }
-
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      r.raf = requestAnimationFrame(step)
     }
-
-    animationFrameRef.current = window.requestAnimationFrame(step)
+    R.current.raf = requestAnimationFrame(step)
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
-      if (nearMissTimerRef.current) clearTimeout(nearMissTimerRef.current)
+      if (R.current.raf !== null) { cancelAnimationFrame(R.current.raf); R.current.raf = null }
+      R.current.lastFrame = null
+      if (R.current.nmTimer) clearTimeout(R.current.nmTimer)
     }
-  }, [finishRound, playSfx, effects])
+  }, [finish, sfx, fx])
 
-  const displayedBestScore = Math.max(bestScore, score)
-  const comboLabel = getComboLabel(score)
-  const comboColor = getComboColor(score)
-  const skyColors = getSkyColors(score)
-  const groundColors = getGroundColors(score)
-  const isNight = score >= NIGHT_SCORE
-  const wingScale = 0.7 + Math.sin(wingPhase) * 0.3
+  const bestDisp = Math.max(bestScore, score)
+  const combo = getComboLabel(score)
+  const comboC = getComboColor(score)
+  const sky = skyCol(score)
+  const gnd = groundCol(score)
+  const mt = mtCol(score)
+  const isNight = score >= NIGHT_AT
+  const ws = 0.7 + Math.sin(wingPh) * 0.3
+  const sl = streakLabel(streak)
 
   return (
-    <section className="mini-game-panel flappy-singer-panel" aria-label="flappy-singer-game" style={effects.getShakeStyle()}>
-      <style>{GAME_EFFECTS_CSS}{FLAPPY_CSS}</style>
+    <section className="mini-game-panel fs-panel" aria-label="flappy-singer-game" style={fx.getShakeStyle()}>
+      <style>{GAME_EFFECTS_CSS}{CSS}</style>
 
-      <div className="flappy-singer-board" onPointerDown={handleTap} role="presentation">
-        <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-        <ParticleRenderer particles={effects.particles} />
-        <ScorePopupRenderer popups={effects.scorePopups} />
+      <div className="fs-board" onPointerDown={tap} role="presentation">
+        <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
+        <ParticleRenderer particles={fx.particles} />
+        <ScorePopupRenderer popups={fx.scorePopups} />
 
-        {isMultiplierActive && <div className="flappy-singer-fever-border" />}
-        {shieldActive && <div className="flappy-singer-shield-border" />}
-        {nearMissShow && <div className="flappy-singer-nearmiss">CLOSE!</div>}
-        {milestoneText && (
-          <div className="flappy-singer-milestone-flash">
-            <span className="flappy-singer-milestone-text">{milestoneText}</span>
-          </div>
-        )}
+        {/* CRT scanlines + vignette */}
+        <div className="fs-scanline" />
+        <div className="fs-vignette" />
 
-        <svg
-          className="flappy-singer-svg"
-          viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-          preserveAspectRatio="xMidYMid slice"
-          aria-label="flappy-singer-stage"
-        >
+        {multiActive && <div className="fs-fever" />}
+        {shieldOn && <div className="fs-shield-border" />}
+        {nmShow && <div className="fs-nm">CLOSE!</div>}
+        {dmgFlash && <div className="fs-dmg-flash" />}
+        {msTxt && <div className="fs-milestone"><span className="fs-ms-txt">{msTxt}</span></div>}
+
+        <svg className="fs-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid slice" aria-label="flappy-singer-stage">
           <defs>
             <linearGradient id="fs-sky" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={skyColors.top} />
-              <stop offset="100%" stopColor={skyColors.bottom} />
+              <stop offset="0%" stopColor={sky.t} /><stop offset="100%" stopColor={sky.b} />
             </linearGradient>
-            <linearGradient id="fs-ground" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={groundColors.top} />
-              <stop offset="100%" stopColor={groundColors.bottom} />
+            <linearGradient id="fs-gnd" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={gnd.t} /><stop offset="100%" stopColor={gnd.b} />
             </linearGradient>
-            <radialGradient id="fs-coin-glow">
-              <stop offset="0%" stopColor="#fde68a" />
-              <stop offset="100%" stopColor="#fbbf24" />
-            </radialGradient>
-            <filter id="fs-glow">
-              <feGaussianBlur stdDeviation="2" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
+            <radialGradient id="fs-cg"><stop offset="0%" stopColor="#fde68a" /><stop offset="100%" stopColor="#fbbf24" /></radialGradient>
+            <filter id="fs-gl"><feGaussianBlur stdDeviation="2" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
           </defs>
 
-          {/* Sky */}
-          <rect x="0" y="0" width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT} fill="url(#fs-sky)" />
+          <rect x="0" y="0" width={VW} height={VH} fill="url(#fs-sky)" />
 
-          {/* Stars (night) */}
-          {isNight && STARS.map((star, i) => (
-            <circle
-              key={`star-${i}`}
-              cx={star.x} cy={star.y} r={star.r}
-              fill="#fde68a" opacity="0.7"
-              style={{ animation: `flappy-star-twinkle ${star.twinkleSpeed}s ease-in-out infinite`, animationDelay: `${i * 0.15}s` }}
-            />
+          {/* Stars (night) - pixel squares */}
+          {isNight && STARS.map((st, i) => (
+            <rect key={`st-${i}`} x={st.x} y={st.y} width={st.s} height={st.s} fill="#fde68a" opacity="0.7"
+              style={{ animation: `fs-twinkle ${1.5 + (i % 4) * 0.5}s ease-in-out infinite`, animationDelay: `${i * 0.15}s` }}
+              shapeRendering="crispEdges" />
           ))}
 
-          {/* Clouds */}
-          {CLOUDS.map((cloud, i) => {
-            const cx = ((cloud.x + cloudOffsets[i]) % (VIEWBOX_WIDTH + cloud.w * 2)) - cloud.w
+          {/* Parallax mountains */}
+          {MOUNTAINS.map((m, i) => {
+            const mx = ((m.x + mtOff[i]) % (VW + m.w * 2)) - m.w
+            const baseY = VH - GROUND_H
             return (
-              <g key={`cloud-${i}`} opacity={isNight ? 0.15 : 0.65} shapeRendering="crispEdges">
-                <rect x={cx - cloud.w / 2} y={cloud.y - cloud.h / 2} width={cloud.w} height={cloud.h} rx={4} fill="#fff" />
-                <rect x={cx - cloud.w * 0.35} y={cloud.y - cloud.h * 0.3} width={cloud.w * 0.3} height={cloud.h * 0.5} rx={2} fill="#fff" />
-                <rect x={cx + cloud.w * 0.1} y={cloud.y - cloud.h * 0.35} width={cloud.w * 0.35} height={cloud.h * 0.55} rx={2} fill="#fff" />
+              <polygon key={`mt-${i}`}
+                points={`${mx},${baseY} ${mx + m.w / 2},${baseY - m.h} ${mx + m.w},${baseY}`}
+                fill={mt[i < 3 ? 0 : 1]} opacity={i < 3 ? 0.3 : 0.2} shapeRendering="crispEdges" />
+            )
+          })}
+
+          {/* Clouds - pixel blocks */}
+          {CLOUDS.map((cl, i) => {
+            const cx = ((cl.x + cloudOff[i]) % (VW + cl.w * 2)) - cl.w
+            return (
+              <g key={`cl-${i}`} opacity={isNight ? 0.12 : 0.6} shapeRendering="crispEdges">
+                <rect x={cx - cl.w / 2} y={cl.y - cl.h / 2} width={cl.w} height={cl.h} fill="#fff" />
+                <rect x={cx - cl.w * 0.3} y={cl.y - cl.h * 0.6} width={cl.w * 0.4} height={cl.h * 0.5} fill="#fff" />
+                <rect x={cx + cl.w * 0.1} y={cl.y - cl.h * 0.55} width={cl.w * 0.35} height={cl.h * 0.45} fill="#fff" />
               </g>
             )
           })}
 
-          {/* Speed lines */}
-          {speedLines.map(sl => (
-            <line key={sl.id} x1={sl.x} y1={sl.y} x2={sl.x + sl.length} y2={sl.y}
-              stroke="#fff" strokeWidth="1.5" opacity={sl.opacity} />
-          ))}
-
-          {/* Note trails */}
-          {noteTrails.map(nt => (
-            <text key={nt.id} x={nt.x} y={nt.y} fontSize="12" fill="#fbbf24" opacity={nt.opacity}
-              style={{ filter: 'url(#fs-glow)' }}>{nt.note}</text>
-          ))}
-
-          {/* Pipes */}
-          {pipes.map(pipe => (
-            <PixelPipe key={pipe.id} pipe={pipe} score={score} viewHeight={VIEWBOX_HEIGHT} groundHeight={GROUND_HEIGHT} />
-          ))}
-
-          {/* Coins */}
-          {coins.map(coin => (
-            <g key={`coin-${coin.id}`} style={{ animation: 'flappy-coin-spin 1.2s linear infinite' }}>
-              <circle cx={coin.x} cy={coin.y} r={COIN_RADIUS + 4} fill="rgba(251,191,36,0.12)" />
-              <circle cx={coin.x} cy={coin.y} r={COIN_RADIUS} fill="url(#fs-coin-glow)" stroke="#ca8a04" strokeWidth="1.5" />
-              <rect x={coin.x - 2} y={coin.y - 3} width={3} height={3} fill="rgba(255,255,255,0.5)" />
-              <text x={coin.x} y={coin.y + 1} textAnchor="middle" dominantBaseline="central" fontSize="7" fontWeight="900" fill="#92400e" fontFamily="monospace">$</text>
-            </g>
-          ))}
-
-          {/* Power-ups */}
-          {powerUps.map(pu => (
-            <g key={`pu-${pu.id}`}>
-              <rect x={pu.x - POWERUP_SIZE / 2 - 2} y={pu.y - POWERUP_SIZE / 2 - 2}
-                width={POWERUP_SIZE + 4} height={POWERUP_SIZE + 4}
-                fill={POWERUP_COLORS[pu.type]} opacity="0.2" rx={3} />
-              <rect x={pu.x - POWERUP_SIZE / 2} y={pu.y - POWERUP_SIZE / 2}
-                width={POWERUP_SIZE} height={POWERUP_SIZE}
-                fill={POWERUP_COLORS[pu.type]} stroke="#fff" strokeWidth="1.5" rx={3}
-                shapeRendering="crispEdges" />
-              <text x={pu.x} y={pu.y + 1} textAnchor="middle" dominantBaseline="central"
-                fontSize="10" fontWeight="900" fill="#fff" fontFamily="monospace">
-                {POWERUP_ICONS[pu.type]}
+          {/* Wind zones */}
+          {winds.map(w => (
+            <g key={`w-${w.id}`} opacity="0.2" shapeRendering="crispEdges">
+              <rect x={w.x} y={w.y} width={WIND_ZONE_W} height={WIND_ZONE_H} fill={w.direction > 0 ? '#ef4444' : '#3b82f6'} rx={2} />
+              {Array.from({ length: 4 }, (_, i) => (
+                <rect key={i} x={w.x + 10 + i * 12} y={w.y + WIND_ZONE_H / 2 - 1 + w.direction * (i * 3)}
+                  width={8} height={2} fill="#fff" opacity="0.5" />
+              ))}
+              <text x={w.x + WIND_ZONE_W / 2} y={w.y + 12} textAnchor="middle" fontSize="8" fill="#fff" opacity="0.6" fontFamily="monospace">
+                {w.direction > 0 ? 'v' : '^'}
               </text>
             </g>
           ))}
 
-          {/* Ground - pixel art style with scrolling pattern */}
-          <rect x="0" y={VIEWBOX_HEIGHT - GROUND_HEIGHT} width={VIEWBOX_WIDTH} height={GROUND_HEIGHT} fill="url(#fs-ground)" shapeRendering="crispEdges" />
-          <line x1="0" y1={VIEWBOX_HEIGHT - GROUND_HEIGHT} x2={VIEWBOX_WIDTH} y2={VIEWBOX_HEIGHT - GROUND_HEIGHT} stroke={groundColors.line} strokeWidth="2" />
-          {/* Scrolling ground pixels */}
+          {/* Speed lines */}
+          {slines.map(s => (
+            <line key={s.id} x1={s.x} y1={s.y} x2={s.x + s.length} y2={s.y} stroke="#fff" strokeWidth="1.5" opacity={s.opacity} />
+          ))}
+
+          {/* Note trails */}
+          {notes.map(n => (
+            <text key={n.id} x={n.x} y={n.y} fontSize="12" fill="#fbbf24" opacity={n.opacity} style={{ filter: 'url(#fs-gl)' }}>{n.note}</text>
+          ))}
+
+          {/* Pipes */}
+          {pipes.map(p => <PPipe key={p.id} p={p} score={score} />)}
+
+          {/* Coins */}
+          {coins.map(c => (
+            <g key={`c-${c.id}`} style={{ animation: 'fs-coin 1.2s linear infinite' }}>
+              <circle cx={c.x} cy={c.y} r={COIN_R + 3} fill="rgba(251,191,36,.1)" />
+              <circle cx={c.x} cy={c.y} r={COIN_R} fill="url(#fs-cg)" stroke="#ca8a04" strokeWidth="1.5" />
+              <rect x={c.x - 2} y={c.y - 3} width={3} height={3} fill="rgba(255,255,255,.5)" shapeRendering="crispEdges" />
+              <text x={c.x} y={c.y + 1} textAnchor="middle" dominantBaseline="central" fontSize="7" fontWeight="900" fill="#92400e" fontFamily="monospace">$</text>
+            </g>
+          ))}
+
+          {/* Power-ups */}
+          {pups.map(pu => (
+            <g key={`pu-${pu.id}`}>
+              <rect x={pu.x - PU_SIZE / 2 - 2} y={pu.y - PU_SIZE / 2 - 2} width={PU_SIZE + 4} height={PU_SIZE + 4}
+                fill={PU_COL[pu.type]} opacity=".2" shapeRendering="crispEdges" />
+              <rect x={pu.x - PU_SIZE / 2} y={pu.y - PU_SIZE / 2} width={PU_SIZE} height={PU_SIZE}
+                fill={PU_COL[pu.type]} stroke="#fff" strokeWidth="1.5" shapeRendering="crispEdges" />
+              <text x={pu.x} y={pu.y + 1} textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="900" fill="#fff" fontFamily="monospace">
+                {PU_ICON[pu.type]}
+              </text>
+            </g>
+          ))}
+
+          {/* Ground */}
+          <rect x="0" y={VH - GROUND_H} width={VW} height={GROUND_H} fill="url(#fs-gnd)" shapeRendering="crispEdges" />
+          <line x1="0" y1={VH - GROUND_H} x2={VW} y2={VH - GROUND_H} stroke={gnd.l} strokeWidth="2" />
           {Array.from({ length: 24 }, (_, i) => {
-            const gx = ((i * 14 - groundScrollX) % (VIEWBOX_WIDTH + 14)) - 7
+            const gx = ((i * 14 - gndX) % (VW + 14)) - 7
             return (
               <g key={`gp-${i}`} shapeRendering="crispEdges">
-                <rect x={gx} y={VIEWBOX_HEIGHT - GROUND_HEIGHT - 2} width={6} height={4} fill={groundColors.top} opacity="0.6" />
-                <rect x={gx + 2} y={VIEWBOX_HEIGHT - GROUND_HEIGHT + 8} width={4} height={4} fill={groundColors.line} opacity="0.3" />
+                <rect x={gx} y={VH - GROUND_H - 2} width={6} height={4} fill={gnd.t} opacity=".6" />
+                <rect x={gx + 7} y={VH - GROUND_H + 6} width={4} height={4} fill={gnd.l} opacity=".25" />
+                <rect x={gx + 3} y={VH - GROUND_H + 14} width={3} height={3} fill={gnd.l} opacity=".15" />
               </g>
             )
           })}
 
+          {/* Death pixels */}
+          {deathPx.map(px => (
+            <rect key={`dp-${px.id}`} x={px.x} y={px.y} width={px.size} height={px.size}
+              fill={px.color} opacity={px.life} shapeRendering="crispEdges" />
+          ))}
+
           {/* Character */}
-          <g transform={`translate(${CHARACTER_X}, ${characterY}) rotate(${rotationDeg})`}>
-            {/* Shield glow */}
-            {shieldActive && (
-              <circle cx="0" cy="0" r={CHARACTER_SIZE / 2 + 6} fill="none" stroke="rgba(59,130,246,0.5)"
-                strokeWidth="2" strokeDasharray="4 3" opacity="0.7">
+          <g transform={`translate(${CHAR_X}, ${charY}) rotate(${rot})`}
+            opacity={invincible ? (Math.floor(R.current.elapsed / 80) % 2 === 0 ? 1 : 0.3) : 1}>
+
+            {shieldOn && (
+              <circle cx="0" cy="0" r={CHAR_SIZE / 2 + 6} fill="none" stroke="rgba(59,130,246,.5)" strokeWidth="2" strokeDasharray="4 3" opacity=".7">
                 <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="2s" repeatCount="indefinite" />
               </circle>
             )}
-
-            {/* Magnet aura */}
-            {magnetActive && (
-              <circle cx="0" cy="0" r={CHARACTER_SIZE / 2 + 10} fill="none" stroke="rgba(168,85,247,0.35)"
-                strokeWidth="1.5" strokeDasharray="3 5" opacity="0.6">
+            {magnetOn && (
+              <circle cx="0" cy="0" r={CHAR_SIZE / 2 + 10} fill="none" stroke="rgba(168,85,247,.35)" strokeWidth="1.5" strokeDasharray="3 5" opacity=".6">
                 <animateTransform attributeName="transform" type="rotate" from="360" to="0" dur="1.5s" repeatCount="indefinite" />
               </circle>
             )}
 
-            {/* Shadow */}
-            <ellipse cx="0" cy={CHARACTER_SIZE / 2 + 2} rx={CHARACTER_SIZE / 3} ry={3} fill="rgba(0,0,0,0.12)" />
+            <ellipse cx="0" cy={CHAR_SIZE / 2 + 2} rx={CHAR_SIZE / 3} ry={3} fill="rgba(0,0,0,.1)" />
 
-            {/* Wings - pixel style */}
-            <g transform={`translate(-${CHARACTER_SIZE / 2 - 3}, -3) scale(1, ${wingScale})`}>
-              <rect x="-10" y="-6" width="4" height="6" fill="rgba(255,255,255,0.8)" shapeRendering="crispEdges" />
-              <rect x="-6" y="-8" width="4" height="4" fill="rgba(255,255,255,0.6)" shapeRendering="crispEdges" />
+            {/* Pixel wings */}
+            <g transform={`translate(-${CHAR_SIZE / 2 - 3}, -3) scale(1, ${ws})`} shapeRendering="crispEdges">
+              <rect x="-10" y="-6" width="4" height="6" fill="rgba(255,255,255,.8)" />
+              <rect x="-6" y="-8" width="4" height="4" fill="rgba(255,255,255,.6)" />
+              <rect x="-14" y="-4" width="4" height="4" fill="rgba(255,255,255,.5)" />
             </g>
-            <g transform={`translate(${CHARACTER_SIZE / 2 - 3}, -3) scale(1, ${wingScale})`}>
-              <rect x="6" y="-6" width="4" height="6" fill="rgba(255,255,255,0.8)" shapeRendering="crispEdges" />
-              <rect x="2" y="-8" width="4" height="4" fill="rgba(255,255,255,0.6)" shapeRendering="crispEdges" />
+            <g transform={`translate(${CHAR_SIZE / 2 - 3}, -3) scale(1, ${ws})`} shapeRendering="crispEdges">
+              <rect x="6" y="-6" width="4" height="6" fill="rgba(255,255,255,.8)" />
+              <rect x="2" y="-8" width="4" height="4" fill="rgba(255,255,255,.6)" />
+              <rect x="10" y="-4" width="4" height="4" fill="rgba(255,255,255,.5)" />
             </g>
 
-            {/* Character image */}
-            <image
-              href={characterSprite}
-              x={-CHARACTER_SIZE / 2}
-              y={-CHARACTER_SIZE / 2}
-              width={CHARACTER_SIZE}
-              height={CHARACTER_SIZE}
-              preserveAspectRatio="xMidYMid meet"
-              style={{ imageRendering: 'pixelated' as any }}
-            />
+            <image href={sprite} x={-CHAR_SIZE / 2} y={-CHAR_SIZE / 2} width={CHAR_SIZE} height={CHAR_SIZE}
+              preserveAspectRatio="xMidYMid meet" style={{ imageRendering: 'pixelated' as any }} />
 
-            {/* Musical notes when flapping */}
-            {velocity < -0.2 && (
+            {vel < -0.2 && (
               <>
-                <text x="16" y="-14" fontSize="10" fill="#fbbf24" opacity="0.8" style={{ filter: 'url(#fs-glow)' }}>&#9834;</text>
-                <text x="-18" y="-10" fontSize="8" fill="#fb923c" opacity="0.6">&#9835;</text>
+                <text x="16" y="-14" fontSize="10" fill="#fbbf24" opacity=".8" style={{ filter: 'url(#fs-gl)' }}>&#9834;</text>
+                <text x="-18" y="-10" fontSize="8" fill="#fb923c" opacity=".6">&#9835;</text>
               </>
+            )}
+
+            {/* Streak fire trail */}
+            {streak >= 10 && (
+              <g opacity=".6">
+                <rect x="-6" y={CHAR_SIZE / 2} width="4" height="6" fill="#f97316" shapeRendering="crispEdges">
+                  <animate attributeName="opacity" values="1;0.4;1" dur="0.3s" repeatCount="indefinite" />
+                </rect>
+                <rect x="2" y={CHAR_SIZE / 2 + 2} width="4" height="4" fill="#ef4444" shapeRendering="crispEdges">
+                  <animate attributeName="opacity" values="0.5;1;0.5" dur="0.25s" repeatCount="indefinite" />
+                </rect>
+                <rect x="-2" y={CHAR_SIZE / 2 + 4} width="3" height="5" fill="#fbbf24" shapeRendering="crispEdges">
+                  <animate attributeName="opacity" values="0.8;0.3;0.8" dur="0.35s" repeatCount="indefinite" />
+                </rect>
+              </g>
             )}
           </g>
         </svg>
 
         {/* HUD */}
-        <div className="flappy-singer-hud">
-          <p className="flappy-singer-score">{score}</p>
-          <p className="flappy-singer-best">BEST {displayedBestScore}</p>
-          {isMultiplierActive && (
-            <p className="flappy-singer-multiplier">x{MULTIPLIER_VALUE} FEVER!</p>
-          )}
-          {comboLabel && (
-            <p className="ge-combo-label" style={{ fontSize: 'clamp(0.7rem, 3vw, 1rem)', color: comboColor, textAlign: 'center', margin: '2px 0', textShadow: '1px 1px 0 #1f2937', fontFamily: 'monospace' }}>
-              {comboLabel}
+        <div className="fs-hud">
+          <p className="fs-score">{score}</p>
+          <p className="fs-best">BEST {bestDisp}</p>
+          <div className="fs-hp">
+            {Array.from({ length: MAX_HP }, (_, i) => (
+              <span key={i} className={`fs-hp-heart ${i >= hp ? 'lost' : ''}`}>
+                {i < hp ? '\u2665' : '\u2661'}
+              </span>
+            ))}
+          </div>
+          {multiActive && <p className="fs-multi">x{MULTI_VALUE} FEVER!</p>}
+          {sl && <p className="fs-streak">{sl} x{streak}</p>}
+          {combo && (
+            <p className="ge-combo-label" style={{ fontSize: 'clamp(0.65rem,2.8vw,0.9rem)', color: comboC, textAlign: 'center', margin: '1px 0', textShadow: '1px 1px 0 #1f2937', fontFamily: 'monospace' }}>
+              {combo}
             </p>
           )}
-          {/* Power-up indicators */}
-          {(shieldActive || magnetActive) && (
-            <div className="flappy-singer-powerup-bar">
-              {shieldActive && (
-                <span className="flappy-singer-powerup-indicator" style={{ background: 'rgba(59,130,246,0.7)' }}>SHIELD</span>
-              )}
-              {magnetActive && (
-                <span className="flappy-singer-powerup-indicator" style={{ background: 'rgba(168,85,247,0.7)' }}>MAGNET</span>
-              )}
+          {(shieldOn || magnetOn) && (
+            <div className="fs-pu-bar">
+              {shieldOn && <span className="fs-pu-ind" style={{ background: 'rgba(59,130,246,.7)' }}>SHIELD</span>}
+              {magnetOn && <span className="fs-pu-ind" style={{ background: 'rgba(168,85,247,.7)' }}>MAGNET</span>}
             </div>
           )}
         </div>
 
-        {/* Start overlay */}
-        {!gameStarted && !gameOver && (
-          <div className="flappy-singer-start-overlay">
-            <p className="flappy-singer-start-text">TAP TO FLY!</p>
-            <p className="flappy-singer-start-sub">Space / Tap to Flap</p>
+        {!started && !over && (
+          <div className="fs-start">
+            <p className="fs-start-txt">TAP TO FLY!</p>
+            <p className="fs-start-sub">Space / Tap to Flap</p>
           </div>
         )}
 
-        {/* Game over overlay */}
-        {gameOver && (
-          <div className="flappy-singer-gameover-overlay">
-            <p className="flappy-singer-gameover-text">GAME OVER</p>
-            <p className="flappy-singer-gameover-score">Score: {score}</p>
+        {over && (
+          <div className="fs-gameover">
+            <p className="fs-go-txt">GAME OVER</p>
+            <p className="fs-go-score">Score: {score}</p>
           </div>
         )}
 
-        {/* Action buttons */}
-        <div className="flappy-singer-overlay-actions">
-          <button
-            className="flappy-singer-action-button"
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => { playSfx(scoreAudioRef.current, 0.5, 1); finishRound() }}
-          >
-            FINISH
-          </button>
-          <button
-            className="flappy-singer-action-button ghost"
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onExit}
-          >
-            EXIT
-          </button>
+        <div className="fs-btns">
+          <button className="fs-btn" type="button" onPointerDown={e => e.stopPropagation()}
+            onClick={() => { sfx(A.current.score, 0.5, 1); finish() }}>FINISH</button>
+          <button className="fs-btn ghost" type="button" onPointerDown={e => e.stopPropagation()}
+            onClick={onExit}>EXIT</button>
         </div>
       </div>
     </section>

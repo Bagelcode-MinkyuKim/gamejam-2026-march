@@ -12,58 +12,103 @@ import comboSfx from '../../../assets/sounds/treasure-dig-combo.mp3'
 import feverSfx from '../../../assets/sounds/treasure-dig-fever.mp3'
 import depthClearSfx from '../../../assets/sounds/treasure-dig-depth-clear.mp3'
 import hintSfx from '../../../assets/sounds/treasure-dig-hint.mp3'
+import shieldSfx from '../../../assets/sounds/treasure-dig-shield.mp3'
+import mapRevealSfx from '../../../assets/sounds/treasure-dig-map.mp3'
+import chainSfx from '../../../assets/sounds/treasure-dig-chain.mp3'
+import luckySfx from '../../../assets/sounds/treasure-dig-lucky.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
+// ─── Pixel Art Characters (inline SVG data) ────────────────
+const PIXEL_PICKAXE = '\u{26CF}\uFE0F'
+const PIXEL_GEM = '\u{1F48E}'
+const PIXEL_CROWN = '\u{1F451}'
+const PIXEL_BOMB = '\u{1F4A3}'
+const PIXEL_CLOCK = '\u{23F0}'
+const PIXEL_SHIELD = '\u{1F6E1}\uFE0F'
+const PIXEL_MAP = '\u{1F5FA}\uFE0F'
+const PIXEL_CHAIN = '\u{26A1}'
+const PIXEL_CLOVER = '\u{1F340}'
+
 // ─── Game Config ────────────────────────────────────────────
-const ROUND_DURATION_MS = 45000
+const ROUND_DURATION_MS = 50000
 const GRID_SIZE = 5
 const CELL_COUNT = GRID_SIZE * GRID_SIZE
 const BASE_TREASURE_COUNT = 3
 const BASE_BOMB_COUNT = 2
-const BASE_TREASURE_SCORE = 30
+const BASE_TREASURE_SCORE = 35
 const BOMB_PENALTY = 20
 const LOW_TIME_THRESHOLD_MS = 8000
-const DIG_FEEDBACK_DURATION_MS = 400
+const DIG_FEEDBACK_DURATION_MS = 500
 
 // ─── Gimmick constants ─────────────────────────────────────
 const GOLDEN_TREASURE_CHANCE = 0.12
-const GOLDEN_TREASURE_SCORE = 120
+const GOLDEN_TREASURE_SCORE = 150
 const COMBO_DIG_WINDOW_MS = 2500
 const COMBO_DIG_MULTIPLIER = 0.5
-const DEPTH_BONUS_PER_LEVEL = 15
-const TIME_BONUS_PER_CLEAR_MS = 4000
+const DEPTH_BONUS_PER_LEVEL = 20
+const TIME_BONUS_PER_CLEAR_MS = 4500
 const FEVER_THRESHOLD = 3
 const FEVER_DURATION_MS = 5000
 const FEVER_MULTIPLIER = 2.5
 
-// ─── New Feature: Hint System ──────────────────────────────
-const HINT_COOLDOWN_MS = 12000
-const HINT_FLASH_DURATION_MS = 1500
+// ─── Hint System ───────────────────────────────────────────
+const HINT_COOLDOWN_MS = 10000
+const HINT_FLASH_DURATION_MS = 1800
 
-// ─── New Feature: Shovel Power-up ──────────────────────────
-const SHOVEL_CHANCE_PER_DEPTH = 0.3
+// ─── Power-ups ─────────────────────────────────────────────
 const SHOVEL_CLEAR_COUNT = 3
-
-// ─── New Feature: X-Ray Power-up ───────────────────────────
-const XRAY_CHANCE_PER_DEPTH = 0.2
-const XRAY_DURATION_MS = 2000
-
-// ─── New Feature: Time Gem ─────────────────────────────────
-const TIME_GEM_CHANCE = 0.08
+const XRAY_DURATION_MS = 2500
+const TIME_GEM_CHANCE = 0.1
 const TIME_GEM_BONUS_MS = 5000
+
+// ─── New: Items ────────────────────────────────────────────
+const CHAIN_DIG_ADJACENT = 2
+const LUCKY_CHARM_DURATION_MS = 8000
+const LUCKY_CHARM_GOLDEN_BOOST = 0.3
 
 type CellContent = 'empty' | 'treasure' | 'bomb' | 'golden' | 'time-gem'
 type CellState = 'hidden' | 'revealed'
-type PowerUpType = 'shovel' | 'xray' | null
+type ItemType = 'shovel' | 'xray' | 'shield' | 'map' | 'chain' | 'lucky' | null
+
+const ITEM_POOL: { type: ItemType; weight: number; minDepth: number }[] = [
+  { type: 'shovel', weight: 25, minDepth: 1 },
+  { type: 'xray', weight: 20, minDepth: 2 },
+  { type: 'shield', weight: 20, minDepth: 1 },
+  { type: 'map', weight: 15, minDepth: 2 },
+  { type: 'chain', weight: 12, minDepth: 3 },
+  { type: 'lucky', weight: 8, minDepth: 4 },
+]
+
+function rollItem(depth: number): ItemType {
+  const eligible = ITEM_POOL.filter((i) => depth >= i.minDepth)
+  if (eligible.length === 0 || Math.random() > 0.45) return null
+  const totalWeight = eligible.reduce((s, i) => s + i.weight, 0)
+  let roll = Math.random() * totalWeight
+  for (const item of eligible) {
+    roll -= item.weight
+    if (roll <= 0) return item.type
+  }
+  return null
+}
+
+const ITEM_INFO: Record<string, { icon: string; label: string; color: string }> = {
+  shovel: { icon: '\u{26CF}\uFE0F', label: 'SHOVEL', color: '#a16207' },
+  xray: { icon: '\u{1F50D}', label: 'X-RAY', color: '#2563eb' },
+  shield: { icon: PIXEL_SHIELD, label: 'SHIELD', color: '#059669' },
+  map: { icon: PIXEL_MAP, label: 'MAP', color: '#7c3aed' },
+  chain: { icon: PIXEL_CHAIN, label: 'CHAIN', color: '#dc2626' },
+  lucky: { icon: PIXEL_CLOVER, label: 'LUCKY', color: '#16a34a' },
+}
 
 interface Cell {
   content: CellContent
   state: CellState
   adjacentTreasures: number
   hintFlashing: boolean
+  chainRevealing: boolean
 }
 
-function createBoard(depth: number): Cell[] {
+function createBoard(depth: number, goldenBoost = 0): Cell[] {
   const treasureCount = BASE_TREASURE_COUNT + Math.floor(depth / 2)
   const bombCount = BASE_BOMB_COUNT + Math.floor(depth / 3)
   const totalSpecial = Math.min(treasureCount + bombCount + 1, CELL_COUNT - 2)
@@ -75,6 +120,7 @@ function createBoard(depth: number): Cell[] {
     state: 'hidden' as CellState,
     adjacentTreasures: 0,
     hintFlashing: false,
+    chainRevealing: false,
   }))
 
   const indices = Array.from({ length: CELL_COUNT }, (_, i) => i)
@@ -87,7 +133,8 @@ function createBoard(depth: number): Cell[] {
 
   let placed = 0
   for (let i = 0; i < actualTreasures; i += 1) {
-    const isGolden = Math.random() < GOLDEN_TREASURE_CHANCE + depth * 0.015
+    const goldenChance = GOLDEN_TREASURE_CHANCE + depth * 0.015 + goldenBoost
+    const isGolden = Math.random() < goldenChance
     cells[indices[placed]].content = isGolden ? 'golden' : 'treasure'
     placed += 1
   }
@@ -95,7 +142,6 @@ function createBoard(depth: number): Cell[] {
     cells[indices[placed]].content = 'bomb'
     placed += 1
   }
-  // Time gem
   if (placed < CELL_COUNT && Math.random() < TIME_GEM_CHANCE + depth * 0.01) {
     cells[indices[placed]].content = 'time-gem'
     placed += 1
@@ -122,6 +168,24 @@ function createBoard(depth: number): Cell[] {
   return cells
 }
 
+function getAdjacents(idx: number): number[] {
+  const row = Math.floor(idx / GRID_SIZE)
+  const col = idx % GRID_SIZE
+  const result: number[] = []
+  for (let dr = -1; dr <= 1; dr += 1) {
+    for (let dc = -1; dc <= 1; dc += 1) {
+      if (dr === 0 && dc === 0) continue
+      const nr = row + dr
+      const nc = col + dc
+      if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
+        result.push(nr * GRID_SIZE + nc)
+      }
+    }
+  }
+  return result
+}
+
+// ─── Component ──────────────────────────────────────────────
 function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const effects = useGameEffects()
 
@@ -138,10 +202,13 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [lastBonusText, setLastBonusText] = useState('')
   const [hintCooldownMs, setHintCooldownMs] = useState(0)
   const [isXrayActive, setIsXrayActive] = useState(false)
-  const [pendingPowerUp, setPendingPowerUp] = useState<PowerUpType>(null)
+  const [pendingItem, setPendingItem] = useState<ItemType>(null)
   const [depthTransition, setDepthTransition] = useState(false)
-  const totalDigsRef = useRef(0)
-  const bombsHitRef = useRef(0)
+  const [hasShield, setHasShield] = useState(false)
+  const [isLuckyActive, setIsLuckyActive] = useState(false)
+  const [luckyMs, setLuckyMs] = useState(0)
+  const [hasChain, setHasChain] = useState(false)
+  const [shieldFlash, setShieldFlash] = useState(false)
 
   const scoreRef = useRef(0)
   const treasuresFoundRef = useRef(0)
@@ -162,12 +229,14 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const hintCooldownRef = useRef(0)
   const isXrayRef = useRef(false)
   const xrayTimerRef = useRef(0)
+  const hasShieldRef = useRef(false)
+  const isLuckyRef = useRef(false)
+  const luckyMsRef = useRef(0)
+  const hasChainRef = useRef(false)
+  const totalDigsRef = useRef(0)
+  const bombsHitRef = useRef(0)
 
-  // Audio refs
-  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({
-    dig: null, treasureFound: null, goldenFound: null, bomb: null,
-    combo: null, fever: null, depthClear: null, hint: null, gameOver: null,
-  })
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const clearTimeoutSafe = (timerRef: { current: number | null }) => {
     if (timerRef.current !== null) {
@@ -191,13 +260,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     bonusTextTimerRef.current = window.setTimeout(() => {
       bonusTextTimerRef.current = null
       setLastBonusText('')
-    }, 1400)
-  }, [])
-
-  const getCellXY = useCallback((cellIndex: number) => {
-    const col = cellIndex % GRID_SIZE
-    const row = Math.floor(cellIndex / GRID_SIZE)
-    return { x: col * 70 + 35, y: row * 70 + 220 }
+    }, 1600)
   }, [])
 
   const resetBoard = useCallback(() => {
@@ -205,7 +268,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     depthRef.current = nextDepth
     setDepth(nextDepth)
     setDepthTransition(true)
-    setTimeout(() => setDepthTransition(false), 600)
+    setTimeout(() => setDepthTransition(false), 700)
 
     remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_PER_CLEAR_MS)
 
@@ -213,19 +276,15 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     scoreRef.current += depthBonus
     setScore(scoreRef.current)
 
-    // Power-up roll
-    if (Math.random() < SHOVEL_CHANCE_PER_DEPTH) {
-      setPendingPowerUp('shovel')
-    } else if (Math.random() < XRAY_CHANCE_PER_DEPTH) {
-      setPendingPowerUp('xray')
-    }
+    const item = rollItem(nextDepth)
+    if (item) setPendingItem(item)
 
-    showBonusText(`DEPTH ${nextDepth}! +${depthBonus} +${(TIME_BONUS_PER_CLEAR_MS / 1000).toFixed(0)}s`)
+    showBonusText(`DEPTH ${nextDepth}! +${depthBonus}pts +${(TIME_BONUS_PER_CLEAR_MS / 1000).toFixed(0)}s`)
     playAudio('depthClear', 0.7)
+    effects.triggerFlash('rgba(251,191,36,0.35)')
 
-    effects.triggerFlash('rgba(251,191,36,0.3)')
-
-    const nextBoard = createBoard(nextDepth)
+    const goldenBoost = isLuckyRef.current ? LUCKY_CHARM_GOLDEN_BOOST : 0
+    const nextBoard = createBoard(nextDepth, goldenBoost)
     boardRef.current = nextBoard
     setBoard(nextBoard)
   }, [showBonusText, playAudio, effects])
@@ -235,32 +294,89 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     finishedRef.current = true
     clearTimeoutSafe(digFeedbackTimerRef)
     clearTimeoutSafe(bonusTextTimerRef)
-
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     playAudio('gameOver', 0.6)
-    onFinish({
-      score: scoreRef.current,
-      durationMs: elapsedMs,
-    })
+    onFinish({ score: scoreRef.current, durationMs: elapsedMs })
   }, [onFinish, playAudio])
 
+  // ─── Item Activation ─────────────────────────────────────
+  const activateItem = useCallback((item: ItemType) => {
+    if (!item || finishedRef.current) return
+    setPendingItem(null)
+
+    if (item === 'shovel') {
+      playAudio('dig', 0.6, 0.8)
+      const cur = boardRef.current
+      const empties: number[] = []
+      cur.forEach((c, i) => { if (c.state === 'hidden' && c.content === 'empty') empties.push(i) })
+      for (let i = empties.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const t = empties[i]; empties[i] = empties[j]; empties[j] = t
+      }
+      const toClear = empties.slice(0, SHOVEL_CLEAR_COUNT)
+      const next = cur.map((c, idx) => toClear.includes(idx) ? { ...c, state: 'revealed' as CellState } : c)
+      boardRef.current = next
+      setBoard(next)
+      showBonusText(`${PIXEL_PICKAXE} SHOVEL! ${toClear.length} dug!`)
+    } else if (item === 'xray') {
+      playAudio('hint', 0.6, 1.3)
+      isXrayRef.current = true
+      xrayTimerRef.current = XRAY_DURATION_MS
+      setIsXrayActive(true)
+      showBonusText(`\u{1F50D} X-RAY VISION!`)
+    } else if (item === 'shield') {
+      playAudio('shield', 0.7)
+      hasShieldRef.current = true
+      setHasShield(true)
+      showBonusText(`${PIXEL_SHIELD} SHIELD ON!`)
+    } else if (item === 'map') {
+      playAudio('mapReveal', 0.6)
+      const cur = boardRef.current
+      const hiddenTreasures: number[] = []
+      cur.forEach((c, i) => {
+        if (c.state === 'hidden' && (c.content === 'treasure' || c.content === 'golden')) hiddenTreasures.push(i)
+      })
+      if (hiddenTreasures.length > 0) {
+        const revealIdx = hiddenTreasures[Math.floor(Math.random() * hiddenTreasures.length)]
+        const next = cur.map((c, i) => i === revealIdx ? { ...c, hintFlashing: true } : c)
+        boardRef.current = next
+        setBoard(next)
+        setTimeout(() => {
+          const restored = boardRef.current.map((c) => ({ ...c, hintFlashing: false }))
+          boardRef.current = restored
+          setBoard(restored)
+        }, 3000)
+      }
+      showBonusText(`${PIXEL_MAP} TREASURE SPOTTED!`)
+    } else if (item === 'chain') {
+      playAudio('chain', 0.7)
+      hasChainRef.current = true
+      setHasChain(true)
+      showBonusText(`${PIXEL_CHAIN} CHAIN DIG!`)
+    } else if (item === 'lucky') {
+      playAudio('lucky', 0.7)
+      isLuckyRef.current = true
+      luckyMsRef.current = LUCKY_CHARM_DURATION_MS
+      setIsLuckyActive(true)
+      setLuckyMs(LUCKY_CHARM_DURATION_MS)
+      showBonusText(`${PIXEL_CLOVER} LUCKY CHARM!`)
+    }
+  }, [playAudio, showBonusText])
+
+  // ─── Hint ────────────────────────────────────────────────
   const activateHint = useCallback(() => {
     if (hintCooldownRef.current > 0 || finishedRef.current) return
-
     hintCooldownRef.current = HINT_COOLDOWN_MS
     setHintCooldownMs(HINT_COOLDOWN_MS)
     playAudio('hint', 0.5)
 
-    // Flash cells adjacent to hidden treasures
-    const currentBoard = boardRef.current
-    const hintedBoard = currentBoard.map((cell, idx) => {
-      if (cell.state === 'hidden' && cell.adjacentTreasures > 0) {
-        return { ...cell, hintFlashing: true }
-      }
+    const cur = boardRef.current
+    const hinted = cur.map((cell) => {
+      if (cell.state === 'hidden' && cell.adjacentTreasures > 0) return { ...cell, hintFlashing: true }
       return cell
     })
-    boardRef.current = hintedBoard
-    setBoard(hintedBoard)
+    boardRef.current = hinted
+    setBoard(hinted)
 
     setTimeout(() => {
       const restored = boardRef.current.map((c) => ({ ...c, hintFlashing: false }))
@@ -269,56 +385,18 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
     }, HINT_FLASH_DURATION_MS)
   }, [playAudio])
 
-  const activateShovel = useCallback(() => {
-    if (finishedRef.current) return
-    setPendingPowerUp(null)
-
-    const currentBoard = boardRef.current
-    const hiddenEmpties: number[] = []
-    currentBoard.forEach((cell, idx) => {
-      if (cell.state === 'hidden' && cell.content === 'empty') hiddenEmpties.push(idx)
-    })
-
-    // Shuffle and take SHOVEL_CLEAR_COUNT
-    for (let i = hiddenEmpties.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1))
-      const temp = hiddenEmpties[i]
-      hiddenEmpties[i] = hiddenEmpties[j]
-      hiddenEmpties[j] = temp
-    }
-    const toClear = hiddenEmpties.slice(0, SHOVEL_CLEAR_COUNT)
-
-    const nextBoard = currentBoard.map((c, idx) =>
-      toClear.includes(idx) ? { ...c, state: 'revealed' as CellState } : c,
-    )
-    boardRef.current = nextBoard
-    setBoard(nextBoard)
-    playAudio('dig', 0.6, 0.8)
-    showBonusText(`SHOVEL! ${toClear.length} cleared`)
-  }, [playAudio, showBonusText])
-
-  const activateXray = useCallback(() => {
-    if (finishedRef.current) return
-    setPendingPowerUp(null)
-    isXrayRef.current = true
-    xrayTimerRef.current = XRAY_DURATION_MS
-    setIsXrayActive(true)
-    playAudio('hint', 0.6, 1.3)
-    showBonusText('X-RAY VISION!')
-  }, [playAudio, showBonusText])
-
+  // ─── Cell Tap ────────────────────────────────────────────
   const handleCellTap = useCallback(
     (cellIndex: number) => {
       if (finishedRef.current) return
-
       const currentBoard = boardRef.current
       const cell = currentBoard[cellIndex]
       if (cell.state === 'revealed') return
 
       totalDigsRef.current += 1
 
-      const nextBoard = currentBoard.map((c, i) =>
-        i === cellIndex ? { ...c, state: 'revealed' as CellState, hintFlashing: false } : c,
+      let nextBoard = currentBoard.map((c, i) =>
+        i === cellIndex ? { ...c, state: 'revealed' as CellState, hintFlashing: false, chainRevealing: false } : c,
       )
       boardRef.current = nextBoard
       setBoard(nextBoard)
@@ -335,42 +413,68 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       const timeSinceLastDig = now - lastDigAtRef.current
       lastDigAtRef.current = now
 
-      // Combo tracking
       if (timeSinceLastDig < COMBO_DIG_WINDOW_MS) {
         comboRef.current += 1
       } else {
         comboRef.current = 1
       }
       setCombo(comboRef.current)
-      if (comboRef.current > maxComboRef.current) {
-        maxComboRef.current = comboRef.current
-      }
+      if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current
 
       const comboMult = 1 + (comboRef.current - 1) * COMBO_DIG_MULTIPLIER
       const feverMult = isFeverRef.current ? FEVER_MULTIPLIER : 1
-      const { x, y } = getCellXY(cellIndex)
+      const col = cellIndex % GRID_SIZE
+      const row = Math.floor(cellIndex / GRID_SIZE)
+      const px = col * 80 + 40
+      const py = row * 80 + 240
 
       const maybeCheckClear = (b: Cell[]) => {
-        const remaining = b.filter(
-          (c) => (c.content === 'treasure' || c.content === 'golden') && c.state === 'hidden',
-        ).length
-        if (remaining === 0) resetBoard()
+        const rem = b.filter((c) => (c.content === 'treasure' || c.content === 'golden') && c.state === 'hidden').length
+        if (rem === 0) resetBoard()
+      }
+
+      // Chain dig helper
+      const doChainDig = (b: Cell[]): Cell[] => {
+        if (!hasChainRef.current) return b
+        hasChainRef.current = false
+        setHasChain(false)
+        playAudio('chain', 0.5, 1.2)
+
+        const adjacents = getAdjacents(cellIndex)
+        const emptyAdj = adjacents.filter((i) => b[i].state === 'hidden' && b[i].content === 'empty')
+        for (let i = emptyAdj.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1))
+          const t = emptyAdj[i]; emptyAdj[i] = emptyAdj[j]; emptyAdj[j] = t
+        }
+        const toReveal = emptyAdj.slice(0, CHAIN_DIG_ADJACENT)
+        if (toReveal.length > 0) {
+          const chained = b.map((c, i) =>
+            toReveal.includes(i) ? { ...c, state: 'revealed' as CellState, chainRevealing: true } : c,
+          )
+          // Clear chain animation after delay
+          setTimeout(() => {
+            const cleared = boardRef.current.map((c) => ({ ...c, chainRevealing: false }))
+            boardRef.current = cleared
+            setBoard(cleared)
+          }, 600)
+          return chained
+        }
+        return b
       }
 
       if (cell.content === 'golden') {
         const goldenScore = Math.round(GOLDEN_TREASURE_SCORE * comboMult * feverMult)
         scoreRef.current += goldenScore
         setScore(scoreRef.current)
-        const nextFound = treasuresFoundRef.current + 1
-        treasuresFoundRef.current = nextFound
-        setTreasuresFound(nextFound)
+        treasuresFoundRef.current += 1
+        setTreasuresFound(treasuresFoundRef.current)
         consecutiveTreasuresRef.current += 1
         setLastDigKind('golden')
-        showBonusText(`GOLDEN! +${goldenScore}`)
+        showBonusText(`${PIXEL_CROWN} GOLDEN! +${goldenScore}`)
         playAudio('goldenFound', 0.8)
         if (comboRef.current > 2) playAudio('combo', 0.5, 1 + comboRef.current * 0.1)
-        effects.comboHitBurst(x, y, consecutiveTreasuresRef.current, goldenScore, ['\u{1F451}', '\u{1F48E}', '\u{2728}', '\u{1F31F}'])
-        effects.triggerFlash('rgba(251,191,36,0.25)')
+        effects.comboHitBurst(px, py, consecutiveTreasuresRef.current, goldenScore, [PIXEL_CROWN, PIXEL_GEM, '\u{2728}', '\u{1F31F}'])
+        effects.triggerFlash('rgba(251,191,36,0.3)')
 
         if (consecutiveTreasuresRef.current >= FEVER_THRESHOLD && !isFeverRef.current) {
           isFeverRef.current = true
@@ -380,14 +484,16 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           playAudio('fever', 0.7)
         }
 
+        nextBoard = doChainDig(nextBoard)
+        boardRef.current = nextBoard
+        setBoard(nextBoard)
         maybeCheckClear(nextBoard)
       } else if (cell.content === 'treasure') {
         const treasureScore = Math.round(BASE_TREASURE_SCORE * comboMult * feverMult)
         scoreRef.current += treasureScore
         setScore(scoreRef.current)
-        const nextFound = treasuresFoundRef.current + 1
-        treasuresFoundRef.current = nextFound
-        setTreasuresFound(nextFound)
+        treasuresFoundRef.current += 1
+        setTreasuresFound(treasuresFoundRef.current)
         consecutiveTreasuresRef.current += 1
         setLastDigKind('treasure')
         playAudio('treasureFound', 0.7)
@@ -395,8 +501,8 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           playAudio('combo', 0.4, 1 + comboRef.current * 0.1)
           showBonusText(`+${treasureScore} COMBO x${comboMult.toFixed(1)}!`)
         }
-        effects.spawnParticles(5, x, y, ['\u{1F48E}', '\u{2728}', '\u{1F4B0}'])
-        effects.showScorePopup(treasureScore, x, y - 20)
+        effects.spawnParticles(6, px, py, [PIXEL_GEM, '\u{2728}', '\u{1F4B0}'])
+        effects.showScorePopup(treasureScore, px, py - 25)
 
         if (consecutiveTreasuresRef.current >= FEVER_THRESHOLD && !isFeverRef.current) {
           isFeverRef.current = true
@@ -406,141 +512,124 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           playAudio('fever', 0.7)
         }
 
+        nextBoard = doChainDig(nextBoard)
+        boardRef.current = nextBoard
+        setBoard(nextBoard)
         maybeCheckClear(nextBoard)
       } else if (cell.content === 'time-gem') {
         remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_GEM_BONUS_MS)
         setLastDigKind('time-gem')
         playAudio('goldenFound', 0.6, 1.5)
-        showBonusText(`TIME GEM! +${(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s`)
-        effects.spawnParticles(6, x, y, ['\u{23F0}', '\u{1F552}', '\u{2728}'])
-        effects.triggerFlash('rgba(59,130,246,0.25)')
+        showBonusText(`${PIXEL_CLOCK} TIME GEM! +${(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s`)
+        effects.spawnParticles(7, px, py, [PIXEL_CLOCK, '\u{1F552}', '\u{2728}', '\u{1F4AB}'])
+        effects.triggerFlash('rgba(59,130,246,0.3)')
       } else if (cell.content === 'bomb') {
-        const penalty = Math.round(BOMB_PENALTY * (1 + depthRef.current * 0.1))
-        const nextScore = Math.max(0, scoreRef.current - penalty)
-        scoreRef.current = nextScore
-        setScore(nextScore)
-        consecutiveTreasuresRef.current = 0
-        bombsHitRef.current += 1
-        setLastDigKind('bomb')
-        playAudio('bomb', 0.7)
-        effects.triggerShake(8)
-        effects.triggerFlash('rgba(239,68,68,0.5)')
-        effects.spawnParticles(6, x, y, ['\u{1F4A5}', '\u{1F525}', '\u{1F4A3}'])
-        effects.showScorePopup(-penalty, x, y - 20)
+        if (hasShieldRef.current) {
+          // Shield absorbs the bomb!
+          hasShieldRef.current = false
+          setHasShield(false)
+          setShieldFlash(true)
+          setTimeout(() => setShieldFlash(false), 600)
+          playAudio('shield', 0.8, 0.7)
+          showBonusText(`${PIXEL_SHIELD} BLOCKED!`)
+          effects.spawnParticles(4, px, py, [PIXEL_SHIELD, '\u{2728}'])
+          effects.triggerFlash('rgba(5,150,105,0.3)')
+          consecutiveTreasuresRef.current = 0
+          setLastDigKind('bomb')
+        } else {
+          const penalty = Math.round(BOMB_PENALTY * (1 + depthRef.current * 0.1))
+          scoreRef.current = Math.max(0, scoreRef.current - penalty)
+          setScore(scoreRef.current)
+          consecutiveTreasuresRef.current = 0
+          bombsHitRef.current += 1
+          setLastDigKind('bomb')
+          playAudio('bomb', 0.7)
+          effects.triggerShake(10)
+          effects.triggerFlash('rgba(239,68,68,0.55)')
+          effects.spawnParticles(8, px, py, [PIXEL_BOMB, '\u{1F4A5}', '\u{1F525}', '\u{1F4AB}'])
+          effects.showScorePopup(-penalty, px, py - 25)
+        }
       } else {
         setLastDigKind('empty')
         consecutiveTreasuresRef.current = 0
         playAudio('dig', 0.4, 0.85 + Math.random() * 0.3)
-        effects.spawnParticles(2, x, y, ['\u{1F4A8}', '\u{2601}\uFE0F'])
+        effects.spawnParticles(2, px, py, ['\u{1F4A8}'])
       }
     },
-    [playAudio, showBonusText, effects, getCellXY, resetBoard],
+    [playAudio, showBonusText, effects, resetBoard],
   )
 
-  const handleExit = useCallback(() => {
-    onExit()
-  }, [onExit])
+  const handleExit = useCallback(() => { onExit() }, [onExit])
 
-  // Key handler
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        handleExit()
-      }
-      if (event.code === 'KeyH') {
-        event.preventDefault()
-        activateHint()
-      }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); handleExit() }
+      if (e.code === 'KeyH') { e.preventDefault(); activateHint() }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleExit, activateHint])
 
-  // Init audio
   useEffect(() => {
     const sfxMap: Record<string, string> = {
       dig: digSfx, treasureFound: treasureFoundSfx, goldenFound: goldenFoundSfx,
       bomb: bombSfx, combo: comboSfx, fever: feverSfx,
       depthClear: depthClearSfx, hint: hintSfx, gameOver: gameOverHitSfx,
+      shield: shieldSfx, mapReveal: mapRevealSfx, chain: chainSfx, lucky: luckySfx,
     }
     for (const [key, src] of Object.entries(sfxMap)) {
       const audio = new Audio(src)
       audio.preload = 'auto'
       audioRefs.current[key] = audio
     }
-
     return () => {
       clearTimeoutSafe(digFeedbackTimerRef)
       clearTimeoutSafe(bonusTextTimerRef)
-      for (const key of Object.keys(audioRefs.current)) {
-        audioRefs.current[key] = null
-      }
+      for (const key of Object.keys(audioRefs.current)) audioRefs.current[key] = null
       effects.cleanup()
     }
   }, [])
 
-  // Game loop
   useEffect(() => {
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
-
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
-
+      if (finishedRef.current) { animationFrameRef.current = null; return }
+      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
 
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
 
-      // Fever timer
       if (isFeverRef.current) {
         feverMsRef.current = Math.max(0, feverMsRef.current - deltaMs)
         setFeverMs(feverMsRef.current)
-        if (feverMsRef.current <= 0) {
-          isFeverRef.current = false
-          setIsFever(false)
-        }
+        if (feverMsRef.current <= 0) { isFeverRef.current = false; setIsFever(false) }
       }
 
-      // Hint cooldown
       if (hintCooldownRef.current > 0) {
         hintCooldownRef.current = Math.max(0, hintCooldownRef.current - deltaMs)
         setHintCooldownMs(hintCooldownRef.current)
       }
 
-      // X-ray timer
       if (isXrayRef.current) {
         xrayTimerRef.current = Math.max(0, xrayTimerRef.current - deltaMs)
-        if (xrayTimerRef.current <= 0) {
-          isXrayRef.current = false
-          setIsXrayActive(false)
-        }
+        if (xrayTimerRef.current <= 0) { isXrayRef.current = false; setIsXrayActive(false) }
+      }
+
+      if (isLuckyRef.current) {
+        luckyMsRef.current = Math.max(0, luckyMsRef.current - deltaMs)
+        setLuckyMs(luckyMsRef.current)
+        if (luckyMsRef.current <= 0) { isLuckyRef.current = false; setIsLuckyActive(false) }
       }
 
       effects.updateParticles()
 
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
-
+      if (remainingMsRef.current <= 0) { finishGame(); animationFrameRef.current = null; return }
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
-
     animationFrameRef.current = window.requestAnimationFrame(step)
-
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
+      if (animationFrameRef.current !== null) { window.cancelAnimationFrame(animationFrameRef.current); animationFrameRef.current = null }
       lastFrameAtRef.current = null
     }
   }, [finishGame, effects])
@@ -550,51 +639,52 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const timerPercent = remainingMs / ROUND_DURATION_MS
   const hintReady = hintCooldownMs <= 0
 
-  const getCellDisplayClass = (cell: Cell, index: number): string => {
-    const classes = ['td-cell']
+  const getCellClass = (cell: Cell, index: number): string => {
+    const cls = ['td-cell']
     if (cell.state === 'hidden') {
-      classes.push('td-cell-hidden')
-      if (cell.hintFlashing) classes.push('td-cell-hint-flash')
-      if (isXrayActive && (cell.content === 'treasure' || cell.content === 'golden')) {
-        classes.push('td-cell-xray-glow')
-      }
+      cls.push('td-hidden')
+      if (cell.hintFlashing) cls.push('td-hint')
+      if (isXrayActive && (cell.content === 'treasure' || cell.content === 'golden')) cls.push('td-xray')
     } else {
-      classes.push('td-cell-revealed')
-      if (cell.content === 'golden') classes.push('td-cell-golden')
-      else if (cell.content === 'treasure') classes.push('td-cell-treasure')
-      else if (cell.content === 'bomb') classes.push('td-cell-bomb')
-      else if (cell.content === 'time-gem') classes.push('td-cell-time-gem')
-      else classes.push('td-cell-empty')
+      cls.push('td-open')
+      if (cell.content === 'golden') cls.push('td-golden')
+      else if (cell.content === 'treasure') cls.push('td-treasure')
+      else if (cell.content === 'bomb') cls.push('td-bomb')
+      else if (cell.content === 'time-gem') cls.push('td-time')
+      else cls.push('td-empty')
+      if (cell.chainRevealing) cls.push('td-chain-reveal')
     }
     if (lastDigIndex === index) {
-      classes.push('td-cell-just-dug')
-      if (lastDigKind === 'treasure' || lastDigKind === 'golden') classes.push('td-cell-flash-gold')
-      if (lastDigKind === 'bomb') classes.push('td-cell-flash-red')
-      if (lastDigKind === 'time-gem') classes.push('td-cell-flash-blue')
+      cls.push('td-dug')
+      if (lastDigKind === 'treasure' || lastDigKind === 'golden') cls.push('td-dug-gold')
+      if (lastDigKind === 'bomb') cls.push('td-dug-red')
+      if (lastDigKind === 'time-gem') cls.push('td-dug-blue')
     }
-    return classes.join(' ')
+    return cls.join(' ')
   }
 
-  const getCellLabel = (cell: Cell): string => {
+  const getCellIcon = (cell: Cell): string => {
     if (cell.state === 'hidden') return ''
-    if (cell.content === 'golden') return '\u{1F451}'
-    if (cell.content === 'treasure') return '\u{1F48E}'
-    if (cell.content === 'bomb') return '\u{1F4A3}'
-    if (cell.content === 'time-gem') return '\u{23F0}'
+    if (cell.content === 'golden') return PIXEL_CROWN
+    if (cell.content === 'treasure') return PIXEL_GEM
+    if (cell.content === 'bomb') return PIXEL_BOMB
+    if (cell.content === 'time-gem') return PIXEL_CLOCK
     if (cell.adjacentTreasures > 0) return String(cell.adjacentTreasures)
     return ''
   }
 
-  const getAdjacentColor = (count: number): string => {
-    if (count === 1) return '#3b82f6'
-    if (count === 2) return '#22c55e'
-    if (count === 3) return '#ef4444'
-    return '#7c3aed'
-  }
+  const adjColor = (n: number) => n === 1 ? '#60a5fa' : n === 2 ? '#4ade80' : n === 3 ? '#f87171' : '#c084fc'
+
+  // Active buffs indicator
+  const activeBuffs: { icon: string; label: string; color: string }[] = []
+  if (hasShield) activeBuffs.push({ icon: PIXEL_SHIELD, label: 'SHIELD', color: '#059669' })
+  if (hasChain) activeBuffs.push({ icon: PIXEL_CHAIN, label: 'CHAIN', color: '#dc2626' })
+  if (isLuckyActive) activeBuffs.push({ icon: PIXEL_CLOVER, label: `LUCKY ${(luckyMs / 1000).toFixed(0)}s`, color: '#16a34a' })
+  if (isXrayActive) activeBuffs.push({ icon: '\u{1F50D}', label: 'X-RAY', color: '#2563eb' })
 
   return (
     <section
-      className={`td-panel ${isFever ? 'td-panel-fever' : ''} ${depthTransition ? 'td-depth-transition' : ''}`}
+      className={`td ${isFever ? 'td-fever' : ''} ${depthTransition ? 'td-depth-in' : ''} ${shieldFlash ? 'td-shield-flash' : ''}`}
       aria-label="treasure-dig-game"
       style={{ ...effects.getShakeStyle() }}
     >
@@ -603,115 +693,108 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
+      {/* CRT scanlines overlay */}
+      <div className="td-scanlines" />
+
       {/* Timer bar */}
-      <div className="td-timer-bar-wrap">
-        <div
-          className={`td-timer-bar ${isLowTime ? 'td-timer-bar-low' : ''}`}
-          style={{ width: `${timerPercent * 100}%` }}
-        />
+      <div className="td-tbar-wrap">
+        <div className={`td-tbar ${isLowTime ? 'td-tbar-low' : ''}`} style={{ width: `${timerPercent * 100}%` }} />
+        <span className="td-tbar-label">{(remainingMs / 1000).toFixed(1)}s</span>
       </div>
 
       {/* Header */}
-      <div className="td-header">
-        <div className="td-score-block">
-          <p className="td-score">{score.toLocaleString()}</p>
+      <div className="td-hdr">
+        <div className="td-hdr-left">
+          <p className="td-pts">{score.toLocaleString()}</p>
           <p className="td-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
-        <div className="td-timer-block">
-          <p className={`td-time ${isLowTime ? 'td-time-low' : ''}`}>
-            {(remainingMs / 1000).toFixed(1)}s
-          </p>
+        <div className="td-hdr-right">
+          <span className="td-depth-badge">D{depth}</span>
+          <span className="td-gem-count">{PIXEL_GEM}{treasuresFound}</span>
         </div>
       </div>
 
-      {/* Stats row */}
-      <div className="td-stats-row">
-        <span className="td-stat">{'\u{1F48E}'} {treasuresFound}</span>
-        <span className="td-stat td-stat-depth">D{depth}</span>
+      {/* Active buffs */}
+      {activeBuffs.length > 0 && (
+        <div className="td-buffs">
+          {activeBuffs.map((b, i) => (
+            <span key={i} className="td-buff" style={{ borderColor: b.color, color: b.color }}>
+              {b.icon} {b.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Combo / Fever bar */}
+      <div className="td-info-row">
         {combo > 1 && (
-          <span className="td-stat td-stat-combo">
-            x{(1 + (combo - 1) * COMBO_DIG_MULTIPLIER).toFixed(1)}
-          </span>
+          <span className="td-combo">COMBO x{(1 + (combo - 1) * COMBO_DIG_MULTIPLIER).toFixed(1)}</span>
         )}
         {isFever && (
-          <span className="td-stat td-stat-fever">
-            FEVER {(feverMs / 1000).toFixed(1)}s
+          <span className="td-fever-label">
+            FEVER x{FEVER_MULTIPLIER} [{(feverMs / 1000).toFixed(1)}s]
           </span>
         )}
       </div>
 
       {/* Bonus text */}
-      {lastBonusText && (
-        <p className="td-bonus-text">{lastBonusText}</p>
-      )}
+      {lastBonusText && <p className="td-bonus">{lastBonusText}</p>}
 
-      {/* Power-up notification */}
-      {pendingPowerUp && (
-        <div className="td-powerup-bar">
-          <button
-            className="td-powerup-btn"
-            type="button"
-            onClick={() => {
-              if (pendingPowerUp === 'shovel') activateShovel()
-              else if (pendingPowerUp === 'xray') activateXray()
-            }}
-          >
-            {pendingPowerUp === 'shovel' ? '\u{1F6E0}\uFE0F SHOVEL' : '\u{1F50D} X-RAY'}
-            <span className="td-powerup-sub">TAP!</span>
+      {/* Item notification */}
+      {pendingItem && (
+        <div className="td-item-bar">
+          <button className="td-item-btn" type="button" onClick={() => activateItem(pendingItem)}
+            style={{ borderColor: ITEM_INFO[pendingItem]?.color, background: `${ITEM_INFO[pendingItem]?.color}22` }}>
+            <span className="td-item-icon">{ITEM_INFO[pendingItem]?.icon}</span>
+            <span className="td-item-name">{ITEM_INFO[pendingItem]?.label}</span>
+            <span className="td-item-tap">TAP!</span>
           </button>
         </div>
       )}
 
-      {/* Grid - fills remaining space */}
+      {/* Grid */}
       <div className={`td-grid ${isFever ? 'td-grid-fever' : ''}`}>
         {board.map((cell, index) => (
           <button
-            className={getCellDisplayClass(cell, index)}
+            className={getCellClass(cell, index)}
             key={index}
             type="button"
             onClick={() => handleCellTap(index)}
             disabled={cell.state === 'revealed'}
-            aria-label={`cell-${Math.floor(index / GRID_SIZE)}-${index % GRID_SIZE}`}
           >
-            <span
-              className="td-cell-label"
-              style={
-                cell.state === 'revealed' && cell.content === 'empty' && cell.adjacentTreasures > 0
-                  ? { color: getAdjacentColor(cell.adjacentTreasures) }
-                  : undefined
-              }
+            <span className="td-icon"
+              style={cell.state === 'revealed' && cell.content === 'empty' && cell.adjacentTreasures > 0
+                ? { color: adjColor(cell.adjacentTreasures) } : undefined}
             >
-              {getCellLabel(cell)}
+              {getCellIcon(cell)}
             </span>
           </button>
         ))}
       </div>
 
-      {/* Bottom bar */}
-      <div className="td-bottom-bar">
+      {/* Bottom */}
+      <div className="td-bot">
         <button
-          className={`td-hint-btn ${hintReady ? 'td-hint-ready' : 'td-hint-cooldown'}`}
-          type="button"
-          onClick={activateHint}
-          disabled={!hintReady}
+          className={`td-hint-btn ${hintReady ? '' : 'td-hint-cd'}`}
+          type="button" onClick={activateHint} disabled={!hintReady}
         >
-          {hintReady ? '\u{1F4A1} HINT' : `\u{1F4A1} ${(hintCooldownMs / 1000).toFixed(0)}s`}
+          {hintReady ? '\u{1F4A1}HINT' : `${(hintCooldownMs / 1000).toFixed(0)}s`}
         </button>
-
         <div className="td-legend">
-          <span>{'\u{1F48E}'}+{BASE_TREASURE_SCORE}</span>
-          <span>{'\u{1F451}'}+{GOLDEN_TREASURE_SCORE}</span>
-          <span>{'\u{1F4A3}'}-{BOMB_PENALTY}</span>
-          <span>{'\u{23F0}'}+{(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s</span>
+          <span>{PIXEL_GEM}+{BASE_TREASURE_SCORE}</span>
+          <span>{PIXEL_CROWN}+{GOLDEN_TREASURE_SCORE}</span>
+          <span>{PIXEL_BOMB}-{BOMB_PENALTY}</span>
+          <span>{PIXEL_CLOCK}+{(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s</span>
         </div>
-
-        <button className="td-exit-btn" type="button" onClick={handleExit}>
-          Hub
-        </button>
+        <button className="td-exit" type="button" onClick={handleExit}>EXIT</button>
       </div>
 
       <style>{`
-        .td-panel {
+        /* ═══════════════════════════════════════════
+           PIXEL ART THEME
+           ═══════════════════════════════════════════ */
+
+        .td {
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -722,486 +805,500 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           position: relative;
           user-select: none;
           -webkit-user-select: none;
-          background: linear-gradient(180deg, #78350f 0%, #92400e 15%, #b45309 40%, #d4a574 70%, #fef3c7 100%);
+          background: #2d1b0e;
+          background-image:
+            linear-gradient(180deg, #1a0f06 0%, #3d2211 20%, #5c3a1e 50%, #4a2e14 80%, #2d1b0e 100%);
+          font-family: 'Courier New', 'Menlo', monospace;
+          image-rendering: pixelated;
         }
 
-        .td-panel-fever {
-          animation: td-fever-bg 0.3s ease-in-out infinite alternate;
+        /* CRT scanlines */
+        .td-scanlines {
+          position: absolute;
+          inset: 0;
+          background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.08) 2px,
+            rgba(0,0,0,0.08) 4px
+          );
+          pointer-events: none;
+          z-index: 10;
         }
 
-        @keyframes td-fever-bg {
-          from { filter: brightness(1); }
-          to { filter: brightness(1.1) saturate(1.2); }
+        .td > * { position: relative; z-index: 1; }
+
+        /* Fever mode */
+        .td-fever {
+          animation: td-fv-bg 0.25s ease-in-out infinite alternate;
+        }
+        @keyframes td-fv-bg {
+          from { filter: brightness(1) hue-rotate(0deg); }
+          to { filter: brightness(1.15) hue-rotate(5deg); }
         }
 
-        .td-depth-transition {
-          animation: td-depth-flash 0.6s ease-out;
+        .td-depth-in {
+          animation: td-dp-flash 0.7s ease-out;
+        }
+        @keyframes td-dp-flash {
+          0% { filter: brightness(2) saturate(0.5); }
+          100% { filter: brightness(1) saturate(1); }
         }
 
-        @keyframes td-depth-flash {
-          0% { filter: brightness(1.5); }
-          100% { filter: brightness(1); }
+        .td-shield-flash {
+          animation: td-sh-flash 0.6s ease-out;
+        }
+        @keyframes td-sh-flash {
+          0% { box-shadow: inset 0 0 60px rgba(5,150,105,0.8); }
+          100% { box-shadow: inset 0 0 0 transparent; }
         }
 
-        /* Timer bar */
-        .td-timer-bar-wrap {
+        /* ── Timer bar ── */
+        .td-tbar-wrap {
           width: 100%;
-          height: 5px;
-          background: rgba(0,0,0,0.3);
+          height: 20px;
+          background: #1a0f06;
+          border-bottom: 2px solid #5c3a1e;
+          position: relative;
           flex-shrink: 0;
         }
-
-        .td-timer-bar {
+        .td-tbar {
           height: 100%;
           background: linear-gradient(90deg, #22c55e, #84cc16, #eab308);
-          transition: width 0.1s linear;
-          border-radius: 0 3px 3px 0;
+          transition: width 0.15s linear;
+          image-rendering: pixelated;
         }
-
-        .td-timer-bar-low {
+        .td-tbar-low {
           background: linear-gradient(90deg, #ef4444, #f97316);
-          animation: td-bar-pulse 0.4s ease-in-out infinite alternate;
+          animation: td-tbar-pulse 0.35s steps(2) infinite;
+        }
+        @keyframes td-tbar-pulse {
+          0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; }
+        }
+        .td-tbar-label {
+          position: absolute;
+          right: 6px;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 11px;
+          font-weight: 900;
+          color: #fef3c7;
+          text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+          letter-spacing: 1px;
         }
 
-        @keyframes td-bar-pulse {
-          from { opacity: 1; }
-          to { opacity: 0.6; }
-        }
-
-        /* Header */
-        .td-header {
+        /* ── Header ── */
+        .td-hdr {
           display: flex;
           align-items: center;
           justify-content: space-between;
           width: 100%;
-          padding: 8px 16px 4px;
+          padding: 6px 12px 4px;
           flex-shrink: 0;
+          border-bottom: 2px solid #5c3a1e;
+          background: rgba(0,0,0,0.2);
         }
-
-        .td-score-block {
-          flex: 1;
-        }
-
-        .td-score {
-          font-size: clamp(28px, 7vw, 36px);
+        .td-pts {
+          font-size: clamp(28px, 8vw, 40px);
           font-weight: 900;
-          color: #fef3c7;
+          color: #fbbf24;
           margin: 0;
-          text-shadow: 0 2px 6px rgba(0,0,0,0.5), 0 0 20px rgba(251,191,36,0.3);
-          line-height: 1.1;
+          text-shadow: 2px 2px 0 #78350f, 0 0 12px rgba(251,191,36,0.5);
+          line-height: 1;
+          letter-spacing: 2px;
         }
-
         .td-best {
-          font-size: 11px;
-          font-weight: 600;
-          color: rgba(254,243,199,0.5);
-          margin: 0;
-        }
-
-        .td-timer-block {
-          text-align: right;
-        }
-
-        .td-time {
-          font-size: clamp(22px, 6vw, 30px);
-          font-weight: 800;
-          color: #fef3c7;
-          margin: 0;
-          font-variant-numeric: tabular-nums;
-          text-shadow: 0 1px 4px rgba(0,0,0,0.4);
-        }
-
-        .td-time-low {
-          color: #fca5a5;
-          animation: td-time-pulse 0.4s ease-in-out infinite alternate;
-        }
-
-        @keyframes td-time-pulse {
-          from { opacity: 1; transform: scale(1); }
-          to { opacity: 0.6; transform: scale(1.05); }
-        }
-
-        /* Stats row */
-        .td-stats-row {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          width: 100%;
-          padding: 4px 12px;
-          background: rgba(0,0,0,0.15);
-          backdrop-filter: blur(4px);
-          flex-shrink: 0;
-        }
-
-        .td-stat {
-          font-size: 13px;
+          font-size: 9px;
           font-weight: 700;
-          color: #fef3c7;
-        }
-
-        .td-stat-depth {
-          color: #c084fc;
-          font-size: 14px;
-        }
-
-        .td-stat-combo {
-          color: #fbbf24;
-          animation: td-combo-bounce 0.3s ease-out;
-        }
-
-        @keyframes td-combo-bounce {
-          0% { transform: scale(1.4); }
-          100% { transform: scale(1); }
-        }
-
-        .td-stat-fever {
-          color: #ef4444;
-          font-weight: 900;
-          letter-spacing: 1px;
-          text-shadow: 0 0 8px rgba(239,68,68,0.6);
-          animation: td-fever-text 0.25s ease-in-out infinite alternate;
-        }
-
-        @keyframes td-fever-text {
-          from { opacity: 0.8; transform: scale(1); }
-          to { opacity: 1; transform: scale(1.05); }
-        }
-
-        /* Bonus text */
-        .td-bonus-text {
-          margin: 2px 0;
-          font-size: 16px;
-          font-weight: 900;
-          color: #fbbf24;
-          text-shadow: 0 0 12px rgba(251,191,36,0.8), 0 2px 4px rgba(0,0,0,0.5);
-          text-align: center;
-          animation: td-bonus-pop 0.5s ease-out;
-          flex-shrink: 0;
+          color: #92400e;
+          margin: 0;
           letter-spacing: 1px;
         }
-
-        @keyframes td-bonus-pop {
-          0% { transform: scale(0.3) translateY(10px); opacity: 0; }
-          50% { transform: scale(1.2) translateY(-5px); opacity: 1; }
-          100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-
-        /* Power-up bar */
-        .td-powerup-bar {
-          width: 100%;
-          padding: 4px 16px;
-          display: flex;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-
-        .td-powerup-btn {
-          background: linear-gradient(135deg, #7c3aed, #a855f7);
-          border: 2px solid #c084fc;
-          border-radius: 12px;
-          color: white;
-          font-size: 15px;
-          font-weight: 800;
-          padding: 8px 24px;
-          cursor: pointer;
-          animation: td-powerup-pulse 0.6s ease-in-out infinite alternate;
+        .td-hdr-right {
           display: flex;
           align-items: center;
           gap: 8px;
-          box-shadow: 0 0 16px rgba(124,58,237,0.5);
+        }
+        .td-depth-badge {
+          background: #7c3aed;
+          color: white;
+          font-size: 13px;
+          font-weight: 900;
+          padding: 2px 8px;
+          border: 2px solid #a855f7;
+          letter-spacing: 1px;
+        }
+        .td-gem-count {
+          font-size: 15px;
+          font-weight: 900;
+          color: #fbbf24;
+          text-shadow: 1px 1px 0 #000;
         }
 
-        .td-powerup-sub {
-          font-size: 11px;
-          opacity: 0.8;
-          font-weight: 600;
+        /* ── Active buffs ── */
+        .td-buffs {
+          display: flex;
+          gap: 6px;
+          padding: 3px 12px;
+          width: 100%;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .td-buff {
+          font-size: 10px;
+          font-weight: 900;
+          padding: 1px 6px;
+          border: 2px solid;
+          background: rgba(0,0,0,0.3);
+          animation: td-buff-pulse 0.5s steps(2) infinite;
+          letter-spacing: 1px;
+        }
+        @keyframes td-buff-pulse {
+          0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; }
         }
 
-        @keyframes td-powerup-pulse {
-          from { transform: scale(1); box-shadow: 0 0 16px rgba(124,58,237,0.5); }
-          to { transform: scale(1.03); box-shadow: 0 0 24px rgba(124,58,237,0.8); }
+        /* ── Info row ── */
+        .td-info-row {
+          display: flex;
+          gap: 12px;
+          justify-content: center;
+          width: 100%;
+          min-height: 18px;
+          flex-shrink: 0;
+        }
+        .td-combo {
+          font-size: 13px;
+          font-weight: 900;
+          color: #fbbf24;
+          text-shadow: 1px 1px 0 #000;
+          animation: td-combo-pop 0.3s steps(3);
+          letter-spacing: 1px;
+        }
+        @keyframes td-combo-pop {
+          0% { transform: scale(1.6); } 100% { transform: scale(1); }
+        }
+        .td-fever-label {
+          font-size: 13px;
+          font-weight: 900;
+          color: #ef4444;
+          text-shadow: 0 0 8px rgba(239,68,68,0.8), 1px 1px 0 #000;
+          animation: td-fv-txt 0.2s steps(2) infinite;
+          letter-spacing: 2px;
+        }
+        @keyframes td-fv-txt {
+          0% { color: #ef4444; } 50% { color: #fbbf24; } 100% { color: #ef4444; }
         }
 
-        .td-powerup-btn:active {
-          transform: scale(0.95) !important;
+        /* ── Bonus text ── */
+        .td-bonus {
+          margin: 2px 0;
+          font-size: clamp(14px, 4vw, 18px);
+          font-weight: 900;
+          color: #fbbf24;
+          text-shadow: 2px 2px 0 #78350f, 0 0 16px rgba(251,191,36,0.8);
+          text-align: center;
+          animation: td-bonus-in 0.5s steps(4);
+          flex-shrink: 0;
+          letter-spacing: 2px;
+        }
+        @keyframes td-bonus-in {
+          0% { transform: scale(0.2) translateY(15px); opacity: 0; }
+          50% { transform: scale(1.3) translateY(-5px); opacity: 1; }
+          100% { transform: scale(1) translateY(0); }
         }
 
-        /* Grid - fills remaining space */
+        /* ── Item bar ── */
+        .td-item-bar {
+          width: 100%;
+          padding: 3px 12px;
+          display: flex;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .td-item-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 18px;
+          border: 3px solid;
+          color: #fef3c7;
+          cursor: pointer;
+          font-family: inherit;
+          animation: td-item-pulse 0.4s steps(2) infinite alternate;
+        }
+        @keyframes td-item-pulse {
+          from { transform: scale(1); filter: brightness(1); }
+          to { transform: scale(1.04); filter: brightness(1.2); }
+        }
+        .td-item-btn:active { transform: scale(0.92) !important; }
+        .td-item-icon { font-size: 18px; }
+        .td-item-name { font-size: 14px; font-weight: 900; letter-spacing: 2px; }
+        .td-item-tap { font-size: 10px; font-weight: 700; opacity: 0.7; }
+
+        /* ── Grid ── */
         .td-grid {
           display: grid;
           grid-template-columns: repeat(${GRID_SIZE}, 1fr);
-          gap: clamp(4px, 1.2vw, 7px);
+          gap: clamp(3px, 1vw, 5px);
           width: 100%;
-          padding: 8px 12px;
+          padding: 6px 8px;
           flex: 1;
           align-content: center;
           min-height: 0;
         }
-
         .td-grid-fever {
-          box-shadow: inset 0 0 30px rgba(239, 68, 68, 0.2);
-          border-radius: 8px;
+          animation: td-grid-fv 0.3s steps(2) infinite alternate;
+        }
+        @keyframes td-grid-fv {
+          from { box-shadow: inset 0 0 20px rgba(239,68,68,0.2); }
+          to { box-shadow: inset 0 0 40px rgba(239,68,68,0.4); }
         }
 
-        /* Cells */
+        /* ── Cells ── */
         .td-cell {
           position: relative;
           display: flex;
           align-items: center;
           justify-content: center;
           border: none;
-          border-radius: clamp(6px, 1.5vw, 10px);
           cursor: pointer;
-          font-size: clamp(20px, 5vw, 28px);
-          font-weight: 800;
-          transition: transform 0.1s ease, background-color 0.2s ease;
+          font-size: clamp(18px, 5vw, 26px);
+          font-weight: 900;
+          font-family: inherit;
           aspect-ratio: 1;
           padding: 0;
           -webkit-tap-highlight-color: transparent;
+          transition: transform 0.08s;
+          image-rendering: pixelated;
         }
+        .td-cell:active:not(:disabled) { transform: scale(0.85); }
 
-        .td-cell:active:not(:disabled) {
-          transform: scale(0.88);
+        /* Hidden cell - dirt block */
+        .td-hidden {
+          background: #8b5e34;
+          border: 3px solid;
+          border-color: #b8864e #5c3a1e #5c3a1e #b8864e;
+          box-shadow: inset 0 0 0 1px #6b4423, 2px 2px 0 rgba(0,0,0,0.3);
         }
-
-        .td-cell-hidden {
-          background: linear-gradient(145deg, #a16207 0%, #854d0e 50%, #713f12 100%);
-          box-shadow: inset 0 -4px 0 #5c3a10, inset 0 2px 0 rgba(255,255,255,0.1), 0 3px 6px rgba(0,0,0,0.3);
-        }
-
-        .td-cell-hidden::after {
+        .td-hidden::before {
           content: '';
           position: absolute;
-          inset: 3px;
-          border-radius: 4px;
-          background: radial-gradient(ellipse at 30% 20%, rgba(255,255,255,0.12), transparent 60%);
+          top: 3px; left: 3px;
+          width: 40%; height: 40%;
+          background: rgba(255,255,255,0.1);
           pointer-events: none;
         }
-
-        .td-cell-hidden:hover:not(:disabled) {
-          background: linear-gradient(145deg, #b87a10, #9a5f11);
-          box-shadow: inset 0 -4px 0 #6b4510, inset 0 2px 0 rgba(255,255,255,0.15), 0 4px 8px rgba(0,0,0,0.35);
+        .td-hidden::after {
+          content: '';
+          position: absolute;
+          bottom: 4px; right: 4px;
+          width: 5px; height: 5px;
+          background: #6b4423;
+          pointer-events: none;
+        }
+        .td-hidden:hover:not(:disabled) {
+          background: #9a6b3d;
+          border-color: #c99a5e #6b4423 #6b4423 #c99a5e;
         }
 
-        .td-cell-hint-flash {
-          animation: td-hint-glow 0.5s ease-in-out infinite alternate;
+        /* Hint flash */
+        .td-hint {
+          animation: td-hint-glow 0.4s steps(2) infinite alternate;
         }
-
         @keyframes td-hint-glow {
-          from { box-shadow: inset 0 -4px 0 #5c3a10, 0 0 4px rgba(251,191,36,0.3); }
-          to { box-shadow: inset 0 -4px 0 #5c3a10, 0 0 16px rgba(251,191,36,0.8), 0 0 32px rgba(251,191,36,0.4); }
+          from { box-shadow: 0 0 4px #fbbf24; }
+          to { box-shadow: 0 0 16px #fbbf24, 0 0 32px rgba(251,191,36,0.5); }
         }
 
-        .td-cell-xray-glow {
-          animation: td-xray-pulse 0.4s ease-in-out infinite alternate;
+        /* X-ray */
+        .td-xray {
+          animation: td-xray-p 0.3s steps(2) infinite alternate;
+        }
+        @keyframes td-xray-p {
+          from { box-shadow: 0 0 6px rgba(59,130,246,0.5); border-color: #3b82f6 #1d4ed8 #1d4ed8 #3b82f6; }
+          to { box-shadow: 0 0 18px rgba(59,130,246,0.9); border-color: #60a5fa #2563eb #2563eb #60a5fa; }
         }
 
-        @keyframes td-xray-pulse {
-          from { box-shadow: inset 0 -4px 0 #5c3a10, 0 0 8px rgba(59,130,246,0.4); }
-          to { box-shadow: inset 0 -4px 0 #5c3a10, 0 0 20px rgba(59,130,246,0.9), 0 0 40px rgba(59,130,246,0.4); }
+        /* Revealed cells */
+        .td-open { cursor: default; }
+
+        .td-empty {
+          background: #4a3f35;
+          border: 2px solid #3a302a;
+          color: #a8a29e;
         }
 
-        .td-cell-revealed {
-          cursor: default;
+        .td-treasure {
+          background: #d97706;
+          border: 3px solid;
+          border-color: #fbbf24 #92400e #92400e #fbbf24;
+          box-shadow: 0 0 12px rgba(251,191,36,0.6);
+          animation: td-treas-in 0.4s steps(4);
         }
-
-        .td-cell-empty {
-          background: linear-gradient(145deg, #d6d3d1, #c4bfba);
-          box-shadow: inset 0 2px 4px rgba(0,0,0,0.12);
-          color: #44403c;
-        }
-
-        .td-cell-treasure {
-          background: linear-gradient(145deg, #fbbf24, #f59e0b, #d97706);
-          box-shadow: 0 0 16px rgba(251,191,36,0.6), inset 0 2px 0 rgba(255,255,255,0.3);
-          animation: td-treasure-in 0.4s ease-out;
-        }
-
-        @keyframes td-treasure-in {
-          0% { transform: scale(0.5) rotate(-15deg); opacity: 0; }
-          60% { transform: scale(1.15) rotate(3deg); }
-          100% { transform: scale(1) rotate(0deg); opacity: 1; }
-        }
-
-        .td-cell-golden {
-          background: linear-gradient(145deg, #fde68a, #fbbf24, #f59e0b, #d97706);
-          box-shadow: 0 0 24px rgba(251,191,36,0.9), inset 0 2px 0 rgba(255,255,255,0.4);
-          animation: td-golden-in 0.5s ease-out, td-golden-glow 0.6s ease-in-out 0.5s infinite alternate;
-        }
-
-        @keyframes td-golden-in {
-          0% { transform: scale(0.3) rotate(-30deg); opacity: 0; }
-          50% { transform: scale(1.3) rotate(5deg); }
-          100% { transform: scale(1) rotate(0deg); opacity: 1; }
-        }
-
-        @keyframes td-golden-glow {
-          from { box-shadow: 0 0 16px rgba(251,191,36,0.6); }
-          to { box-shadow: 0 0 32px rgba(251,191,36,1), 0 0 48px rgba(251,191,36,0.4); }
-        }
-
-        .td-cell-bomb {
-          background: linear-gradient(145deg, #ef4444, #dc2626, #b91c1c);
-          box-shadow: 0 0 16px rgba(239,68,68,0.6);
-          animation: td-bomb-in 0.4s ease-out;
-        }
-
-        @keyframes td-bomb-in {
-          0% { transform: scale(0.5); opacity: 0; }
-          40% { transform: scale(1.2); }
-          70% { transform: scale(0.95); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-
-        .td-cell-time-gem {
-          background: linear-gradient(145deg, #60a5fa, #3b82f6, #2563eb);
-          box-shadow: 0 0 16px rgba(59,130,246,0.6), inset 0 2px 0 rgba(255,255,255,0.3);
-          animation: td-timegem-in 0.4s ease-out, td-timegem-glow 0.5s ease-in-out 0.4s infinite alternate;
-        }
-
-        @keyframes td-timegem-in {
-          0% { transform: scale(0.3) rotate(30deg); opacity: 0; }
-          60% { transform: scale(1.2) rotate(-5deg); }
+        @keyframes td-treas-in {
+          0% { transform: scale(0.3) rotate(-20deg); opacity: 0; }
+          50% { transform: scale(1.2) rotate(5deg); opacity: 1; }
           100% { transform: scale(1) rotate(0deg); }
         }
 
-        @keyframes td-timegem-glow {
-          from { box-shadow: 0 0 12px rgba(59,130,246,0.5); }
-          to { box-shadow: 0 0 24px rgba(59,130,246,0.9); }
+        .td-golden {
+          background: linear-gradient(135deg, #fde68a, #fbbf24);
+          border: 3px solid;
+          border-color: #fef3c7 #d97706 #d97706 #fef3c7;
+          box-shadow: 0 0 20px rgba(251,191,36,0.9);
+          animation: td-gold-in 0.5s steps(5), td-gold-glow 0.4s steps(2) 0.5s infinite alternate;
+        }
+        @keyframes td-gold-in {
+          0% { transform: scale(0.2) rotate(-30deg); opacity: 0; }
+          40% { transform: scale(1.4) rotate(10deg); }
+          100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        @keyframes td-gold-glow {
+          from { box-shadow: 0 0 12px rgba(251,191,36,0.6); }
+          to { box-shadow: 0 0 28px rgba(251,191,36,1), 0 0 48px rgba(251,191,36,0.4); }
         }
 
-        .td-cell-just-dug {
-          animation: td-pop 0.35s ease-out;
+        .td-bomb {
+          background: #b91c1c;
+          border: 3px solid;
+          border-color: #f87171 #7f1d1d #7f1d1d #f87171;
+          box-shadow: 0 0 12px rgba(239,68,68,0.5);
+          animation: td-bomb-in 0.35s steps(4);
+        }
+        @keyframes td-bomb-in {
+          0% { transform: scale(0.4); opacity: 0; }
+          30% { transform: scale(1.3); }
+          60% { transform: scale(0.9); }
+          100% { transform: scale(1); opacity: 1; }
         }
 
-        .td-cell-flash-gold {
-          animation: td-flash-gold 0.5s ease-out;
+        .td-time {
+          background: #1d4ed8;
+          border: 3px solid;
+          border-color: #60a5fa #1e3a8a #1e3a8a #60a5fa;
+          box-shadow: 0 0 12px rgba(59,130,246,0.6);
+          animation: td-time-in 0.4s steps(4), td-time-glow 0.5s steps(2) 0.4s infinite alternate;
+        }
+        @keyframes td-time-in {
+          0% { transform: scale(0.3) rotate(20deg); opacity: 0; }
+          50% { transform: scale(1.2) rotate(-5deg); }
+          100% { transform: scale(1) rotate(0deg); }
+        }
+        @keyframes td-time-glow {
+          from { box-shadow: 0 0 8px rgba(59,130,246,0.5); }
+          to { box-shadow: 0 0 20px rgba(59,130,246,0.9); }
         }
 
-        .td-cell-flash-red {
-          animation: td-flash-red 0.5s ease-out;
+        .td-chain-reveal {
+          animation: td-chain-fx 0.6s steps(4);
+        }
+        @keyframes td-chain-fx {
+          0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.8); transform: scale(0.5); }
+          30% { box-shadow: 0 0 20px 6px rgba(220,38,38,0.6); transform: scale(1.15); }
+          100% { box-shadow: none; transform: scale(1); }
         }
 
-        .td-cell-flash-blue {
-          animation: td-flash-blue 0.5s ease-out;
+        /* Dig feedback */
+        .td-dug { animation: td-dug-pop 0.4s steps(4); }
+        @keyframes td-dug-pop {
+          0% { transform: scale(0.5); } 50% { transform: scale(1.2); } 100% { transform: scale(1); }
+        }
+        .td-dug-gold { animation: td-dug-g 0.5s steps(4); }
+        @keyframes td-dug-g {
+          0% { box-shadow: 0 0 0 0 rgba(251,191,36,0.9); transform: scale(0.5); }
+          40% { box-shadow: 0 0 30px 10px rgba(251,191,36,0.7); transform: scale(1.25); }
+          100% { box-shadow: 0 0 12px rgba(251,191,36,0.5); transform: scale(1); }
+        }
+        .td-dug-red { animation: td-dug-r 0.5s steps(4); }
+        @keyframes td-dug-r {
+          0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.9); transform: scale(0.5); }
+          40% { box-shadow: 0 0 30px 10px rgba(239,68,68,0.7); transform: scale(1.25); }
+          100% { box-shadow: 0 0 12px rgba(239,68,68,0.5); transform: scale(1); }
+        }
+        .td-dug-blue { animation: td-dug-b 0.5s steps(4); }
+        @keyframes td-dug-b {
+          0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.9); transform: scale(0.5); }
+          40% { box-shadow: 0 0 30px 10px rgba(59,130,246,0.7); transform: scale(1.25); }
+          100% { box-shadow: 0 0 12px rgba(59,130,246,0.5); transform: scale(1); }
         }
 
-        @keyframes td-pop {
-          0% { transform: scale(0.6); }
-          50% { transform: scale(1.15); }
-          100% { transform: scale(1); }
-        }
-
-        @keyframes td-flash-gold {
-          0% { box-shadow: 0 0 0 0 rgba(251,191,36,0.9); transform: scale(0.6); }
-          40% { box-shadow: 0 0 24px 8px rgba(251,191,36,0.7); transform: scale(1.2); }
-          100% { box-shadow: 0 0 16px rgba(251,191,36,0.5); transform: scale(1); }
-        }
-
-        @keyframes td-flash-red {
-          0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.9); transform: scale(0.6); }
-          40% { box-shadow: 0 0 24px 8px rgba(239,68,68,0.7); transform: scale(1.2); }
-          100% { box-shadow: 0 0 16px rgba(239,68,68,0.5); transform: scale(1); }
-        }
-
-        @keyframes td-flash-blue {
-          0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.9); transform: scale(0.6); }
-          40% { box-shadow: 0 0 24px 8px rgba(59,130,246,0.7); transform: scale(1.2); }
-          100% { box-shadow: 0 0 16px rgba(59,130,246,0.5); transform: scale(1); }
-        }
-
-        .td-cell-label {
+        .td-icon {
           pointer-events: none;
           line-height: 1;
-          filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.4);
         }
 
-        /* Bottom bar */
-        .td-bottom-bar {
+        /* ── Bottom bar ── */
+        .td-bot {
           display: flex;
           align-items: center;
           justify-content: space-between;
           width: 100%;
-          padding: 6px 12px 10px;
-          gap: 8px;
+          padding: 6px 10px 8px;
+          gap: 6px;
           flex-shrink: 0;
-          background: rgba(0,0,0,0.1);
+          background: rgba(0,0,0,0.3);
+          border-top: 2px solid #5c3a1e;
         }
-
         .td-hint-btn {
-          font-size: 12px;
-          font-weight: 800;
-          padding: 6px 12px;
-          border-radius: 8px;
-          border: 2px solid;
+          font-family: inherit;
+          font-size: 11px;
+          font-weight: 900;
+          padding: 5px 10px;
+          border: 2px solid #d97706;
+          background: #92400e;
+          color: #fbbf24;
           cursor: pointer;
-          white-space: nowrap;
-          transition: all 0.2s;
+          letter-spacing: 1px;
+          transition: transform 0.1s;
         }
-
-        .td-hint-ready {
-          background: linear-gradient(135deg, #fbbf24, #f59e0b);
-          border-color: #d97706;
-          color: #78350f;
-          box-shadow: 0 2px 8px rgba(251,191,36,0.4);
-        }
-
-        .td-hint-ready:active {
-          transform: scale(0.93);
-        }
-
-        .td-hint-cooldown {
-          background: rgba(255,255,255,0.1);
-          border-color: rgba(255,255,255,0.2);
-          color: rgba(254,243,199,0.4);
+        .td-hint-btn:active:not(:disabled) { transform: scale(0.9); }
+        .td-hint-cd {
+          background: #3a302a;
+          border-color: #57534e;
+          color: #78716c;
           cursor: default;
         }
-
         .td-legend {
           display: flex;
-          gap: 8px;
-          font-size: 11px;
+          gap: 6px;
+          font-size: 10px;
           font-weight: 700;
-          color: rgba(254,243,199,0.7);
+          color: #a8a29e;
           flex-wrap: wrap;
           justify-content: center;
+          letter-spacing: 0.5px;
         }
-
-        .td-exit-btn {
-          background: rgba(255,255,255,0.15);
-          border: 1px solid rgba(255,255,255,0.2);
-          border-radius: 8px;
-          color: #fef3c7;
-          font-size: 12px;
-          font-weight: 700;
-          padding: 6px 14px;
+        .td-exit {
+          font-family: inherit;
+          font-size: 11px;
+          font-weight: 900;
+          padding: 5px 10px;
+          border: 2px solid #57534e;
+          background: #3a302a;
+          color: #d6d3d1;
           cursor: pointer;
+          letter-spacing: 1px;
         }
+        .td-exit:active { transform: scale(0.9); background: #57534e; }
 
-        .td-exit-btn:active {
-          transform: scale(0.93);
-          background: rgba(255,255,255,0.25);
-        }
-
-        /* Ambient dirt particles in background */
-        .td-panel::before {
+        /* ── Ambient pixel dirt ── */
+        .td::before {
           content: '';
           position: absolute;
-          top: 0; left: 0; right: 0; bottom: 0;
+          inset: 0;
           background-image:
-            radial-gradient(circle at 15% 25%, rgba(251,191,36,0.08) 1px, transparent 1px),
-            radial-gradient(circle at 85% 15%, rgba(251,191,36,0.06) 1px, transparent 1px),
-            radial-gradient(circle at 45% 65%, rgba(251,191,36,0.05) 1px, transparent 1px),
-            radial-gradient(circle at 75% 80%, rgba(251,191,36,0.07) 1px, transparent 1px);
-          background-size: 100% 100%;
+            radial-gradient(1px 1px at 12% 20%, rgba(251,191,36,0.15), transparent),
+            radial-gradient(1px 1px at 88% 12%, rgba(251,191,36,0.1), transparent),
+            radial-gradient(1px 1px at 35% 55%, rgba(139,94,52,0.2), transparent),
+            radial-gradient(1px 1px at 72% 78%, rgba(251,191,36,0.12), transparent),
+            radial-gradient(1px 1px at 55% 35%, rgba(139,94,52,0.15), transparent),
+            radial-gradient(1px 1px at 20% 85%, rgba(251,191,36,0.08), transparent),
+            radial-gradient(1px 1px at 80% 45%, rgba(139,94,52,0.12), transparent);
           pointer-events: none;
           z-index: 0;
-        }
-
-        .td-panel > * {
-          position: relative;
-          z-index: 1;
+          image-rendering: pixelated;
         }
       `}</style>
     </section>

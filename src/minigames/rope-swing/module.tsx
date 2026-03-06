@@ -2,7 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
+
+// Character sprites
 import taeJinaSprite from '../../../assets/images/same-character/tae-jina.png'
+import kimYeonjaSprite from '../../../assets/images/same-character/kim-yeonja.png'
+import parkSangminSprite from '../../../assets/images/same-character/park-sangmin.png'
+import parkWankyuSprite from '../../../assets/images/same-character/park-wankyu.png'
+import seoTaijiSprite from '../../../assets/images/same-character/seo-taiji.png'
+import songChangsikSprite from '../../../assets/images/same-character/song-changsik.png'
+
+// Sound effects
 import releaseWhooshSfx from '../../../assets/sounds/rope-swing-release.mp3'
 import grabSfx from '../../../assets/sounds/rope-swing-grab.mp3'
 import coinSfx from '../../../assets/sounds/rope-swing-coin.mp3'
@@ -11,1170 +20,675 @@ import feverSfx from '../../../assets/sounds/rope-swing-fever.mp3'
 import windSfx from '../../../assets/sounds/rope-swing-wind.mp3'
 import fallSfx from '../../../assets/sounds/rope-swing-fall.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import speedupSfx from '../../../assets/sounds/rope-swing-speedup.mp3'
+import slowmoSfx from '../../../assets/sounds/rope-swing-slowmo.mp3'
+import starSfx from '../../../assets/sounds/rope-swing-star.mp3'
+import levelupSfx from '../../../assets/sounds/rope-swing-levelup.mp3'
+import bounceSfx from '../../../assets/sounds/rope-swing-bounce.mp3'
+import dashSfx from '../../../assets/sounds/rope-swing-dash.mp3'
 
-// --- Physics & Layout Constants ---
+const ALL_CHARS = [taeJinaSprite, kimYeonjaSprite, parkSangminSprite, parkWankyuSprite, seoTaijiSprite, songChangsikSprite]
 
-const VIEWBOX_WIDTH = 360
-const VIEWBOX_HEIGHT = 720
-
-const ROPE_ANCHOR_Y = 30
-const ROPE_LENGTH_MIN = 150
-const ROPE_LENGTH_MAX = 240
-const ROPE_GRAB_RADIUS = 55
-
-const GRAVITY = 980
-const PENDULUM_DAMPING = 0.998
-const WIND_MAX_FORCE = 120
-const WIND_CHANGE_INTERVAL_MS = 3000
-
-const INITIAL_ROPE_GAP_MIN = 100
-const INITIAL_ROPE_GAP_MAX = 140
-const GAP_INCREASE_PER_SCORE = 1.8
-const MAX_ROPE_GAP = 220
-
-const PLAYER_WIDTH = 52
-const PLAYER_HEIGHT = 60
-
-const COMBO_DECAY_MS = 2500
-const COMBO_MULTIPLIER_STEP = 5
-
-const FALL_ZONE_Y = VIEWBOX_HEIGHT + 60
-
-const SPEED_INCREASE_PER_SCORE = 0.03
-const MAX_SPEED_MULTIPLIER = 2.5
-const COIN_SPAWN_CHANCE = 0.65
-const COIN_RADIUS = 14
-const COIN_COLLECT_RADIUS = 34
-const COIN_SCORE = 5
-const DISTANCE_BONUS_DIVISOR = 80
-const FEVER_COMBO_THRESHOLD = 10
-const FEVER_MULTIPLIER = 2
-
-// Power-ups
-const POWERUP_SPAWN_CHANCE = 0.25
-const POWERUP_RADIUS = 16
-const POWERUP_COLLECT_RADIUS = 36
-const MAGNET_DURATION_MS = 5000
-const SHIELD_DURATION_MS = 6000
-const DOUBLE_JUMP_COUNT = 2
-
-// Obstacles
-const OBSTACLE_SPAWN_CHANCE = 0.3
-const OBSTACLE_RADIUS = 18
-
-// Trail
-const TRAIL_MAX_LENGTH = 12
-const TRAIL_FADE_STEP = 1 / TRAIL_MAX_LENGTH
+// --- Constants ---
+const VW = 360
+const VH = 720
+const ROPE_AY = 28
+const ROPE_LMIN = 140
+const ROPE_LMAX = 230
+const GRAB_R = 55
+const G = 980
+const PDAMP = 0.998
+const WIND_MAX = 120
+const WIND_MS = 3000
+const GAP_MIN0 = 95
+const GAP_MAX0 = 135
+const GAP_GROW = 1.6
+const GAP_CAP = 220
+const PW = 56
+const PH = 64
+const COMBO_DECAY = 2800
+const COMBO_STEP = 4
+const FALL_Y = VH + 60
+const SPD_GROW = 0.025
+const SPD_CAP = 2.5
+const COIN_CH = 0.7
+const COIN_R = 13
+const COIN_CR = 34
+const COIN_PTS = 5
+const DIST_DIV = 70
+const FVR_TH = 8
+const FVR_M = 2
+const PU_CH = 0.28
+const PU_R = 15
+const PU_CR = 36
+const MAG_MS = 5500
+const SHLD_MS = 6500
+const DJ_CT = 2
+const SX2_MS = 8000
+const SPB_MS = 4000
+const SLO_MS = 3500
+const OBS_CH = 0.32
+const OBS_R = 18
+const TRAIL_N = 14
+const LVL_SW = 5
+const MAX_LVL = 20
+const STAR_CH = 0.15
+const STAR_R = 12
+const STAR_PTS = 25
 
 // --- Types ---
-
-interface Rope {
-  readonly id: number
-  readonly anchorX: number
-  readonly length: number
-}
-
-type GamePhase = 'swinging' | 'flying' | 'falling' | 'ended'
-type PowerUpType = 'magnet' | 'shield' | 'double-jump' | 'score-x2'
-
-interface PowerUp {
-  id: number
-  x: number
-  y: number
-  type: PowerUpType
-  collected: boolean
-}
-
-interface Obstacle {
-  id: number
-  x: number
-  y: number
-  type: 'bird' | 'cloud'
-  vx: number
-}
-
-interface PlayerState {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  angle: number
-  angularVelocity: number
-}
-
-interface TrailPoint {
-  x: number
-  y: number
-  opacity: number
-}
+interface Rope { readonly id: number; readonly anchorX: number; readonly length: number }
+type Phase = 'swinging' | 'flying' | 'falling' | 'ended'
+type PUType = 'magnet' | 'shield' | 'double-jump' | 'score-x2' | 'speed-boost' | 'slow-motion'
+interface PU { id: number; x: number; y: number; type: PUType; collected: boolean }
+interface Obs { id: number; x: number; y: number; type: 'bat' | 'spike' | 'ghost'; vx: number; vy: number }
+interface Coin { id: number; x: number; y: number; collected: boolean }
+interface Star { id: number; x: number; y: number; collected: boolean }
+interface PState { x: number; y: number; vx: number; vy: number; ang: number; av: number }
+interface TPt { x: number; y: number; op: number }
 
 // --- Helpers ---
+const rnd = (a: number, b: number) => a + Math.random() * (b - a)
+const clp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+const cMul = (c: number) => 1 + Math.floor(c / COMBO_STEP)
 
-function randomBetween(min: number, max: number): number {
-  return min + Math.random() * (max - min)
+function gap(s: number) {
+  const g = s * GAP_GROW
+  return { mn: Math.min(GAP_MIN0 + g, GAP_CAP - 20), mx: Math.min(GAP_MAX0 + g, GAP_CAP) }
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
+function nxRope(px: number, sc: number, id: number): Rope {
+  const { mn, mx } = gap(sc)
+  const dir = Math.random() < 0.5 ? -1 : 1
+  const d = rnd(mn, mx)
+  let nx = px + dir * d
+  const m = 60
+  if (nx < m) nx = px + d; else if (nx > VW - m) nx = px - d
+  return { id, anchorX: clp(nx, m, VW - m), length: rnd(ROPE_LMIN, ROPE_LMAX) }
 }
 
-function toComboMultiplier(combo: number): number {
-  return 1 + Math.floor(combo / COMBO_MULTIPLIER_STEP)
+function initRopes(): Rope[] {
+  const a: Rope = { id: 0, anchorX: VW / 2, length: rnd(ROPE_LMIN, ROPE_LMAX) }
+  const b = nxRope(a.anchorX, 0, 1)
+  return [a, b, nxRope(b.anchorX, 0, 2)]
 }
 
-function computeRopeGap(score: number): { min: number; max: number } {
-  const increase = score * GAP_INCREASE_PER_SCORE
-  const min = Math.min(INITIAL_ROPE_GAP_MIN + increase, MAX_ROPE_GAP - 20)
-  const max = Math.min(INITIAL_ROPE_GAP_MAX + increase, MAX_ROPE_GAP)
-  return { min, max }
+function posOnR(r: Rope, a: number) {
+  return { x: r.anchorX + Math.sin(a) * r.length, y: ROPE_AY + Math.cos(a) * r.length }
 }
 
-function generateNextRope(previousAnchorX: number, score: number, nextId: number): Rope {
-  const gap = computeRopeGap(score)
-  const direction = Math.random() < 0.5 ? -1 : 1
-  const distance = randomBetween(gap.min, gap.max)
-  let nextX = previousAnchorX + direction * distance
-
-  const margin = 60
-  if (nextX < margin) {
-    nextX = previousAnchorX + distance
-  } else if (nextX > VIEWBOX_WIDTH - margin) {
-    nextX = previousAnchorX - distance
-  }
-
-  nextX = clampNumber(nextX, margin, VIEWBOX_WIDTH - margin)
-
-  return {
-    id: nextId,
-    anchorX: nextX,
-    length: randomBetween(ROPE_LENGTH_MIN, ROPE_LENGTH_MAX),
-  }
+const PUD: Record<PUType, { ic: string; cl: string; gl: string }> = {
+  'magnet':      { ic: 'M', cl: '#ef4444', gl: '#fca5a5' },
+  'shield':      { ic: 'S', cl: '#3b82f6', gl: '#93c5fd' },
+  'double-jump': { ic: 'J', cl: '#22c55e', gl: '#86efac' },
+  'score-x2':    { ic: '2', cl: '#f59e0b', gl: '#fde68a' },
+  'speed-boost': { ic: '>', cl: '#ec4899', gl: '#f9a8d4' },
+  'slow-motion': { ic: '~', cl: '#8b5cf6', gl: '#c4b5fd' },
 }
 
-function createInitialRopes(): Rope[] {
-  const first: Rope = {
-    id: 0,
-    anchorX: VIEWBOX_WIDTH / 2,
-    length: randomBetween(ROPE_LENGTH_MIN, ROPE_LENGTH_MAX),
-  }
-  const second = generateNextRope(first.anchorX, 0, 1)
-  const third = generateNextRope(second.anchorX, 0, 2)
-  return [first, second, third]
-}
+const OBS_E: Record<string, string> = { bat: '\u{1F987}', spike: '\u{1F480}', ghost: '\u{1F47B}' }
 
-function playerPositionOnRope(rope: Rope, angle: number): { x: number; y: number } {
-  return {
-    x: rope.anchorX + Math.sin(angle) * rope.length,
-    y: ROPE_ANCHOR_Y + Math.cos(angle) * rope.length,
-  }
-}
-
-const POWERUP_ICONS: Record<PowerUpType, { emoji: string; color: string }> = {
-  'magnet': { emoji: '🧲', color: '#ef4444' },
-  'shield': { emoji: '🛡️', color: '#3b82f6' },
-  'double-jump': { emoji: '⬆️', color: '#22c55e' },
-  'score-x2': { emoji: '✖️', color: '#f59e0b' },
+function PxB({ x, y, s, c, o = 1 }: { x: number; y: number; s: number; c: string; o?: number }) {
+  return <rect x={x} y={y} width={s} height={s} fill={c} opacity={o} shapeRendering="crispEdges" />
 }
 
 // --- Component ---
-
 function RopeSwingGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const effects = useGameEffects()
+  const fx = useGameEffects()
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
-  const [phase, setPhase] = useState<GamePhase>('swinging')
-  const [playerPos, setPlayerPos] = useState<{ x: number; y: number }>({ x: VIEWBOX_WIDTH / 2, y: ROPE_ANCHOR_Y + 170 })
-  const [ropes, setRopes] = useState<Rope[]>(() => createInitialRopes())
-  const [currentRopeIndex, setCurrentRopeIndex] = useState(0)
-  const [pendulumAngle, setPendulumAngle] = useState(0)
-  const [windForce, setWindForce] = useState(0)
-  const [cameraOffsetX, setCameraOffsetX] = useState(0)
-  const [elapsedMs, setElapsedMs] = useState(0)
-  const [coins, setCoins] = useState<Array<{ id: number; x: number; y: number; collected: boolean }>>([])
-  const [coinsCollected, setCoinsCollected] = useState(0)
-  const [isFever, setIsFever] = useState(false)
-  const [trail, setTrail] = useState<TrailPoint[]>([])
-  const [powerups, setPowerups] = useState<PowerUp[]>([])
-  const [obstacles, setObstacles] = useState<Obstacle[]>([])
-  const [activePowerups, setActivePowerups] = useState<Map<PowerUpType, number>>(new Map())
-  const [doubleJumpsLeft, setDoubleJumpsLeft] = useState(0)
-  const [hasShield, setHasShield] = useState(false)
-  const [swingCount, setSwingCount] = useState(0)
-  const [perfectGrabs, setPerfectGrabs] = useState(0)
-  const [showPerfect, setShowPerfect] = useState(false)
+  const [phase, setPhase] = useState<Phase>('swinging')
+  const [pPos, setPPos] = useState({ x: VW / 2, y: ROPE_AY + 170 })
+  const [ropes, setRopes] = useState<Rope[]>(() => initRopes())
+  const [cIdx, setCIdx] = useState(0)
+  const [pAng, setPAng] = useState(0)
+  const [wind, setWind] = useState(0)
+  const [camX, setCamX] = useState(0)
+  const [coins, setCoins] = useState<Coin[]>([])
+  const [coinCt, setCoinCt] = useState(0)
+  const [fever, setFever] = useState(false)
+  const [trail, setTrail] = useState<TPt[]>([])
+  const [pups, setPups] = useState<PU[]>([])
+  const [obs, setObs] = useState<Obs[]>([])
+  const [stars, setStars] = useState<Star[]>([])
+  const [dj, setDj] = useState(0)
+  const [shld, setShld] = useState(false)
+  const [swCt, setSwCt] = useState(0)
+  const [lvl, setLvl] = useState(1)
+  const [perf, setPerf] = useState(false)
+  const [lvUp, setLvUp] = useState(false)
+  const [chI, setChI] = useState(() => Math.floor(Math.random() * ALL_CHARS.length))
+  const [aPUs, setAPUs] = useState<Map<PUType, number>>(new Map())
+  const [sloMo, setSloMo] = useState(false)
+  const [dash, setDash] = useState(false)
 
-  const scoreRef = useRef(0)
-  const comboRef = useRef(0)
-  const lastComboAtRef = useRef(0)
-  const phaseRef = useRef<GamePhase>('swinging')
-  const playerRef = useRef<PlayerState>({
-    x: VIEWBOX_WIDTH / 2,
-    y: ROPE_ANCHOR_Y + 170,
-    vx: 0,
-    vy: 0,
-    angle: 0,
-    angularVelocity: 1.8,
-  })
-  const ropesRef = useRef<Rope[]>(ropes)
-  const currentRopeIndexRef = useRef(0)
-  const ropeIdCounterRef = useRef(3)
-  const windForceRef = useRef(0)
-  const windTimerRef = useRef(0)
-  const elapsedMsRef = useRef(0)
-  const finishedRef = useRef(false)
-  const coinsRef = useRef<Array<{ id: number; x: number; y: number; collected: boolean }>>([])
-  const coinIdCounterRef = useRef(0)
-  const coinsCollectedRef = useRef(0)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const cameraOffsetXRef = useRef(0)
-  const trailRef = useRef<TrailPoint[]>([])
-  const powerupsRef = useRef<PowerUp[]>([])
-  const obstaclesRef = useRef<Obstacle[]>([])
-  const powerupIdRef = useRef(0)
-  const obstacleIdRef = useRef(0)
-  const activePowerupsRef = useRef<Map<PowerUpType, number>>(new Map())
-  const doubleJumpsRef = useRef(0)
-  const hasShieldRef = useRef(false)
-  const swingCountRef = useRef(0)
-  const perfectGrabsRef = useRef(0)
+  const sR = useRef(0)
+  const coR = useRef(0)
+  const lcAt = useRef(0)
+  const phR = useRef<Phase>('swinging')
+  const pR = useRef<PState>({ x: VW / 2, y: ROPE_AY + 170, vx: 0, vy: 0, ang: 0, av: 1.8 })
+  const rsR = useRef<Rope[]>(ropes)
+  const ciR = useRef(0)
+  const ridR = useRef(3)
+  const wR = useRef(0)
+  const wtR = useRef(0)
+  const elR = useRef(0)
+  const dnR = useRef(false)
+  const cnsR = useRef<Coin[]>([])
+  const cnidR = useRef(0)
+  const cctR = useRef(0)
+  const rafR = useRef<number | null>(null)
+  const lfR = useRef<number | null>(null)
+  const cxR = useRef(0)
+  const trR = useRef<TPt[]>([])
+  const puR = useRef<PU[]>([])
+  const obR = useRef<Obs[]>([])
+  const stR = useRef<Star[]>([])
+  const puidR = useRef(0)
+  const obidR = useRef(0)
+  const stidR = useRef(0)
+  const apuR = useRef<Map<PUType, number>>(new Map())
+  const djR = useRef(0)
+  const shR = useRef(false)
+  const swR = useRef(0)
+  const lvR = useRef(1)
+  const chiR = useRef(chI)
 
-  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
+  const auR = useRef<Record<string, HTMLAudioElement | null>>({})
 
-  const playSfx = useCallback((key: string, volume: number, playbackRate = 1) => {
-    const audio = audioRefs.current[key]
-    if (!audio) return
-    const clone = audio.cloneNode() as HTMLAudioElement
-    clone.volume = volume
-    clone.playbackRate = playbackRate
-    void clone.play().catch(() => {})
+  const sfx = useCallback((k: string, v: number, r = 1) => {
+    const a = auR.current[k]
+    if (!a) return
+    const cl = a.cloneNode() as HTMLAudioElement
+    cl.volume = v; cl.playbackRate = r
+    void cl.play().catch(() => {})
   }, [])
 
-  const finishRound = useCallback(() => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    phaseRef.current = 'ended'
-    setPhase('ended')
-    const finalElapsedMs = Math.max(16.66, elapsedMsRef.current)
-    onFinish({
-      score: scoreRef.current,
-      durationMs: Math.round(finalElapsedMs),
-    })
+  const fin = useCallback(() => {
+    if (dnR.current) return
+    dnR.current = true; phR.current = 'ended'; setPhase('ended')
+    onFinish({ score: sR.current, durationMs: Math.round(Math.max(16.66, elR.current)) })
   }, [onFinish])
 
-  const handleTap = useCallback(() => {
-    if (finishedRef.current) return
+  const tap = useCallback(() => {
+    if (dnR.current) return
+    const ph = phR.current
+    if (ph === 'ended' || ph === 'falling') return
 
-    const currentPhase = phaseRef.current
-    if (currentPhase === 'ended' || currentPhase === 'falling') return
-
-    if (currentPhase === 'swinging') {
-      const player = playerRef.current
-      const rope = ropesRef.current[currentRopeIndexRef.current]
-      if (!rope) return
-
-      const pos = playerPositionOnRope(rope, player.angle)
-      const tangentSpeed = player.angularVelocity * rope.length
-      const cosAngle = Math.cos(player.angle)
-      const sinAngle = Math.sin(player.angle)
-
-      player.x = pos.x
-      player.y = pos.y
-      player.vx = tangentSpeed * cosAngle
-      player.vy = -tangentSpeed * sinAngle
-      player.vy = Math.min(player.vy, -50)
-
-      phaseRef.current = 'flying'
-      setPhase('flying')
-      playSfx('release', 0.5, 1.1)
-
-      // Reset trail
-      trailRef.current = []
-    } else if (currentPhase === 'flying' && doubleJumpsRef.current > 0) {
-      // Double jump!
-      const player = playerRef.current
-      player.vy = -350
-      player.vx *= 1.2
-      doubleJumpsRef.current -= 1
-      setDoubleJumpsLeft(doubleJumpsRef.current)
-      playSfx('release', 0.6, 1.4)
-      effects.spawnParticles(6, player.x, player.y)
-      effects.triggerFlash('rgba(34,197,94,0.3)')
+    if (ph === 'swinging') {
+      const p = pR.current, r = rsR.current[ciR.current]
+      if (!r) return
+      const pos = posOnR(r, p.ang)
+      const ts = p.av * r.length
+      p.x = pos.x; p.y = pos.y
+      p.vx = ts * Math.cos(p.ang); p.vy = -ts * Math.sin(p.ang)
+      p.vy = Math.min(p.vy, -50)
+      if (apuR.current.has('speed-boost')) {
+        p.vx *= 1.4; p.vy *= 0.8
+        setDash(true); setTimeout(() => setDash(false), 400)
+        sfx('dash', 0.5, 1.2)
+      }
+      phR.current = 'flying'; setPhase('flying')
+      sfx('release', 0.5, 1.1); trR.current = []
+    } else if (ph === 'flying' && djR.current > 0) {
+      const p = pR.current
+      p.vy = -380; p.vx *= 1.15
+      djR.current -= 1; setDj(djR.current)
+      sfx('bounce', 0.55, 1.3)
+      fx.spawnParticles(8, p.x, p.y)
+      fx.triggerFlash('rgba(34,197,94,0.35)')
     }
-  }, [playSfx, effects])
+  }, [sfx, fx])
 
-  const syncVisualState = useCallback(() => {
-    const player = playerRef.current
-    setPlayerPos({ x: player.x, y: player.y })
-    setPendulumAngle(player.angle)
-    setWindForce(windForceRef.current)
-    setCameraOffsetX(cameraOffsetXRef.current)
-    setElapsedMs(elapsedMsRef.current)
-    setTrail([...trailRef.current])
-    setCoins([...coinsRef.current])
-    setPowerups([...powerupsRef.current])
-    setObstacles([...obstaclesRef.current])
-    setActivePowerups(new Map(activePowerupsRef.current))
+  const sync = useCallback(() => {
+    const p = pR.current
+    setPPos({ x: p.x, y: p.y }); setPAng(p.ang); setWind(wR.current)
+    setCamX(cxR.current); setTrail([...trR.current]); setCoins([...cnsR.current])
+    setPups([...puR.current]); setObs([...obR.current]); setStars([...stR.current])
+    setAPUs(new Map(apuR.current))
   }, [])
 
-  const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const comboMultiplier = useMemo(() => toComboMultiplier(combo), [combo])
-  const hasMagnet = activePowerups.has('magnet')
-  const hasScoreX2 = activePowerups.has('score-x2')
+  const bestD = useMemo(() => Math.max(bestScore, score), [bestScore, score])
+  const cm = useMemo(() => cMul(combo), [combo])
+  const hasMag = aPUs.has('magnet')
+  const hasSx2 = aPUs.has('score-x2')
+  const hasSpd = aPUs.has('speed-boost')
 
-  // --- Audio setup ---
   useEffect(() => {
-    const sfxMap: Record<string, string> = {
-      release: releaseWhooshSfx,
-      grab: grabSfx,
-      coin: coinSfx,
-      combo: comboSfx,
-      fever: feverSfx,
-      wind: windSfx,
-      fall: fallSfx,
-      gameOver: gameOverHitSfx,
+    const m: Record<string, string> = {
+      release: releaseWhooshSfx, grab: grabSfx, coin: coinSfx, combo: comboSfx,
+      fever: feverSfx, wind: windSfx, fall: fallSfx, gameOver: gameOverHitSfx,
+      speedup: speedupSfx, slowmo: slowmoSfx, star: starSfx, levelup: levelupSfx,
+      bounce: bounceSfx, dash: dashSfx,
     }
-    for (const [key, src] of Object.entries(sfxMap)) {
-      const audio = new Audio(src)
-      audio.preload = 'auto'
-      audioRefs.current[key] = audio
-    }
-
-    return () => {
-      for (const audio of Object.values(audioRefs.current)) {
-        if (audio) {
-          audio.pause()
-          audio.currentTime = 0
-        }
-      }
-      effects.cleanup()
-    }
+    for (const [k, src] of Object.entries(m)) { const a = new Audio(src); a.preload = 'auto'; auR.current[k] = a }
+    return () => { for (const a of Object.values(auR.current)) { if (a) { a.pause(); a.currentTime = 0 } }; fx.cleanup() }
   }, [])
 
-  // --- Keyboard support ---
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        onExit()
-        return
-      }
-      if (event.code === 'Space' || event.code === 'ArrowUp') {
-        event.preventDefault()
-        handleTap()
-      }
+    const h = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); tap() }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleTap, onExit])
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [tap, onExit])
 
   // --- Main game loop ---
   useEffect(() => {
-    lastFrameAtRef.current = null
-
+    lfR.current = null
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
+      if (dnR.current) { rafR.current = null; return }
+      if (lfR.current === null) lfR.current = now
+      const raw = Math.min(now - lfR.current, MAX_FRAME_DELTA_MS)
+      lfR.current = now; elR.current += raw
+      const slow = apuR.current.has('slow-motion')
+      const dtMs = slow ? raw * 0.5 : raw
+      const dt = dtMs / 1000
+      setSloMo(slow)
+
+      wtR.current += raw
+      if (wtR.current >= WIND_MS) {
+        wtR.current = 0
+        const mw = Math.min(WIND_MAX, 30 + sR.current * 2.5 + lvR.current * 5)
+        wR.current = rnd(-mw, mw)
+        if (Math.abs(wR.current) > 55) sfx('wind', 0.25, 1)
       }
 
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
+      for (const [t, exp] of apuR.current.entries()) {
+        if (now > exp) { apuR.current.delete(t); if (t === 'shield') { shR.current = false; setShld(false) } }
       }
 
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-      elapsedMsRef.current += deltaMs
-      const deltaSec = deltaMs / 1000
+      const p = pR.current, ph = phR.current
 
-      // Wind update
-      windTimerRef.current += deltaMs
-      if (windTimerRef.current >= WIND_CHANGE_INTERVAL_MS) {
-        windTimerRef.current = 0
-        const maxWind = Math.min(WIND_MAX_FORCE, 30 + scoreRef.current * 3)
-        windForceRef.current = randomBetween(-maxWind, maxWind)
-        if (Math.abs(windForceRef.current) > 60) {
-          playSfx('wind', 0.3, 1)
+      if (ph === 'swinging') {
+        const r = rsR.current[ciR.current]
+        if (r) {
+          const ga = -(G / r.length) * Math.sin(p.ang)
+          const wa = (wR.current / r.length) * Math.cos(p.ang)
+          p.av += (ga + wa) * dt; p.av *= PDAMP; p.ang += p.av * dt
+          const pos = posOnR(r, p.ang); p.x = pos.x; p.y = pos.y
         }
-      }
+      } else if (ph === 'flying') {
+        const sm = Math.min(SPD_CAP, 1 + sR.current * SPD_GROW)
+        p.vy += G * dt; p.vx += wR.current * 0.3 * dt
+        p.x += p.vx * dt * sm; p.y += p.vy * dt
 
-      // Expire powerups
-      for (const [type, expiresAt] of activePowerupsRef.current.entries()) {
-        if (now > expiresAt) {
-          activePowerupsRef.current.delete(type)
-          if (type === 'shield') {
-            hasShieldRef.current = false
-            setHasShield(false)
+        trR.current.push({ x: p.x, y: p.y, op: 1 })
+        if (trR.current.length > TRAIL_N) trR.current.shift()
+        trR.current.forEach((t, i) => { t.op = (i + 1) / trR.current.length })
+
+        const magOn = apuR.current.has('magnet'), magRad = 110
+
+        for (const c of cnsR.current) {
+          if (c.collected) continue
+          if (magOn) { const dx = p.x - c.x, dy = p.y - c.y, d = Math.hypot(dx, dy); if (d < magRad && d > 1) { c.x += (dx / d) * 4; c.y += (dy / d) * 4 } }
+          if (Math.hypot(p.x - c.x, p.y - c.y) < COIN_CR) {
+            c.collected = true; cctR.current += 1; setCoinCt(cctR.current)
+            let pts = COIN_PTS * cMul(coR.current); if (apuR.current.has('score-x2')) pts *= 2
+            sR.current += pts; setScore(sR.current); sfx('coin', 0.4, 1.1 + Math.random() * 0.3); fx.spawnParticles(3, c.x, c.y)
           }
         }
-      }
+        cnsR.current = cnsR.current.filter(c => !c.collected)
 
-      const player = playerRef.current
-      const currentPhase = phaseRef.current
-
-      if (currentPhase === 'swinging') {
-        const rope = ropesRef.current[currentRopeIndexRef.current]
-        if (rope) {
-          const gravityAccel = -(GRAVITY / rope.length) * Math.sin(player.angle)
-          const windAccel = (windForceRef.current / rope.length) * Math.cos(player.angle)
-          player.angularVelocity += (gravityAccel + windAccel) * deltaSec
-          player.angularVelocity *= PENDULUM_DAMPING
-          player.angle += player.angularVelocity * deltaSec
-
-          const pos = playerPositionOnRope(rope, player.angle)
-          player.x = pos.x
-          player.y = pos.y
-        }
-      } else if (currentPhase === 'flying') {
-        const speedMult = Math.min(MAX_SPEED_MULTIPLIER, 1 + scoreRef.current * SPEED_INCREASE_PER_SCORE)
-
-        // Parabolic flight
-        player.vy += GRAVITY * deltaSec
-        player.vx += windForceRef.current * 0.3 * deltaSec
-        player.x += player.vx * deltaSec * speedMult
-        player.y += player.vy * deltaSec
-
-        // Trail update
-        trailRef.current.push({ x: player.x, y: player.y, opacity: 1 })
-        if (trailRef.current.length > TRAIL_MAX_LENGTH) {
-          trailRef.current.shift()
-        }
-        for (let i = 0; i < trailRef.current.length; i++) {
-          trailRef.current[i].opacity = (i + 1) * TRAIL_FADE_STEP
-        }
-
-        // Magnet effect — attract coins
-        const magnetActive = activePowerupsRef.current.has('magnet')
-        const magnetRadius = 100
-
-        // Coin collection during flight
-        for (const coin of coinsRef.current) {
-          if (coin.collected) continue
-
-          if (magnetActive) {
-            const dx = player.x - coin.x
-            const dy = player.y - coin.y
-            const dist = Math.hypot(dx, dy)
-            if (dist < magnetRadius && dist > 1) {
-              coin.x += (dx / dist) * 3
-              coin.y += (dy / dist) * 3
-            }
-          }
-
-          const dist = Math.hypot(player.x - coin.x, player.y - coin.y)
-          if (dist < COIN_COLLECT_RADIUS) {
-            coin.collected = true
-            coinsCollectedRef.current += 1
-            setCoinsCollected(coinsCollectedRef.current)
-            let coinPoints = COIN_SCORE * toComboMultiplier(comboRef.current)
-            if (activePowerupsRef.current.has('score-x2')) coinPoints *= 2
-            scoreRef.current += coinPoints
-            setScore(scoreRef.current)
-            playSfx('coin', 0.45, 1.2 + Math.random() * 0.3)
-            effects.spawnParticles(3, coin.x, coin.y)
+        for (const s of stR.current) {
+          if (s.collected) continue
+          if (magOn) { const dx = p.x - s.x, dy = p.y - s.y, d = Math.hypot(dx, dy); if (d < magRad && d > 1) { s.x += (dx / d) * 4; s.y += (dy / d) * 4 } }
+          if (Math.hypot(p.x - s.x, p.y - s.y) < COIN_CR) {
+            s.collected = true; let pts = STAR_PTS * cMul(coR.current); if (apuR.current.has('score-x2')) pts *= 2
+            sR.current += pts; setScore(sR.current); sfx('star', 0.5, 1.2)
+            fx.spawnParticles(6, s.x, s.y); fx.showScorePopup(pts, s.x, s.y - 20, '#fbbf24'); fx.triggerFlash('rgba(250,204,21,0.25)')
           }
         }
-        coinsRef.current = coinsRef.current.filter((c) => !c.collected)
+        stR.current = stR.current.filter(s => !s.collected)
 
-        // Powerup collection
-        for (const pu of powerupsRef.current) {
+        for (const pu of puR.current) {
           if (pu.collected) continue
-          const dist = Math.hypot(player.x - pu.x, player.y - pu.y)
-          if (dist < POWERUP_COLLECT_RADIUS) {
+          if (Math.hypot(p.x - pu.x, p.y - pu.y) < PU_CR) {
             pu.collected = true
-            if (pu.type === 'double-jump') {
-              doubleJumpsRef.current = DOUBLE_JUMP_COUNT
-              setDoubleJumpsLeft(DOUBLE_JUMP_COUNT)
-            } else if (pu.type === 'shield') {
-              hasShieldRef.current = true
-              setHasShield(true)
-              activePowerupsRef.current.set('shield', now + SHIELD_DURATION_MS)
-            } else if (pu.type === 'magnet') {
-              activePowerupsRef.current.set('magnet', now + MAGNET_DURATION_MS)
-            } else if (pu.type === 'score-x2') {
-              activePowerupsRef.current.set('score-x2', now + 8000)
+            switch (pu.type) {
+              case 'double-jump': djR.current = DJ_CT; setDj(DJ_CT); break
+              case 'shield': shR.current = true; setShld(true); apuR.current.set('shield', now + SHLD_MS); break
+              case 'magnet': apuR.current.set('magnet', now + MAG_MS); break
+              case 'score-x2': apuR.current.set('score-x2', now + SX2_MS); break
+              case 'speed-boost': apuR.current.set('speed-boost', now + SPB_MS); sfx('speedup', 0.45, 1.2); break
+              case 'slow-motion': apuR.current.set('slow-motion', now + SLO_MS); sfx('slowmo', 0.45, 1); break
             }
-            playSfx('combo', 0.5, 1.3)
-            effects.triggerFlash(POWERUP_ICONS[pu.type].color + '40')
-            effects.spawnParticles(5, pu.x, pu.y)
+            sfx('combo', 0.45, 1.3); fx.triggerFlash(PUD[pu.type].gl + '40'); fx.spawnParticles(5, pu.x, pu.y)
           }
         }
-        powerupsRef.current = powerupsRef.current.filter((p) => !p.collected)
+        puR.current = puR.current.filter(pu => !pu.collected)
 
-        // Obstacle collision
-        for (const obs of obstaclesRef.current) {
-          // Move obstacles
-          obs.x += obs.vx * deltaSec
-
-          const dist = Math.hypot(player.x - obs.x, player.y - obs.y)
-          if (dist < OBSTACLE_RADIUS + PLAYER_WIDTH / 3) {
-            if (hasShieldRef.current) {
-              hasShieldRef.current = false
-              setHasShield(false)
-              activePowerupsRef.current.delete('shield')
-              effects.triggerFlash('rgba(59,130,246,0.5)')
-              effects.triggerShake(3)
-              playSfx('grab', 0.5, 0.8)
-              // Remove the obstacle
-              obs.x = -999
+        for (const o of obR.current) {
+          o.x += o.vx * dt; o.y += (o.vy || 0) * dt
+          if (Math.hypot(p.x - o.x, p.y - o.y) < OBS_R + PW / 3) {
+            if (shR.current) {
+              shR.current = false; setShld(false); apuR.current.delete('shield')
+              fx.triggerFlash('rgba(59,130,246,0.5)'); fx.triggerShake(3); sfx('grab', 0.5, 0.7); o.x = -999
             } else {
-              phaseRef.current = 'falling'
-              setPhase('falling')
-              effects.triggerShake(6)
-              effects.triggerFlash('rgba(239,68,68,0.5)')
-              playSfx('fall', 0.6, 1)
-              playSfx('gameOver', 0.6, 0.9)
-              finishRound()
-              animationFrameRef.current = null
-              syncVisualState()
-              return
+              phR.current = 'falling'; setPhase('falling')
+              fx.triggerShake(6); fx.triggerFlash('rgba(239,68,68,0.5)')
+              sfx('fall', 0.6, 1); sfx('gameOver', 0.6, 0.9)
+              fin(); rafR.current = null; sync(); return
             }
           }
         }
-        obstaclesRef.current = obstaclesRef.current.filter((o) => o.x > -500 && o.x < VIEWBOX_WIDTH + 500)
+        obR.current = obR.current.filter(o => o.x > -500 && o.x < VW + 500)
 
-        // Check if grabbed next rope
-        const allRopes = ropesRef.current
-        for (let i = 0; i < allRopes.length; i++) {
-          if (i <= currentRopeIndexRef.current) continue
-          const rope = allRopes[i]
-          const ropeEndX = rope.anchorX
-          const ropeEndY = ROPE_ANCHOR_Y + rope.length * 0.6
+        const allR = rsR.current
+        for (let i = 0; i < allR.length; i++) {
+          if (i <= ciR.current) continue
+          const r = allR[i], ey = ROPE_AY + r.length * 0.6
+          const dist = Math.hypot(p.x - r.anchorX, p.y - ey)
+          if (dist < GRAB_R && p.y < ROPE_AY + r.length + 20) {
+            ciR.current = i; setCIdx(i); swR.current += 1; setSwCt(swR.current)
 
-          const dx = player.x - ropeEndX
-          const dy = player.y - ropeEndY
-          const dist = Math.hypot(dx, dy)
-
-          if (dist < ROPE_GRAB_RADIUS && player.y < ROPE_ANCHOR_Y + rope.length + 20) {
-            // Grabbed the rope
-            currentRopeIndexRef.current = i
-            setCurrentRopeIndex(i)
-            swingCountRef.current += 1
-            setSwingCount(swingCountRef.current)
-
-            // Calculate angle from grab position
-            const grabDx = player.x - rope.anchorX
-            const grabDy = player.y - ROPE_ANCHOR_Y
-            player.angle = Math.atan2(grabDx, grabDy)
-
-            // Convert velocity to angular velocity
-            const tangentialComponent =
-              (player.vx * Math.cos(player.angle) - player.vy * Math.sin(player.angle)) / rope.length
-            player.angularVelocity = tangentialComponent * 0.7
-
-            // Combo logic
-            const timeSinceLastCombo = now - lastComboAtRef.current
-            if (timeSinceLastCombo < COMBO_DECAY_MS) {
-              comboRef.current += 1
-            } else {
-              comboRef.current = 1
-            }
-            lastComboAtRef.current = now
-            setCombo(comboRef.current)
-
-            const comboMult = toComboMultiplier(comboRef.current)
-            const feverActive = comboRef.current >= FEVER_COMBO_THRESHOLD
-            if (feverActive && !activePowerupsRef.current.has('score-x2')) {
-              playSfx('fever', 0.5, 1)
-            }
-            setIsFever(feverActive)
-
-            // Perfect grab detection (close to anchor center)
-            const isPerfect = dist < ROPE_GRAB_RADIUS * 0.4
-            if (isPerfect) {
-              perfectGrabsRef.current += 1
-              setPerfectGrabs(perfectGrabsRef.current)
-              setShowPerfect(true)
-              setTimeout(() => setShowPerfect(false), 600)
+            const nLvl = Math.min(MAX_LVL, 1 + Math.floor(swR.current / LVL_SW))
+            if (nLvl > lvR.current) {
+              lvR.current = nLvl; setLvl(nLvl); setLvUp(true); setTimeout(() => setLvUp(false), 1200)
+              sfx('levelup', 0.55, 1); fx.triggerFlash('rgba(250,204,21,0.35)'); fx.spawnParticles(12, p.x, p.y)
+              chiR.current = (chiR.current + 1) % ALL_CHARS.length; setChI(chiR.current)
+              const lb = nLvl * 5; sR.current += lb; setScore(sR.current); fx.showScorePopup(lb, p.x, p.y - 40, '#fbbf24')
             }
 
-            // Distance-based scoring
-            const grabDist = Math.abs(player.x - rope.anchorX)
-            const distanceBonus = Math.floor(grabDist / DISTANCE_BONUS_DIVISOR)
-            let earnedPoints = (1 + distanceBonus) * comboMult
-            if (feverActive) earnedPoints *= FEVER_MULTIPLIER
-            if (isPerfect) earnedPoints *= 2
-            if (activePowerupsRef.current.has('score-x2')) earnedPoints *= 2
+            const gx = p.x - r.anchorX, gy = p.y - ROPE_AY
+            p.ang = Math.atan2(gx, gy)
+            p.av = ((p.vx * Math.cos(p.ang) - p.vy * Math.sin(p.ang)) / r.length) * 0.7
 
-            const nextScore = scoreRef.current + earnedPoints
-            scoreRef.current = nextScore
-            setScore(nextScore)
+            const ts = now - lcAt.current
+            coR.current = ts < COMBO_DECAY ? coR.current + 1 : 1
+            lcAt.current = now; setCombo(coR.current)
+            const cmv = cMul(coR.current), fvOn = coR.current >= FVR_TH
+            if (fvOn && !fever) sfx('fever', 0.5, 1)
+            setFever(fvOn)
 
-            phaseRef.current = 'swinging'
-            setPhase('swinging')
+            const isPf = dist < GRAB_R * 0.35
+            if (isPf) { setPerf(true); setTimeout(() => setPerf(false), 700) }
 
-            // Clear trail
-            trailRef.current = []
+            const db = Math.floor(Math.abs(p.x - r.anchorX) / DIST_DIV)
+            let pts = (1 + db) * cmv
+            if (fvOn) pts *= FVR_M; if (isPf) pts *= 2; if (apuR.current.has('score-x2')) pts *= 2
+            sR.current += pts; setScore(sR.current)
+            phR.current = 'swinging'; setPhase('swinging'); trR.current = []
+            if (cmv > 1) sfx('combo', 0.5, 1 + coR.current * 0.02); else sfx('grab', 0.4, 1.05)
+            fx.triggerFlash(isPf ? 'rgba(250,204,21,0.4)' : undefined)
+            fx.spawnParticles(isPf ? 10 : 4, p.x, p.y)
+            if (pts > 5) fx.showScorePopup(pts, p.x, p.y - 30)
 
-            if (comboMult > 1) {
-              playSfx('combo', 0.55, 1 + comboRef.current * 0.03)
-            } else {
-              playSfx('grab', 0.45, 1.05)
-            }
-
-            effects.triggerFlash(isPerfect ? 'rgba(250,204,21,0.4)' : undefined)
-            effects.spawnParticles(isPerfect ? 8 : 4, player.x, player.y)
-            if (earnedPoints > 5) {
-              effects.spawnScorePopup(earnedPoints, player.x, player.y - 30)
-            }
-
-            // Spawn coins between current and next rope
-            if (Math.random() < COIN_SPAWN_CHANCE && i + 1 < allRopes.length) {
-              const nextRopeAnchor = allRopes[i + 1] ? allRopes[i + 1].anchorX : rope.anchorX + 100
-              const coinCount = 1 + Math.floor(Math.random() * 3)
-              for (let c = 0; c < coinCount; c++) {
-                const t = (c + 1) / (coinCount + 1)
-                const coinX = rope.anchorX + (nextRopeAnchor - rope.anchorX) * t + randomBetween(-20, 20)
-                const coinY = randomBetween(ROPE_ANCHOR_Y + 80, VIEWBOX_HEIGHT - 150)
-                coinsRef.current.push({ id: coinIdCounterRef.current++, x: coinX, y: coinY, collected: false })
+            if (i + 1 < allR.length) {
+              const nxA = allR[i + 1] ? allR[i + 1].anchorX : r.anchorX + 100
+              if (Math.random() < COIN_CH) {
+                const ct = 1 + Math.floor(Math.random() * 3) + Math.floor(lvR.current / 4)
+                for (let c = 0; c < ct; c++) {
+                  const t = (c + 1) / (ct + 1)
+                  cnsR.current.push({ id: cnidR.current++, x: r.anchorX + (nxA - r.anchorX) * t + rnd(-25, 25), y: rnd(ROPE_AY + 70, VH - 160), collected: false })
+                }
+              }
+              if (Math.random() < STAR_CH + lvR.current * 0.01)
+                stR.current.push({ id: stidR.current++, x: (r.anchorX + nxA) / 2 + rnd(-30, 30), y: rnd(ROPE_AY + 50, VH * 0.4), collected: false })
+              if (Math.random() < PU_CH) {
+                const ts: PUType[] = ['magnet', 'shield', 'double-jump', 'score-x2', 'speed-boost', 'slow-motion']
+                puR.current.push({ id: puidR.current++, x: (r.anchorX + nxA) / 2, y: rnd(ROPE_AY + 50, VH * 0.45), type: ts[Math.floor(Math.random() * ts.length)], collected: false })
+              }
+              const oc = OBS_CH + lvR.current * 0.015
+              if (sR.current > 3 && Math.random() < oc) {
+                const d = Math.random() < 0.5 ? 1 : -1
+                const ots: Array<'bat' | 'spike' | 'ghost'> = ['bat', 'spike', 'ghost']
+                obR.current.push({ id: obidR.current++, x: d > 0 ? -50 : VW + 50, y: rnd(ROPE_AY + 80, VH * 0.6), type: ots[Math.floor(Math.random() * ots.length)], vx: d * rnd(50 + lvR.current * 5, 110 + lvR.current * 8), vy: rnd(-15, 15) })
               }
             }
 
-            // Spawn powerup occasionally
-            if (Math.random() < POWERUP_SPAWN_CHANCE && i + 1 < allRopes.length) {
-              const nextRope = allRopes[i + 1]
-              const types: PowerUpType[] = ['magnet', 'shield', 'double-jump', 'score-x2']
-              const puType = types[Math.floor(Math.random() * types.length)]
-              const puX = (rope.anchorX + (nextRope ? nextRope.anchorX : rope.anchorX + 100)) / 2
-              const puY = randomBetween(ROPE_ANCHOR_Y + 60, VIEWBOX_HEIGHT * 0.5)
-              powerupsRef.current.push({ id: powerupIdRef.current++, x: puX, y: puY, type: puType, collected: false })
-            }
-
-            // Spawn obstacle occasionally (after score 5)
-            if (scoreRef.current > 5 && Math.random() < OBSTACLE_SPAWN_CHANCE && i + 1 < allRopes.length) {
-              const obsY = randomBetween(ROPE_ANCHOR_Y + 100, VIEWBOX_HEIGHT * 0.6)
-              const dir = Math.random() < 0.5 ? 1 : -1
-              const obsX = dir > 0 ? -50 : VIEWBOX_WIDTH + 50
-              obstaclesRef.current.push({
-                id: obstacleIdRef.current++,
-                x: obsX,
-                y: obsY,
-                type: Math.random() < 0.5 ? 'bird' : 'cloud',
-                vx: dir * randomBetween(40, 100),
-              })
-            }
-
-            // Generate new ropes ahead
-            let currentRopes = [...ropesRef.current]
-            while (currentRopes.length - i < 3) {
-              const lastRope = currentRopes[currentRopes.length - 1]
-              const newRope = generateNextRope(lastRope.anchorX, scoreRef.current, ropeIdCounterRef.current++)
-              currentRopes.push(newRope)
-            }
-
-            // Remove old ropes far behind
-            const removeCount = Math.max(0, i - 2)
-            if (removeCount > 0) {
-              currentRopes = currentRopes.slice(removeCount)
-              currentRopeIndexRef.current -= removeCount
-              setCurrentRopeIndex(currentRopeIndexRef.current)
-            }
-
-            ropesRef.current = currentRopes
-            setRopes(currentRopes)
-            break
+            let cr = [...rsR.current]
+            while (cr.length - i < 3) { const l = cr[cr.length - 1]; cr.push(nxRope(l.anchorX, sR.current, ridR.current++)) }
+            const rm = Math.max(0, i - 2)
+            if (rm > 0) { cr = cr.slice(rm); ciR.current -= rm; setCIdx(ciR.current) }
+            rsR.current = cr; setRopes(cr); break
           }
         }
 
-        // Check fall
-        if (player.y > FALL_ZONE_Y) {
-          phaseRef.current = 'falling'
-          setPhase('falling')
-          effects.triggerShake(5)
-          effects.triggerFlash('rgba(239,68,68,0.5)')
-          playSfx('fall', 0.6, 1)
-          playSfx('gameOver', 0.6, 0.9)
-          finishRound()
-          animationFrameRef.current = null
-          syncVisualState()
-          return
-        }
-
-        // Check out of bounds horizontally
-        if (player.x < -150 || player.x > VIEWBOX_WIDTH + 150) {
-          phaseRef.current = 'falling'
-          setPhase('falling')
-          effects.triggerShake(5)
-          effects.triggerFlash('rgba(239,68,68,0.5)')
-          playSfx('fall', 0.6, 1)
-          playSfx('gameOver', 0.6, 0.9)
-          finishRound()
-          animationFrameRef.current = null
-          syncVisualState()
-          return
+        if (p.y > FALL_Y || p.x < -180 || p.x > VW + 180) {
+          phR.current = 'falling'; setPhase('falling')
+          fx.triggerShake(5); fx.triggerFlash('rgba(239,68,68,0.5)')
+          sfx('fall', 0.6, 1); sfx('gameOver', 0.6, 0.9)
+          fin(); rafR.current = null; sync(); return
         }
       }
 
-      // Camera follows player horizontally
-      const targetCameraX = player.x - VIEWBOX_WIDTH / 2
-      cameraOffsetXRef.current += (targetCameraX - cameraOffsetXRef.current) * 0.08
-
-      syncVisualState()
-      effects.updateParticles()
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      const tcx = p.x - VW / 2
+      cxR.current += (tcx - cxR.current) * 0.08
+      sync(); fx.updateParticles()
+      rafR.current = window.requestAnimationFrame(step)
     }
+    rafR.current = window.requestAnimationFrame(step)
+    return () => { if (rafR.current !== null) { window.cancelAnimationFrame(rafR.current); rafR.current = null }; lfR.current = null }
+  }, [fin, sfx, sync, fx])
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
-
-    return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
-    }
-  }, [finishRound, playSfx, syncVisualState, effects])
-
-  // --- Derived visuals ---
-  const currentRope = ropes[currentRopeIndex] ?? null
-  const isSwinging = phase === 'swinging'
-
-  const windIndicator = useMemo(() => {
-    const absWind = Math.abs(windForce)
-    if (absWind < 15) return ''
-    const dir = windForce > 0 ? '>' : '<'
-    const arrows = absWind > 80 ? dir.repeat(3) : absWind > 40 ? dir.repeat(2) : dir
-    return arrows
-  }, [windForce])
-
-  // Player rotation based on velocity
-  const playerRotation = useMemo(() => {
-    if (phase === 'flying') {
-      const player = playerRef.current
-      return Math.atan2(player.vx, -player.vy) * (180 / Math.PI)
-    }
-    if (phase === 'swinging') {
-      return pendulumAngle * (180 / Math.PI) * 0.5
-    }
+  const isSw = phase === 'swinging'
+  const wArr = useMemo(() => {
+    const aw = Math.abs(wind); if (aw < 15) return ''
+    const d = wind > 0 ? '>' : '<'
+    return aw > 80 ? d.repeat(3) : aw > 40 ? d.repeat(2) : d
+  }, [wind])
+  const pRot = useMemo(() => {
+    if (phase === 'flying') return Math.atan2(pR.current.vx, -pR.current.vy) * (180 / Math.PI)
+    if (phase === 'swinging') return pAng * (180 / Math.PI) * 0.5
     return 0
-  }, [phase, pendulumAngle, playerPos])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, pAng, pPos])
+  const curCh = ALL_CHARS[chI]
 
   return (
-    <section
-      className="mini-game-panel rope-swing-panel"
-      aria-label="rope-swing-game"
-      style={{
-        position: 'relative',
-        width: '100%',
-        maxWidth: '432px',
-        height: '100%',
-        margin: '0 auto',
-        overflow: 'hidden',
-        background: 'linear-gradient(180deg, #0f172a 0%, #1e3a5f 35%, #134e4a 70%, #065f46 100%)',
-        ...effects.getShakeStyle(),
-      }}
-    >
-      <div
-        className="rope-swing-board"
-        onClick={handleTap}
-        onTouchStart={(e) => {
-          e.preventDefault()
-          handleTap()
-        }}
-        role="presentation"
-        style={{ width: '100%', height: '100%', position: 'relative', cursor: 'pointer' }}
-      >
-        <svg
-          className="rope-swing-svg"
-          viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-          preserveAspectRatio="xMidYMid slice"
-          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
-          aria-label="rope-swing-stage"
-        >
-          {/* Definitions */}
+    <section className="mini-game-panel rope-swing-panel" aria-label="rope-swing-game"
+      style={{ position: 'relative', width: '100%', maxWidth: '432px', height: '100%', margin: '0 auto', overflow: 'hidden', background: '#0a0a1a', imageRendering: 'pixelated', ...fx.getShakeStyle() }}>
+      <div onClick={tap} onTouchStart={(e) => { e.preventDefault(); tap() }} role="presentation"
+        style={{ width: '100%', height: '100%', position: 'relative', cursor: 'pointer' }}>
+        <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid slice"
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, imageRendering: 'pixelated' }} shapeRendering="crispEdges">
           <defs>
-            <linearGradient id="rs-rope-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#fbbf24" />
-              <stop offset="100%" stopColor="#d97706" />
+            <linearGradient id="rbg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0a0a2e" /><stop offset="40%" stopColor="#1a1a4e" />
+              <stop offset="70%" stopColor="#0d2818" /><stop offset="100%" stopColor="#0a1a0a" />
             </linearGradient>
-            <radialGradient id="rs-coin-grad" cx="35%" cy="35%">
-              <stop offset="0%" stopColor="#fef3c7" />
-              <stop offset="100%" stopColor="#f59e0b" />
-            </radialGradient>
-            <filter id="rs-glow">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            <filter id="rs-glow-strong">
-              <feGaussianBlur stdDeviation="6" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
+            <filter id="rgl"><feGaussianBlur stdDeviation="2.5" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+            <filter id="rg2"><feGaussianBlur stdDeviation="5" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
           </defs>
+          <rect width={VW} height={VH} fill="url(#rbg)" />
 
-          {/* Stars background */}
-          {Array.from({ length: 30 }, (_, i) => (
-            <circle
-              key={`star-${i}`}
-              cx={(i * 97 + 31) % VIEWBOX_WIDTH}
-              cy={(i * 53 + 17) % (VIEWBOX_HEIGHT * 0.35)}
-              r={i % 4 === 0 ? 2 : 1}
-              fill="white"
-              opacity={0.2 + (i % 5) * 0.1}
-            >
-              {i % 3 === 0 && (
-                <animate attributeName="opacity" values="0.1;0.5;0.1" dur={`${2 + (i % 3)}s`} repeatCount="indefinite" />
-              )}
-            </circle>
+          {/* Pixel stars */}
+          {Array.from({ length: 40 }, (_, i) => (
+            <PxB key={`s${i}`} x={(i * 89 + 13) % VW} y={(i * 47 + 11) % (VH * 0.35)} s={i % 5 === 0 ? 4 : 2} c={i % 7 === 0 ? '#fbbf24' : '#fff'} o={0.15 + (i % 6) * 0.08} />
           ))}
 
-          {/* Bottom ground/jungle */}
-          <rect x="0" y={VIEWBOX_HEIGHT - 60} width={VIEWBOX_WIDTH} height={60} fill="#052e16" opacity={0.6} />
-          {Array.from({ length: 12 }, (_, i) => (
-            <polygon
-              key={`tree-${i}`}
-              points={`${i * 32},${VIEWBOX_HEIGHT} ${i * 32 + 16},${VIEWBOX_HEIGHT - 30 - (i % 3) * 10} ${i * 32 + 32},${VIEWBOX_HEIGHT}`}
-              fill={i % 2 === 0 ? '#064e3b' : '#065f46'}
-              opacity={0.7}
-            />
+          {/* Ground */}
+          {Array.from({ length: 24 }, (_, i) => (
+            <g key={`g${i}`}>
+              <PxB x={i * 16} y={VH - 48} s={16} c={i % 3 === 0 ? '#1a4a1a' : '#0d3d0d'} />
+              <PxB x={i * 16} y={VH - 32} s={16} c={i % 2 === 0 ? '#143a14' : '#0a2e0a'} />
+              <PxB x={i * 16} y={VH - 16} s={16} c="#0a1e0a" />
+              {i % 3 === 0 && <PxB x={i * 16 + 4} y={VH - 56} s={6} c="#22c55e" o={0.6} />}
+              {i % 4 === 1 && <PxB x={i * 16 + 8} y={VH - 52} s={4} c="#34d399" o={0.5} />}
+            </g>
           ))}
 
-          {/* Camera group */}
-          <g transform={`translate(${(-cameraOffsetX).toFixed(2)}, 0)`}>
+          {/* Trees */}
+          {[50, 130, 220, 310].map((tx, i) => (
+            <g key={`t${i}`} opacity={0.3}>
+              <PxB x={tx} y={VH - 120} s={8} c="#064e3b" />
+              <PxB x={tx - 4} y={VH - 104} s={16} c="#065f46" />
+              <PxB x={tx - 8} y={VH - 88} s={24} c="#064e3b" />
+              <PxB x={tx + 2} y={VH - 72} s={4} c="#3a2a1a" />
+              <PxB x={tx + 2} y={VH - 56} s={4} c="#3a2a1a" />
+            </g>
+          ))}
+
+          {sloMo && <rect width={VW} height={VH} fill="rgba(139,92,246,0.08)" />}
+
+          <g transform={`translate(${(-camX).toFixed(1)}, 0)`}>
             {/* Trail */}
-            {phase === 'flying' && trail.map((point, i) => (
-              <circle
-                key={`trail-${i}`}
-                cx={point.x}
-                cy={point.y}
-                r={3 + point.opacity * 4}
-                fill={isFever ? '#fbbf24' : '#34d399'}
-                opacity={point.opacity * 0.6}
-              />
+            {phase === 'flying' && trail.map((pt, i) => (
+              <PxB key={`tr${i}`} x={pt.x - 3} y={pt.y - 3} s={6 + Math.round(pt.op * 4)}
+                c={fever ? '#fbbf24' : hasSpd ? '#ec4899' : '#34d399'} o={pt.op * 0.5} />
             ))}
 
-            {/* Ropes & anchors */}
-            {ropes.map((rope, ropeIdx) => {
-              const isActive = ropeIdx === currentRopeIndex && isSwinging
-              const ropeBottomX = isActive
-                ? rope.anchorX + Math.sin(pendulumAngle) * rope.length
-                : rope.anchorX
-              const ropeBottomY = isActive
-                ? ROPE_ANCHOR_Y + Math.cos(pendulumAngle) * rope.length
-                : ROPE_ANCHOR_Y + rope.length
-              const isPast = ropeIdx < currentRopeIndex
-
+            {/* Ropes */}
+            {ropes.map((r, ri) => {
+              const act = ri === cIdx && isSw
+              const bx = act ? r.anchorX + Math.sin(pAng) * r.length : r.anchorX
+              const by = act ? ROPE_AY + Math.cos(pAng) * r.length : ROPE_AY + r.length
+              const past = ri < cIdx, isNx = ri === cIdx + 1
+              const segs = 12, pts: Array<{ x: number; y: number }> = []
+              for (let s = 0; s <= segs; s++) { const t = s / segs; pts.push({ x: r.anchorX + (bx - r.anchorX) * t, y: ROPE_AY + (by - ROPE_AY) * t }) }
               return (
-                <g key={rope.id}>
-                  {/* Anchor glow */}
-                  {!isPast && (
-                    <circle
-                      cx={rope.anchorX}
-                      cy={ROPE_ANCHOR_Y}
-                      r={12}
-                      fill="none"
-                      stroke="#fbbf24"
-                      strokeWidth={1}
-                      opacity={0.3}
-                      filter="url(#rs-glow)"
-                    />
-                  )}
-                  {/* Anchor point */}
-                  <circle
-                    cx={rope.anchorX}
-                    cy={ROPE_ANCHOR_Y}
-                    r={7}
-                    fill="#fbbf24"
-                    stroke="#92400e"
-                    strokeWidth={2}
-                    opacity={isPast ? 0.3 : 1}
-                  />
-                  {/* Rope line */}
-                  <line
-                    x1={rope.anchorX}
-                    y1={ROPE_ANCHOR_Y}
-                    x2={ropeBottomX}
-                    y2={ropeBottomY}
-                    stroke="url(#rs-rope-grad)"
-                    strokeWidth={isActive ? 3.5 : 2.5}
-                    strokeLinecap="round"
-                    opacity={isPast ? 0.2 : 1}
-                  />
-                  {/* Grab zone hint for next rope */}
-                  {ropeIdx === currentRopeIndex + 1 && (
-                    <g>
-                      <circle
-                        cx={rope.anchorX}
-                        cy={ROPE_ANCHOR_Y + rope.length * 0.6}
-                        r={ROPE_GRAB_RADIUS}
-                        fill="none"
-                        stroke="#34d399"
-                        strokeWidth={2}
-                        strokeDasharray="6 4"
-                        opacity={0.4}
-                      >
-                        <animate attributeName="opacity" values="0.2;0.5;0.2" dur="1.5s" repeatCount="indefinite" />
-                      </circle>
-                      {/* Arrow pointing to next rope */}
-                      <text
-                        x={rope.anchorX}
-                        y={ROPE_ANCHOR_Y + rope.length * 0.6 - ROPE_GRAB_RADIUS - 8}
-                        textAnchor="middle"
-                        fill="#34d399"
-                        fontSize={16}
-                        opacity={0.6}
-                      >
-                        v
-                      </text>
-                    </g>
+                <g key={r.id} opacity={past ? 0.2 : 1}>
+                  <PxB x={r.anchorX - 6} y={ROPE_AY - 6} s={12} c={past ? '#6b7280' : '#fbbf24'} />
+                  {!past && <PxB x={r.anchorX - 4} y={ROPE_AY - 4} s={4} c="#fef3c7" o={0.6} />}
+                  {pts.map((pt, pi) => <PxB key={pi} x={pt.x - 2} y={pt.y - 2} s={act && pi > segs * 0.7 ? 5 : 4} c={pi % 2 === 0 ? '#d97706' : '#fbbf24'} />)}
+                  {isNx && (
+                    <rect x={r.anchorX - GRAB_R} y={ROPE_AY + r.length * 0.6 - GRAB_R} width={GRAB_R * 2} height={GRAB_R * 2}
+                      fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="8 4" opacity={0.35} rx={4}>
+                      <animate attributeName="opacity" values="0.2;0.45;0.2" dur="1.2s" repeatCount="indefinite" />
+                    </rect>
                   )}
                 </g>
               )
             })}
 
             {/* Coins */}
-            {coins.map((coin) => (
-              <g key={`coin-${coin.id}`}>
-                <circle cx={coin.x} cy={coin.y} r={COIN_RADIUS} fill="url(#rs-coin-grad)" stroke="#d97706" strokeWidth={2} filter="url(#rs-glow)">
-                  <animate attributeName="r" values={`${COIN_RADIUS};${COIN_RADIUS + 2};${COIN_RADIUS}`} dur="1s" repeatCount="indefinite" />
-                </circle>
-                <text x={coin.x} y={coin.y + 5} textAnchor="middle" fill="#92400e" fontSize={14} fontWeight="bold">$</text>
+            {coins.map(c => (
+              <g key={`c${c.id}`}>
+                <PxB x={c.x - COIN_R} y={c.y - COIN_R} s={COIN_R * 2} c="#f59e0b" o={0.9} />
+                <PxB x={c.x - COIN_R + 3} y={c.y - COIN_R + 3} s={6} c="#fef3c7" o={0.5} />
+                <text x={c.x} y={c.y + 5} textAnchor="middle" fill="#92400e" fontSize={14} fontWeight="bold" fontFamily="monospace">$</text>
+              </g>
+            ))}
+
+            {/* Stars */}
+            {stars.map(s => (
+              <g key={`st${s.id}`}>
+                <PxB x={s.x - STAR_R} y={s.y - STAR_R} s={STAR_R * 2} c="#fbbf24" />
+                <PxB x={s.x - STAR_R + 2} y={s.y - STAR_R + 2} s={4} c="#fef3c7" o={0.7} />
+                <text x={s.x} y={s.y + 6} textAnchor="middle" fill="#fff" fontSize={18} fontFamily="monospace" fontWeight="bold">*</text>
               </g>
             ))}
 
             {/* Power-ups */}
-            {powerups.map((pu) => {
-              const icon = POWERUP_ICONS[pu.type]
+            {pups.map(pu => {
+              const d = PUD[pu.type]
               return (
-                <g key={`pu-${pu.id}`}>
-                  <circle cx={pu.x} cy={pu.y} r={POWERUP_RADIUS} fill={icon.color} opacity={0.3} filter="url(#rs-glow-strong)">
-                    <animate attributeName="r" values={`${POWERUP_RADIUS};${POWERUP_RADIUS + 4};${POWERUP_RADIUS}`} dur="1.2s" repeatCount="indefinite" />
-                  </circle>
-                  <circle cx={pu.x} cy={pu.y} r={POWERUP_RADIUS} fill={icon.color} opacity={0.8} stroke="white" strokeWidth={2} />
-                  <text x={pu.x} y={pu.y + 6} textAnchor="middle" fontSize={16}>{icon.emoji}</text>
+                <g key={`pu${pu.id}`}>
+                  <PxB x={pu.x - PU_R - 2} y={pu.y - PU_R - 2} s={PU_R * 2 + 4} c={d.gl} o={0.3} />
+                  <PxB x={pu.x - PU_R} y={pu.y - PU_R} s={PU_R * 2} c={d.cl} o={0.85} />
+                  <PxB x={pu.x - PU_R + 2} y={pu.y - PU_R + 2} s={6} c="white" o={0.4} />
+                  <text x={pu.x} y={pu.y + 6} textAnchor="middle" fill="white" fontSize={16} fontWeight="bold" fontFamily="monospace">{d.ic}</text>
                 </g>
               )
             })}
 
             {/* Obstacles */}
-            {obstacles.map((obs) => (
-              <g key={`obs-${obs.id}`}>
-                <text x={obs.x} y={obs.y + 8} textAnchor="middle" fontSize={obs.type === 'bird' ? 28 : 32}>
-                  {obs.type === 'bird' ? '🦅' : '⛈️'}
-                </text>
+            {obs.map(o => (
+              <g key={`ob${o.id}`}>
+                <text x={o.x} y={o.y + 8} textAnchor="middle" fontSize={30}>{OBS_E[o.type]}</text>
+                <rect x={o.x - OBS_R} y={o.y - OBS_R} width={OBS_R * 2} height={OBS_R * 2} fill="none" stroke="#ef4444" strokeWidth={1} opacity={0.3} />
               </g>
             ))}
 
             {/* Player */}
-            <g transform={`translate(${playerPos.x}, ${playerPos.y})`}>
-              {/* Shield effect */}
-              {hasShield && (
-                <circle cx={0} cy={0} r={PLAYER_WIDTH * 0.7} fill="none" stroke="#3b82f6" strokeWidth={3} opacity={0.6} filter="url(#rs-glow)">
-                  <animate attributeName="r" values={`${PLAYER_WIDTH * 0.65};${PLAYER_WIDTH * 0.75};${PLAYER_WIDTH * 0.65}`} dur="1s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.4;0.7;0.4" dur="1s" repeatCount="indefinite" />
-                </circle>
+            <g transform={`translate(${pPos.x}, ${pPos.y})`}>
+              {shld && (
+                <rect x={-PW * 0.7} y={-PH * 0.7} width={PW * 1.4} height={PH * 1.4} fill="none" stroke="#3b82f6" strokeWidth={3} opacity={0.6} rx={2}>
+                  <animate attributeName="opacity" values="0.4;0.7;0.4" dur="0.8s" repeatCount="indefinite" />
+                </rect>
               )}
-              {/* Shadow */}
-              <ellipse
-                cx={0}
-                cy={PLAYER_HEIGHT / 2 + 4}
-                rx={14}
-                ry={4}
-                fill="rgba(0,0,0,0.3)"
-              />
-              {/* Character sprite */}
-              <g transform={`rotate(${playerRotation.toFixed(1)})`}>
-                <image
-                  href={taeJinaSprite}
-                  x={-PLAYER_WIDTH / 2}
-                  y={-PLAYER_HEIGHT / 2}
-                  width={PLAYER_WIDTH}
-                  height={PLAYER_HEIGHT}
-                  preserveAspectRatio="xMidYMid meet"
-                />
+              <PxB x={-10} y={PH / 2 + 2} s={20} c="#000" o={0.2} />
+              <g transform={`rotate(${pRot.toFixed(1)})`}>
+                <image href={curCh} x={-PW / 2} y={-PH / 2} width={PW} height={PH} preserveAspectRatio="xMidYMid meet" style={{ imageRendering: 'pixelated' }} />
               </g>
-              {/* Fever glow around player */}
-              {isFever && (
-                <circle cx={0} cy={0} r={PLAYER_WIDTH * 0.5} fill="none" stroke="#fbbf24" strokeWidth={2} opacity={0.5} filter="url(#rs-glow-strong)">
-                  <animate attributeName="opacity" values="0.3;0.7;0.3" dur="0.5s" repeatCount="indefinite" />
-                </circle>
+              {fever && (
+                <rect x={-PW * 0.55} y={-PH * 0.55} width={PW * 1.1} height={PH * 1.1} fill="none" stroke="#fbbf24" strokeWidth={2} opacity={0.5} rx={2}>
+                  <animate attributeName="opacity" values="0.3;0.8;0.3" dur="0.4s" repeatCount="indefinite" />
+                </rect>
+              )}
+              {hasSpd && (
+                <g opacity={0.3}><image href={curCh} x={-PW / 2 - 8} y={-PH / 2} width={PW} height={PH} preserveAspectRatio="xMidYMid meet" style={{ imageRendering: 'pixelated' }} /></g>
               )}
             </g>
           </g>
 
-          {/* Danger zone at bottom */}
-          <rect x="0" y={VIEWBOX_HEIGHT - 30} width={VIEWBOX_WIDTH} height={30} fill="rgba(239,68,68,0.12)" />
-          <line x1="0" y1={VIEWBOX_HEIGHT - 30} x2={VIEWBOX_WIDTH} y2={VIEWBOX_HEIGHT - 30} stroke="#ef4444" strokeWidth={1} strokeDasharray="8 4" opacity={0.4} />
+          {/* Danger */}
+          {Array.from({ length: Math.ceil(VW / 16) }, (_, i) => (
+            <PxB key={`dz${i}`} x={i * 16} y={VH - 48} s={16} c={i % 2 === 0 ? '#ef4444' : 'transparent'} o={0.08} />
+          ))}
         </svg>
 
-        {/* HUD overlay */}
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 16px',
-          display: 'flex', flexDirection: 'column', gap: '4px', pointerEvents: 'none',
-          zIndex: 10,
-        }}>
-          {/* Score row */}
+        {/* HUD */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '8px 14px', pointerEvents: 'none', zIndex: 10 }}>
+          <div style={{ display: 'inline-block', background: 'rgba(0,0,0,0.5)', border: '2px solid #fbbf24', borderRadius: 2, padding: '2px 10px', marginBottom: 4, fontFamily: 'monospace', fontSize: '0.8rem', color: '#fbbf24', fontWeight: 700 }}>
+            LV.{lvl}
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <p style={{
-                fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 900, color: 'white', margin: 0,
-                textShadow: '0 2px 8px rgba(0,0,0,0.5), 0 0 20px rgba(251,191,36,0.3)',
-                lineHeight: 1,
-              }}>
-                {score}
-              </p>
-              <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', margin: 0 }}>
-                BEST {displayedBestScore}
-              </p>
+              <p style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 900, color: 'white', margin: 0, fontFamily: 'monospace', lineHeight: 1, textShadow: '2px 2px 0 #000, 0 0 10px rgba(251,191,36,0.3)' }}>{score}</p>
+              <p style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', margin: 0, fontFamily: 'monospace' }}>BEST {bestD}</p>
             </div>
             <div style={{ textAlign: 'right' }}>
-              {combo > 1 && (
-                <p style={{
-                  fontSize: 'clamp(1.2rem, 4vw, 1.8rem)', fontWeight: 800, margin: 0,
-                  color: comboMultiplier >= 3 ? '#fbbf24' : '#34d399',
-                  textShadow: '0 0 8px currentColor',
-                  animation: 'rs-pulse 0.3s ease-out',
-                }}>
-                  x{comboMultiplier}
-                </p>
-              )}
-              {isFever && (
-                <p style={{
-                  fontSize: '1rem', fontWeight: 800, color: '#fbbf24', margin: 0,
-                  textShadow: '0 0 10px #f59e0b',
-                  animation: 'rs-fever-glow 0.5s ease-in-out infinite alternate',
-                }}>
-                  FEVER!
-                </p>
-              )}
+              {combo > 1 && <p style={{ fontSize: 'clamp(1.3rem, 4.5vw, 2rem)', fontWeight: 900, margin: 0, fontFamily: 'monospace', color: cm >= 3 ? '#fbbf24' : '#34d399', textShadow: '2px 2px 0 #000, 0 0 8px currentColor' }}>x{cm}</p>}
+              {fever && <p style={{ fontSize: '1.1rem', fontWeight: 900, color: '#fbbf24', margin: 0, fontFamily: 'monospace', textShadow: '2px 2px 0 #000, 0 0 12px #f59e0b', animation: 'rs-bk 0.3s step-end infinite alternate' }}>FEVER!!</p>}
             </div>
           </div>
-
-          {/* Active powerups */}
-          {(hasMagnet || hasShield || hasScoreX2 || doubleJumpsLeft > 0) && (
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {hasMagnet && <span style={{ background: 'rgba(239,68,68,0.3)', borderRadius: 8, padding: '2px 8px', fontSize: 12, color: 'white' }}>🧲 Magnet</span>}
-              {hasShield && <span style={{ background: 'rgba(59,130,246,0.3)', borderRadius: 8, padding: '2px 8px', fontSize: 12, color: 'white' }}>🛡️ Shield</span>}
-              {hasScoreX2 && <span style={{ background: 'rgba(245,158,11,0.3)', borderRadius: 8, padding: '2px 8px', fontSize: 12, color: 'white' }}>x2 Score</span>}
-              {doubleJumpsLeft > 0 && <span style={{ background: 'rgba(34,197,94,0.3)', borderRadius: 8, padding: '2px 8px', fontSize: 12, color: 'white' }}>⬆️ Jump x{doubleJumpsLeft}</span>}
+          {(hasMag || shld || hasSx2 || hasSpd || sloMo || dj > 0) && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+              {hasMag && <PBdg i="M" l="MAG" c="#ef4444" />}
+              {shld && <PBdg i="S" l="SHD" c="#3b82f6" />}
+              {hasSx2 && <PBdg i="2x" l="SCR" c="#f59e0b" />}
+              {hasSpd && <PBdg i=">" l="SPD" c="#ec4899" />}
+              {sloMo && <PBdg i="~" l="SLO" c="#8b5cf6" />}
+              {dj > 0 && <PBdg i={`J${dj}`} l="JMP" c="#22c55e" />}
             </div>
           )}
         </div>
 
-        {/* Wind indicator */}
-        {windIndicator && (
-          <div style={{
-            position: 'absolute', top: '50%', right: windForce > 0 ? 8 : 'auto', left: windForce < 0 ? 8 : 'auto',
-            color: 'rgba(255,255,255,0.4)', fontSize: '1.5rem', fontWeight: 800, pointerEvents: 'none',
-            transform: 'translateY(-50%)',
-          }}>
-            {windIndicator}
-          </div>
-        )}
+        {wArr && <div style={{ position: 'absolute', top: '50%', right: wind > 0 ? 6 : 'auto', left: wind < 0 ? 6 : 'auto', color: 'rgba(255,255,255,0.35)', fontSize: '1.8rem', fontWeight: 900, pointerEvents: 'none', transform: 'translateY(-50%)', fontFamily: 'monospace' }}>{wArr}</div>}
 
-        {/* Perfect grab popup */}
-        {showPerfect && (
-          <div style={{
-            position: 'absolute', top: '35%', left: '50%', transform: 'translate(-50%, -50%)',
-            fontSize: 'clamp(2rem, 7vw, 3rem)', fontWeight: 900, color: '#fbbf24',
-            textShadow: '0 0 20px #f59e0b, 0 2px 4px rgba(0,0,0,0.5)',
-            animation: 'rs-perfect-pop 0.6s ease-out forwards', pointerEvents: 'none', zIndex: 20,
-          }}>
-            PERFECT!
-          </div>
-        )}
+        {perf && <div style={{ position: 'absolute', top: '32%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 'clamp(2.2rem, 8vw, 3.2rem)', fontWeight: 900, color: '#fbbf24', fontFamily: 'monospace', textShadow: '3px 3px 0 #000, 0 0 20px #f59e0b', animation: 'rs-pp 0.7s steps(4) forwards', pointerEvents: 'none', zIndex: 20 }}>PERFECT!!</div>}
+        {lvUp && <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 'clamp(1.8rem, 6vw, 2.5rem)', fontWeight: 900, color: '#22c55e', fontFamily: 'monospace', textShadow: '3px 3px 0 #000, 0 0 15px #22c55e', animation: 'rs-pp 1.2s steps(6) forwards', pointerEvents: 'none', zIndex: 20 }}>LEVEL UP! LV.{lvl}</div>}
+        {dash && <div style={{ position: 'absolute', top: '38%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '2rem', fontWeight: 900, color: '#ec4899', fontFamily: 'monospace', textShadow: '2px 2px 0 #000', animation: 'rs-pp 0.4s steps(3) forwards', pointerEvents: 'none', zIndex: 20 }}>DASH!!</div>}
 
-        {/* Coins collected */}
-        {coinsCollected > 0 && (
-          <div style={{
-            position: 'absolute', bottom: 60, left: 16, color: '#fbbf24', fontSize: '1rem',
-            fontWeight: 700, pointerEvents: 'none', textShadow: '0 1px 4px rgba(0,0,0,0.5)',
-          }}>
-            $ {coinsCollected}
-          </div>
-        )}
-
-        {/* Swing count */}
-        <div style={{
-          position: 'absolute', bottom: 60, right: 16, color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem',
-          pointerEvents: 'none',
-        }}>
-          Swings: {swingCount}
+        <div style={{ position: 'absolute', bottom: 54, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', padding: '0 14px', pointerEvents: 'none', fontFamily: 'monospace' }}>
+          {coinCt > 0 && <span style={{ color: '#fbbf24', fontSize: '0.9rem', fontWeight: 700, textShadow: '1px 1px 0 #000' }}>${coinCt}</span>}
+          <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>{swCt} swings</span>
         </div>
 
-        {/* Double jump hint */}
-        {phase === 'flying' && doubleJumpsLeft > 0 && (
-          <div style={{
-            position: 'absolute', bottom: '20%', left: '50%', transform: 'translateX(-50%)',
-            color: '#22c55e', fontSize: '1rem', fontWeight: 700, pointerEvents: 'none',
-            textShadow: '0 0 8px rgba(34,197,94,0.5)',
-            animation: 'rs-pulse 0.8s ease-in-out infinite',
-          }}>
-            TAP for Double Jump!
-          </div>
-        )}
+        {phase === 'flying' && dj > 0 && <div style={{ position: 'absolute', bottom: '22%', left: '50%', transform: 'translateX(-50%)', color: '#22c55e', fontSize: '1.1rem', fontWeight: 900, pointerEvents: 'none', fontFamily: 'monospace', textShadow: '2px 2px 0 #000', animation: 'rs-bk 0.6s step-end infinite' }}>TAP JUMP!</div>}
+        {phase === 'swinging' && score === 0 && <div style={{ position: 'absolute', bottom: '18%', left: '50%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '1.1rem', fontWeight: 700, pointerEvents: 'none', fontFamily: 'monospace', animation: 'rs-bk 1.2s step-end infinite' }}>TAP TO SWING!</div>}
 
-        {/* Tap hint */}
-        {phase === 'swinging' && score === 0 && (
-          <div style={{
-            position: 'absolute', bottom: '15%', left: '50%', transform: 'translateX(-50%)',
-            color: 'rgba(255,255,255,0.6)', fontSize: '1.2rem', fontWeight: 600, pointerEvents: 'none',
-            animation: 'rs-pulse 1.5s ease-in-out infinite',
-          }}>
-            Tap to release!
-          </div>
-        )}
-
-        {/* Action buttons */}
-        <div style={{
-          position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
-          display: 'flex', gap: 12, pointerEvents: 'auto', zIndex: 15,
-        }}>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              finishRound()
-            }}
-            style={{
-              padding: '8px 20px', borderRadius: 20, border: '2px solid rgba(255,255,255,0.3)',
-              background: 'rgba(0,0,0,0.4)', color: 'white', fontSize: '0.85rem', fontWeight: 700,
-              cursor: 'pointer', backdropFilter: 'blur(4px)',
-            }}
-          >
-            FINISH
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onExit()
-            }}
-            style={{
-              padding: '8px 20px', borderRadius: 20, border: '2px solid rgba(255,255,255,0.2)',
-              background: 'rgba(0,0,0,0.2)', color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem', fontWeight: 700,
-              cursor: 'pointer', backdropFilter: 'blur(4px)',
-            }}
-          >
-            EXIT
-          </button>
+        <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, pointerEvents: 'auto', zIndex: 15 }}>
+          <PxBtn l="FINISH" onClick={(e) => { e.stopPropagation(); fin() }} />
+          <PxBtn l="EXIT" g onClick={(e) => { e.stopPropagation(); onExit() }} />
         </div>
       </div>
 
       <style>{GAME_EFFECTS_CSS}{`
-        @keyframes rs-pulse {
-          0%, 100% { transform: scale(1); opacity: 0.7; }
-          50% { transform: scale(1.1); opacity: 1; }
-        }
-        @keyframes rs-fever-glow {
-          from { text-shadow: 0 0 10px #f59e0b; }
-          to { text-shadow: 0 0 20px #f59e0b, 0 0 40px #fbbf24; }
-        }
-        @keyframes rs-perfect-pop {
-          0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
-          30% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
-          100% { transform: translate(-50%, -80%) scale(1); opacity: 0; }
-        }
+        @keyframes rs-bk{0%,49%{opacity:1}50%,100%{opacity:0.3}}
+        @keyframes rs-pp{0%{transform:translate(-50%,-50%) scale(0.3);opacity:0}25%{transform:translate(-50%,-50%) scale(1.3);opacity:1}75%{transform:translate(-50%,-70%) scale(1.1);opacity:1}100%{transform:translate(-50%,-90%) scale(1);opacity:0}}
       `}</style>
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
+      <ParticleRenderer particles={fx.particles} />
+      <ScorePopupRenderer popups={fx.scorePopups} />
     </section>
+  )
+}
+
+function PBdg({ i, l, c }: { i: string; l: string; c: string }) {
+  return <span style={{ background: c + '30', border: `1px solid ${c}`, borderRadius: 2, padding: '1px 6px', fontSize: '0.65rem', color: 'white', fontFamily: 'monospace', fontWeight: 700 }}>[{i}] {l}</span>
+}
+
+function PxBtn({ l, g, onClick }: { l: string; g?: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      padding: '6px 18px', borderRadius: 2, border: `2px solid ${g ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.4)'}`,
+      background: g ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.5)', color: g ? 'rgba(255,255,255,0.6)' : 'white',
+      fontSize: '0.8rem', fontWeight: 700, fontFamily: 'monospace', cursor: 'pointer',
+    }}>{l}</button>
   )
 }
 
@@ -1182,7 +696,7 @@ export const ropeSwingModule: MiniGameModule = {
   manifest: {
     id: 'rope-swing',
     title: 'Rope Swing',
-    description: 'Swing on ropes! Grab power-ups and dodge obstacles!',
+    description: 'Pixel adventure! Swing, collect, dodge and level up!',
     unlockCost: 55,
     baseReward: 17,
     scoreRewardMultiplier: 1.25,

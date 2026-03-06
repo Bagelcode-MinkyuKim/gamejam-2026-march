@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import songChangsikImage from '../../../assets/images/same-character/song-changsik.png'
+import seoTaijiImage from '../../../assets/images/same-character/seo-taiji.png'
+import kimYeonjaImage from '../../../assets/images/same-character/kim-yeonja.png'
+import taeJinaImage from '../../../assets/images/same-character/tae-jina.png'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
-// Sound imports
 import correctSfx from '../../../assets/sounds/sequence-correct.mp3'
 import wrongSfx from '../../../assets/sounds/sequence-wrong.mp3'
 import comboSfx from '../../../assets/sounds/sequence-combo.mp3'
@@ -12,27 +14,40 @@ import feverSfx from '../../../assets/sounds/sequence-fever.mp3'
 import levelupSfx from '../../../assets/sounds/sequence-levelup.mp3'
 import timeWarningSfx from '../../../assets/sounds/sequence-time-warning.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
+import perfectSfx from '../../../assets/sounds/sequence-perfect.mp3'
+import bossSfx from '../../../assets/sounds/sequence-boss.mp3'
+import lifeLostSfx from '../../../assets/sounds/sequence-life-lost.mp3'
+import powerupSfx from '../../../assets/sounds/sequence-powerup.mp3'
 
-const ROUND_DURATION_MS = 120000
-const LOW_TIME_THRESHOLD_MS = 10000
+// ─── Constants ──────────────────────────────────────────
+const ROUND_DURATION_MS = 90000
+const LOW_TIME_THRESHOLD_MS = 15000
 const CRITICAL_TIME_THRESHOLD_MS = 5000
 const CORRECT_SCORE = 10
-const WRONG_PENALTY = 3
-const FEEDBACK_DURATION_MS = 500
-const COMBO_KEEP_WINDOW_MS = 4000
-const SPEED_BONUS_THRESHOLD_MS = 2000
-const SPEED_BONUS_POINTS = 5
+const WRONG_PENALTY = 5
+const FEEDBACK_DURATION_MS = 450
+const COMBO_KEEP_WINDOW_MS = 4500
+const SPEED_BONUS_THRESHOLD_MS = 1800
+const SPEED_BONUS_POINTS = 8
 const FEVER_COMBO_THRESHOLD = 5
-const FEVER_DURATION_MS = 10000
-const FEVER_MULTIPLIER = 2
-const TIME_BONUS_PER_CORRECT_MS = 800
-const HINT_COOLDOWN_MS = 15000
-const HINT_PENALTY = 5
+const FEVER_DURATION_MS = 8000
+const FEVER_MULTIPLIER = 3
+const TIME_BONUS_PER_CORRECT_MS = 1200
+const HINT_COOLDOWN_MS = 12000
+const HINT_PENALTY = 3
 const STREAK_MILESTONE = 10
+const INITIAL_LIVES = 3
+const MAX_LIVES = 5
+const BOSS_INTERVAL = 8
+const BOSS_BONUS_SCORE = 30
+const BOSS_BONUS_TIME_MS = 5000
+const PERFECT_THRESHOLD_MS = 1200
 
 const DIFFICULTY_THRESHOLDS = [0, 30, 60, 100, 160] as const
+const PIXEL_CHARS = [songChangsikImage, seoTaijiImage, kimYeonjaImage, taeJinaImage]
 
 type PatternKind = 'arithmetic' | 'geometric' | 'fibonacci' | 'squares' | 'cubes' | 'triangular' | 'primes'
+type PowerUpKind = 'freeze' | 'double' | 'heal'
 
 interface SequenceProblem {
   readonly displayed: number[]
@@ -40,8 +55,15 @@ interface SequenceProblem {
   readonly choices: number[]
   readonly patternLabel: string
   readonly patternKind: PatternKind
+  readonly isBoss: boolean
 }
 
+interface ActivePowerUp {
+  kind: PowerUpKind
+  remainingMs: number
+}
+
+// ─── Utility ──────────────────────────────────────────
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
@@ -55,15 +77,16 @@ function shuffle<T>(arr: T[]): T[] {
   return result
 }
 
+function pickRandom<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+// ─── Game Logic ──────────────────────────────────────────
 function getDifficulty(score: number): number {
-  let level = 0
   for (let i = DIFFICULTY_THRESHOLDS.length - 1; i >= 0; i--) {
-    if (score >= DIFFICULTY_THRESHOLDS[i]) {
-      level = i
-      break
-    }
+    if (score >= DIFFICULTY_THRESHOLDS[i]) return i
   }
-  return level
+  return 0
 }
 
 function getAvailablePatterns(difficulty: number): PatternKind[] {
@@ -74,83 +97,60 @@ function getAvailablePatterns(difficulty: number): PatternKind[] {
   return patterns
 }
 
-function getSequenceLength(difficulty: number): number {
-  if (difficulty <= 1) return 4
-  if (difficulty <= 2) return 5
-  return 6
+function getSequenceLength(difficulty: number, isBoss: boolean): number {
+  const base = difficulty <= 1 ? 4 : difficulty <= 2 ? 5 : 6
+  return isBoss ? base + 1 : base
 }
 
 function generateArithmetic(length: number, difficulty: number): number[] {
   const diff = difficulty <= 1 ? randomInt(1, 5) : randomInt(2, 12)
   const start = randomInt(1, 20)
   const sign = difficulty >= 2 && Math.random() < 0.3 ? -1 : 1
-  const seq: number[] = []
-  for (let i = 0; i < length; i++) seq.push(start + sign * diff * i)
-  return seq
+  return Array.from({ length }, (_, i) => start + sign * diff * i)
 }
 
 function generateGeometric(length: number, difficulty: number): number[] {
   const ratio = difficulty <= 2 ? randomInt(2, 3) : randomInt(2, 4)
   const start = randomInt(1, 5)
-  const seq: number[] = []
-  for (let i = 0; i < length; i++) seq.push(start * Math.pow(ratio, i))
-  return seq
+  return Array.from({ length }, (_, i) => start * Math.pow(ratio, i))
 }
 
 function generateFibonacci(length: number): number[] {
-  const a = randomInt(1, 5)
-  const b = randomInt(1, 5)
-  const seq = [a, b]
+  const seq = [randomInt(1, 5), randomInt(1, 5)]
   for (let i = 2; i < length; i++) seq.push(seq[i - 1] + seq[i - 2])
   return seq
 }
 
 function generateSquares(length: number): number[] {
   const start = randomInt(1, 6)
-  const seq: number[] = []
-  for (let i = 0; i < length; i++) seq.push((start + i) * (start + i))
-  return seq
+  return Array.from({ length }, (_, i) => (start + i) * (start + i))
 }
 
 function generateCubes(length: number): number[] {
   const start = randomInt(1, 4)
-  const seq: number[] = []
-  for (let i = 0; i < length; i++) {
-    const n = start + i
-    seq.push(n * n * n)
-  }
-  return seq
+  return Array.from({ length }, (_, i) => { const n = start + i; return n * n * n })
 }
 
 function generateTriangular(length: number): number[] {
   const start = randomInt(1, 5)
-  const seq: number[] = []
-  for (let i = 0; i < length; i++) {
-    const n = start + i
-    seq.push((n * (n + 1)) / 2)
-  }
-  return seq
+  return Array.from({ length }, (_, i) => { const n = start + i; return (n * (n + 1)) / 2 })
 }
 
 function getNthPrime(n: number): number {
   const primes: number[] = []
-  let candidate = 2
+  let c = 2
   while (primes.length < n) {
-    let isPrime = true
-    for (let d = 2; d * d <= candidate; d++) {
-      if (candidate % d === 0) { isPrime = false; break }
-    }
-    if (isPrime) primes.push(candidate)
-    candidate++
+    let ok = true
+    for (let d = 2; d * d <= c; d++) { if (c % d === 0) { ok = false; break } }
+    if (ok) primes.push(c)
+    c++
   }
   return primes[n - 1]
 }
 
 function generatePrimes(length: number): number[] {
-  const startIndex = randomInt(1, 6)
-  const seq: number[] = []
-  for (let i = 0; i < length; i++) seq.push(getNthPrime(startIndex + i))
-  return seq
+  const s = randomInt(1, 6)
+  return Array.from({ length }, (_, i) => getNthPrime(s + i))
 }
 
 function generateSequence(pattern: PatternKind, length: number, difficulty: number): number[] {
@@ -165,78 +165,75 @@ function generateSequence(pattern: PatternKind, length: number, difficulty: numb
   }
 }
 
-function patternToLabel(pattern: PatternKind): string {
-  switch (pattern) {
-    case 'arithmetic': return 'Arithmetic'
-    case 'geometric': return 'Geometric'
-    case 'fibonacci': return 'Fibonacci'
-    case 'squares': return 'Square'
-    case 'cubes': return 'Cubic'
-    case 'triangular': return 'Triangular'
-    case 'primes': return 'Prime'
-  }
-}
-
-function patternToEmoji(pattern: PatternKind): string {
-  switch (pattern) {
-    case 'arithmetic': return '+'
-    case 'geometric': return 'x'
-    case 'fibonacci': return 'F'
-    case 'squares': return 'n2'
-    case 'cubes': return 'n3'
-    case 'triangular': return 'tri'
-    case 'primes': return 'P'
-  }
+const PATTERN_LABELS: Record<PatternKind, string> = {
+  arithmetic: 'ADD', geometric: 'MUL', fibonacci: 'FIB',
+  squares: 'SQR', cubes: 'CUB', triangular: 'TRI', primes: 'PRM',
 }
 
 function generateDistractors(answer: number, count: number): number[] {
   const distractors = new Set<number>()
-  const offsets = [1, 2, 3, 5, 7, 10, -1, -2, -3, -5]
-  const shuffledOffsets = shuffle(offsets)
-  for (const offset of shuffledOffsets) {
+  for (const offset of shuffle([1, 2, 3, 5, 7, 10, -1, -2, -3, -5])) {
     if (distractors.size >= count) break
-    const candidate = answer + offset
-    if (candidate !== answer && !distractors.has(candidate)) distractors.add(candidate)
+    const c = answer + offset
+    if (c !== answer) distractors.add(c)
   }
   while (distractors.size < count) {
-    const candidate = answer + randomInt(-15, 15)
-    if (candidate !== answer && !distractors.has(candidate)) distractors.add(candidate)
+    const c = answer + randomInt(-15, 15)
+    if (c !== answer) distractors.add(c)
   }
   return Array.from(distractors).slice(0, count)
 }
 
-function createProblem(score: number): SequenceProblem {
+function createProblem(score: number, solvedCount: number): SequenceProblem {
   const difficulty = getDifficulty(score)
   const patterns = getAvailablePatterns(difficulty)
-  const pattern = patterns[Math.floor(Math.random() * patterns.length)]
-  const length = getSequenceLength(difficulty)
+  const pattern = pickRandom(patterns)
+  const isBoss = solvedCount > 0 && solvedCount % BOSS_INTERVAL === 0
+  const length = getSequenceLength(difficulty, isBoss)
   const fullSequence = generateSequence(pattern, length + 1, difficulty)
   const displayed = fullSequence.slice(0, length)
   const answer = fullSequence[length]
   const distractors = generateDistractors(answer, 3)
   const choices = shuffle([answer, ...distractors])
-  return { displayed, answer, choices, patternLabel: patternToLabel(pattern), patternKind: pattern }
+  return { displayed, answer, choices, patternLabel: PATTERN_LABELS[pattern], patternKind: pattern, isBoss }
 }
+
+function shouldDropPowerUp(): PowerUpKind | null {
+  if (Math.random() > 0.12) return null
+  return pickRandom(['freeze', 'double', 'heal'] as const)
+}
+
+const POWER_UP_LABELS: Record<PowerUpKind, string> = { freeze: 'FREEZE', double: 'x2 PTS', heal: '+1 HP' }
+const POWER_UP_COLORS: Record<PowerUpKind, string> = { freeze: '#67e8f9', double: '#fbbf24', heal: '#f87171' }
+const POWER_UP_DURATION: Record<PowerUpKind, number> = { freeze: 5000, double: 8000, heal: 0 }
 
 type FeedbackState = { choiceIndex: number; kind: 'correct' | 'wrong' } | null
 
+// ─── Component ──────────────────────────────────────────
 function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
-  const [problem, setProblem] = useState<SequenceProblem>(() => createProblem(0))
+  const [problem, setProblem] = useState<SequenceProblem>(() => createProblem(0, 0))
   const [solvedCount, setSolvedCount] = useState(0)
   const [feedback, setFeedback] = useState<FeedbackState>(null)
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
   const [showHint, setShowHint] = useState(false)
   const [hintAvailableMs, setHintAvailableMs] = useState(0)
-  const [, setPrevDifficulty] = useState(0)
   const [showLevelUp, setShowLevelUp] = useState<string | null>(null)
   const [timeBonusAnim, setTimeBonusAnim] = useState(false)
   const [streak, setStreak] = useState(0)
   const [showStreakMilestone, setShowStreakMilestone] = useState(false)
   const [numberRevealIndex, setNumberRevealIndex] = useState(-1)
+  const [lives, setLives] = useState(INITIAL_LIVES)
+  const [showPerfect, setShowPerfect] = useState(false)
+  const [charImage, setCharImage] = useState(songChangsikImage)
+  const [charReaction, setCharReaction] = useState<'idle' | 'happy' | 'sad' | 'fever'>('idle')
+  const [activePowerUp, setActivePowerUp] = useState<ActivePowerUp | null>(null)
+  const [showPowerUpGet, setShowPowerUpGet] = useState<PowerUpKind | null>(null)
+  const [showBossLabel, setShowBossLabel] = useState(false)
+  const [pixelStars, setPixelStars] = useState(0) // 0-3 stars based on speed
 
   const effects = useGameEffects()
 
@@ -256,53 +253,56 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const streakRef = useRef(0)
   const prevDiffRef = useRef(0)
   const timeWarningPlayedRef = useRef(false)
+  const livesRef = useRef(INITIAL_LIVES)
+  const activePowerUpRef = useRef<ActivePowerUp | null>(null)
+  const freezeActiveRef = useRef(false)
+  const doubleActiveRef = useRef(false)
 
-  const correctAudioRef = useRef<HTMLAudioElement | null>(null)
-  const wrongAudioRef = useRef<HTMLAudioElement | null>(null)
-  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
-  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
-  const levelupAudioRef = useRef<HTMLAudioElement | null>(null)
-  const timeWarningAudioRef = useRef<HTMLAudioElement | null>(null)
-  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Audio refs
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const clearTimeoutSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
+    if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null }
   }
 
-  const playAudio = useCallback(
-    (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
-      const audio = audioRef.current
-      if (audio === null) return
-      audio.currentTime = 0
-      audio.volume = Math.min(1, volume)
-      audio.playbackRate = playbackRate
-      void audio.play().catch(() => {})
-    },
-    [],
-  )
+  const playAudio = useCallback((name: string, volume: number, playbackRate = 1) => {
+    const audio = audioRefs.current[name]
+    if (!audio) return
+    audio.currentTime = 0
+    audio.volume = Math.min(1, volume)
+    audio.playbackRate = playbackRate
+    void audio.play().catch(() => {})
+  }, [])
 
   // Number reveal animation
   useEffect(() => {
     setNumberRevealIndex(-1)
     let cancelled = false
-    const timers: number[] = []
-    problem.displayed.forEach((_, i) => {
-      timers.push(window.setTimeout(() => {
-        if (!cancelled) setNumberRevealIndex(i)
-      }, i * 80))
-    })
+    const timers = problem.displayed.map((_, i) =>
+      window.setTimeout(() => { if (!cancelled) setNumberRevealIndex(i) }, i * 60)
+    )
     return () => { cancelled = true; timers.forEach(t => window.clearTimeout(t)) }
   }, [problem])
 
-  const advanceProblem = useCallback((currentScore: number) => {
-    const next = createProblem(currentScore)
+  // Boss label animation
+  useEffect(() => {
+    if (problem.isBoss) {
+      setShowBossLabel(true)
+      playAudio('boss', 0.6)
+      const t = window.setTimeout(() => setShowBossLabel(false), 1500)
+      return () => window.clearTimeout(t)
+    }
+  }, [problem, playAudio])
+
+  const advanceProblem = useCallback((currentScore: number, currentSolved: number) => {
+    const next = createProblem(currentScore, currentSolved)
     setProblem(next)
     setShowHint(false)
+    setPixelStars(0)
     lastAnswerAtRef.current = window.performance.now()
     lockedRef.current = false
+    // Random character change
+    if (Math.random() < 0.3) setCharImage(pickRandom(PIXEL_CHARS))
   }, [])
 
   const finishGame = useCallback(() => {
@@ -314,15 +314,14 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   }, [onFinish])
 
   const useHint = useCallback(() => {
-    if (hintAvailableMsRef.current > 0 || finishedRef.current || lockedRef.current) return
+    if (hintAvailableMsRef.current > 0 || finishedRef.current || lockedRef.current || showHint) return
     setShowHint(true)
     hintAvailableMsRef.current = HINT_COOLDOWN_MS
     setHintAvailableMs(HINT_COOLDOWN_MS)
-    // Small score penalty for using hint
     const nextScore = Math.max(0, scoreRef.current - HINT_PENALTY)
     scoreRef.current = nextScore
     setScore(nextScore)
-  }, [])
+  }, [showHint])
 
   const handleChoice = useCallback(
     (choiceIndex: number) => {
@@ -344,6 +343,17 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         streakRef.current = nextStreak
         setStreak(nextStreak)
 
+        // Speed star rating
+        const stars = timeSinceLast < PERFECT_THRESHOLD_MS ? 3 : timeSinceLast < SPEED_BONUS_THRESHOLD_MS ? 2 : 1
+        setPixelStars(stars)
+
+        // Perfect answer
+        if (stars === 3) {
+          setShowPerfect(true)
+          playAudio('perfect', 0.5)
+          window.setTimeout(() => setShowPerfect(false), 800)
+        }
+
         // Streak milestone
         if (nextStreak > 0 && nextStreak % STREAK_MILESTONE === 0) {
           setShowStreakMilestone(true)
@@ -351,9 +361,11 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         const speedBonus = timeSinceLast < SPEED_BONUS_THRESHOLD_MS ? SPEED_BONUS_POINTS : 0
-        const comboBonus = Math.floor(nextCombo / 5)
+        const comboBonus = Math.floor(nextCombo / 3) * 2
         const feverMult = feverRef.current ? FEVER_MULTIPLIER : 1
-        const earned = (CORRECT_SCORE + comboBonus + speedBonus) * feverMult
+        const doubleMult = doubleActiveRef.current ? 2 : 1
+        const bossBonus = problem.isBoss ? BOSS_BONUS_SCORE : 0
+        const earned = ((CORRECT_SCORE + comboBonus + speedBonus) * feverMult * doubleMult) + bossBonus
         const nextScore = scoreRef.current + earned
         scoreRef.current = nextScore
         setScore(nextScore)
@@ -363,20 +375,22 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         setSolvedCount(nextSolved)
 
         // Time bonus
-        remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_PER_CORRECT_MS)
-        setRemainingMs(remainingMsRef.current)
+        const timeBonus = problem.isBoss ? BOSS_BONUS_TIME_MS : TIME_BONUS_PER_CORRECT_MS
+        if (!freezeActiveRef.current) {
+          remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + timeBonus)
+          setRemainingMs(remainingMsRef.current)
+        }
         setTimeBonusAnim(true)
         window.setTimeout(() => setTimeBonusAnim(false), 600)
 
-        // Check level up
+        // Level up check
         const newDiff = getDifficulty(nextScore)
         if (newDiff > prevDiffRef.current) {
           prevDiffRef.current = newDiff
-          setPrevDifficulty(newDiff)
-          const labels = ['Easy', 'Normal', 'Hard', 'Expert', 'Master']
-          setShowLevelUp(labels[newDiff] ?? 'Master')
-          playAudio(levelupAudioRef, 0.7)
-          effects.triggerFlash('rgba(59,130,246,0.5)')
+          const labels = ['EASY', 'NORMAL', 'HARD', 'EXPERT', 'MASTER']
+          setShowLevelUp(labels[newDiff] ?? 'MASTER')
+          playAudio('levelup', 0.7)
+          effects.triggerFlash('rgba(96,165,250,0.5)')
           window.setTimeout(() => setShowLevelUp(null), 2000)
         }
 
@@ -386,21 +400,44 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           feverRemainingMsRef.current = FEVER_DURATION_MS
           setIsFever(true)
           setFeverRemainingMs(FEVER_DURATION_MS)
+          setCharReaction('fever')
           effects.triggerFlash('rgba(250,204,21,0.5)')
-          playAudio(feverAudioRef, 0.7)
+          playAudio('fever', 0.7)
+        }
+
+        // Power-up drop
+        const powerDrop = shouldDropPowerUp()
+        if (powerDrop) {
+          if (powerDrop === 'heal') {
+            if (livesRef.current < MAX_LIVES) {
+              livesRef.current += 1
+              setLives(livesRef.current)
+            }
+          } else {
+            const dur = POWER_UP_DURATION[powerDrop]
+            activePowerUpRef.current = { kind: powerDrop, remainingMs: dur }
+            setActivePowerUp({ kind: powerDrop, remainingMs: dur })
+            if (powerDrop === 'freeze') freezeActiveRef.current = true
+            if (powerDrop === 'double') doubleActiveRef.current = true
+          }
+          setShowPowerUpGet(powerDrop)
+          playAudio('powerup', 0.6)
+          window.setTimeout(() => setShowPowerUpGet(null), 1200)
         }
 
         setFeedback({ choiceIndex, kind: 'correct' })
+        setCharReaction('happy')
+        window.setTimeout(() => setCharReaction(feverRef.current ? 'fever' : 'idle'), 600)
 
-        // Sound: combo or correct
         if (nextCombo >= 3) {
-          playAudio(comboAudioRef, 0.6, 1 + Math.min(0.4, nextCombo * 0.03))
+          playAudio('combo', 0.6, 1 + Math.min(0.4, nextCombo * 0.03))
         } else {
-          playAudio(correctAudioRef, 0.6, 1 + Math.min(0.3, nextCombo * 0.02))
+          playAudio('correct', 0.6, 1 + Math.min(0.3, nextCombo * 0.02))
         }
 
         effects.comboHitBurst(200, 300, nextCombo, earned)
       } else {
+        // Wrong answer
         const nextScore = Math.max(0, scoreRef.current - WRONG_PENALTY)
         scoreRef.current = nextScore
         setScore(nextScore)
@@ -410,6 +447,10 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         streakRef.current = 0
         setStreak(0)
 
+        // Lose a life
+        livesRef.current = Math.max(0, livesRef.current - 1)
+        setLives(livesRef.current)
+
         if (feverRef.current) {
           feverRef.current = false
           feverRemainingMsRef.current = 0
@@ -418,19 +459,29 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         }
 
         setFeedback({ choiceIndex, kind: 'wrong' })
-        playAudio(wrongAudioRef, 0.5, 0.8)
-        effects.triggerShake(6)
-        effects.triggerFlash('rgba(239,68,68,0.4)')
+        setCharReaction('sad')
+        window.setTimeout(() => setCharReaction('idle'), 800)
+
+        if (livesRef.current <= 0) {
+          playAudio('gameover', 0.64, 0.95)
+          window.setTimeout(() => finishGame(), 600)
+        } else {
+          playAudio('lifelost', 0.5)
+        }
+
+        playAudio('wrong', 0.5, 0.8)
+        effects.triggerShake(8)
+        effects.triggerFlash('rgba(239,68,68,0.5)')
       }
 
       clearTimeoutSafe(feedbackTimerRef)
       feedbackTimerRef.current = window.setTimeout(() => {
         feedbackTimerRef.current = null
         setFeedback(null)
-        advanceProblem(scoreRef.current)
+        if (!finishedRef.current) advanceProblem(scoreRef.current, solvedCountRef.current)
       }, FEEDBACK_DURATION_MS)
     },
-    [problem, playAudio, advanceProblem],
+    [problem, playAudio, advanceProblem, finishGame, effects],
   )
 
   const handleExit = useCallback(() => { onExit() }, [onExit])
@@ -439,7 +490,6 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'Escape') { event.preventDefault(); handleExit() }
       if (event.code === 'KeyH') { event.preventDefault(); useHint() }
-      // Number keys 1-4 for quick answer
       const keyMap: Record<string, number> = { 'Digit1': 0, 'Digit2': 1, 'Digit3': 2, 'Digit4': 3 }
       if (event.code in keyMap) { event.preventDefault(); handleChoice(keyMap[event.code]) }
     }
@@ -448,30 +498,18 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   }, [handleExit, useHint, handleChoice])
 
   useEffect(() => {
-    const preloadAudio = (src: string) => {
-      const audio = new Audio(src)
-      audio.preload = 'auto'
-      return audio
+    const sources: Record<string, string> = {
+      correct: correctSfx, wrong: wrongSfx, combo: comboSfx, fever: feverSfx,
+      levelup: levelupSfx, timewarning: timeWarningSfx, gameover: gameOverHitSfx,
+      perfect: perfectSfx, boss: bossSfx, lifelost: lifeLostSfx, powerup: powerupSfx,
     }
-    correctAudioRef.current = preloadAudio(correctSfx)
-    wrongAudioRef.current = preloadAudio(wrongSfx)
-    comboAudioRef.current = preloadAudio(comboSfx)
-    feverAudioRef.current = preloadAudio(feverSfx)
-    levelupAudioRef.current = preloadAudio(levelupSfx)
-    timeWarningAudioRef.current = preloadAudio(timeWarningSfx)
-    gameOverAudioRef.current = preloadAudio(gameOverHitSfx)
-
+    for (const [name, src] of Object.entries(sources)) {
+      const a = new Audio(src); a.preload = 'auto'; audioRefs.current[name] = a
+    }
     lastAnswerAtRef.current = window.performance.now()
-
     return () => {
       clearTimeoutSafe(feedbackTimerRef)
-      correctAudioRef.current = null
-      wrongAudioRef.current = null
-      comboAudioRef.current = null
-      feverAudioRef.current = null
-      levelupAudioRef.current = null
-      timeWarningAudioRef.current = null
-      gameOverAudioRef.current = null
+      for (const name of Object.keys(audioRefs.current)) audioRefs.current[name] = null
       effects.cleanup()
     }
   }, [])
@@ -479,14 +517,15 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   useEffect(() => {
     const step = (now: number) => {
       if (finishedRef.current) { animationFrameRef.current = null; return }
-
       if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
-
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
 
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
-      setRemainingMs(remainingMsRef.current)
+      // Time countdown (freeze pauses timer)
+      if (!freezeActiveRef.current) {
+        remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
+        setRemainingMs(remainingMsRef.current)
+      }
 
       // Hint cooldown
       if (hintAvailableMsRef.current > 0) {
@@ -498,22 +537,32 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       if (feverRef.current) {
         feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
         setFeverRemainingMs(feverRemainingMsRef.current)
-        if (feverRemainingMsRef.current <= 0) {
-          feverRef.current = false
-          setIsFever(false)
+        if (feverRemainingMsRef.current <= 0) { feverRef.current = false; setIsFever(false) }
+      }
+
+      // Power-up countdown
+      if (activePowerUpRef.current) {
+        activePowerUpRef.current.remainingMs -= deltaMs
+        if (activePowerUpRef.current.remainingMs <= 0) {
+          if (activePowerUpRef.current.kind === 'freeze') freezeActiveRef.current = false
+          if (activePowerUpRef.current.kind === 'double') doubleActiveRef.current = false
+          activePowerUpRef.current = null
+          setActivePowerUp(null)
+        } else {
+          setActivePowerUp({ ...activePowerUpRef.current })
         }
       }
 
-      // Time warning sound
+      // Time warning
       if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && !timeWarningPlayedRef.current) {
         timeWarningPlayedRef.current = true
-        playAudio(timeWarningAudioRef, 0.5)
+        playAudio('timewarning', 0.5)
       }
 
       effects.updateParticles()
 
       if (remainingMsRef.current <= 0) {
-        playAudio(gameOverAudioRef, 0.64, 0.95)
+        playAudio('gameover', 0.64, 0.95)
         finishGame()
         animationFrameRef.current = null
         return
@@ -521,15 +570,10 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
-
     animationFrameRef.current = window.requestAnimationFrame(step)
-
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
+      if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null; lastFrameAtRef.current = null
     }
   }, [finishGame, playAudio, effects])
 
@@ -537,521 +581,558 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
   const isCriticalTime = remainingMs <= CRITICAL_TIME_THRESHOLD_MS
   const difficulty = getDifficulty(score)
-  const difficultyLabels = ['Easy', 'Normal', 'Hard', 'Expert', 'Master']
-  const difficultyColors = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#a855f7']
-  const difficultyLabel = difficultyLabels[difficulty] ?? 'Master'
-  const difficultyColor = difficultyColors[difficulty] ?? '#a855f7'
-  const timeSeconds = (remainingMs / 1000).toFixed(1)
+  const difficultyLabels = ['LV.1', 'LV.2', 'LV.3', 'LV.4', 'LV.5']
+  const difficultyColors = ['#4ade80', '#60a5fa', '#fbbf24', '#f87171', '#c084fc']
+  const difficultyLabel = difficultyLabels[difficulty] ?? 'LV.5'
+  const difficultyColor = difficultyColors[difficulty] ?? '#c084fc'
+  const timeSeconds = Math.ceil(remainingMs / 1000)
   const timeProgressPercent = (remainingMs / ROUND_DURATION_MS) * 100
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
-  const hintCooldownPercent = hintAvailableMs > 0 ? (hintAvailableMs / HINT_COOLDOWN_MS) * 100 : 0
 
   return (
-    <section className="mini-game-panel sm-panel" aria-label="sequence-master-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
+    <section className="mini-game-panel sm-px" aria-label="sequence-master-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
       <style>{GAME_EFFECTS_CSS}{`
-        .sm-panel {
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        .sm-px {
           display: flex;
           flex-direction: column;
           height: 100%;
-          background: linear-gradient(180deg, #0f172a 0%, #1e3a5f 40%, #1e293b 100%);
+          background: #1a1a2e;
           user-select: none;
           -webkit-user-select: none;
           touch-action: manipulation;
           padding: 0;
           gap: 0;
-          font-family: 'Segoe UI', system-ui, sans-serif;
+          font-family: 'Press Start 2P', monospace;
+          image-rendering: pixelated;
+          position: relative;
         }
 
-        /* ── Header ── */
-        .sm-header {
-          background: linear-gradient(135deg, rgba(37,99,235,0.3), rgba(30,58,95,0.6));
-          padding: 10px 14px;
+        /* Scanline overlay */
+        .sm-px::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 50;
+          background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.08) 2px,
+            rgba(0,0,0,0.08) 4px
+          );
+        }
+
+        /* ── Pixel Header ── */
+        .sm-px-header {
+          background: #16213e;
+          padding: 8px 10px;
           display: flex;
           align-items: center;
-          gap: 10px;
-          border-bottom: 2px solid rgba(59,130,246,0.3);
+          gap: 8px;
+          border-bottom: 4px solid #0f3460;
           flex-shrink: 0;
         }
 
-        .sm-avatar {
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          border: 2px solid rgba(96,165,250,0.5);
+        .sm-px-char-wrap {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #0f3460;
+          background: #1a1a2e;
+          flex-shrink: 0;
+          overflow: hidden;
+          position: relative;
+        }
+
+        .sm-px-char-wrap img {
+          width: 100%;
+          height: 100%;
           object-fit: contain;
-          background: rgba(59,130,246,0.15);
-          flex-shrink: 0;
+          image-rendering: pixelated;
+          transition: transform 0.15s steps(2);
         }
 
-        .sm-header-info {
+        .sm-px-char-wrap.happy img { transform: scale(1.1) translateY(-2px); }
+        .sm-px-char-wrap.sad img { transform: scale(0.9) translateY(2px); filter: brightness(0.7); }
+        .sm-px-char-wrap.fever img { animation: sm-px-char-fever 0.3s steps(2) infinite alternate; }
+
+        @keyframes sm-px-char-fever {
+          from { transform: scale(1.05) rotate(-3deg); }
+          to { transform: scale(1.1) rotate(3deg); }
+        }
+
+        .sm-px-header-info {
           flex: 1;
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 4px;
+          min-width: 0;
         }
 
-        .sm-score-row {
+        .sm-px-score {
+          font-size: 16px;
+          color: #e2e8f0;
+          margin: 0;
+          text-shadow: 2px 2px 0 #0f3460;
+        }
+
+        .sm-px-best {
+          font-size: 7px;
+          color: #64748b;
+          margin: 0;
+        }
+
+        /* ── Lives (pixel hearts) ── */
+        .sm-px-lives {
           display: flex;
-          align-items: baseline;
-          gap: 8px;
-        }
-
-        .sm-score {
-          font-size: 28px;
-          font-weight: 900;
-          color: #fff;
-          margin: 0;
-          text-shadow: 0 2px 8px rgba(59,130,246,0.5);
-          letter-spacing: -1px;
-          font-variant-numeric: tabular-nums;
-        }
-
-        .sm-best {
-          font-size: 10px;
-          color: rgba(255,255,255,0.5);
-          margin: 0;
-          font-weight: 600;
-        }
-
-        .sm-time-block {
-          text-align: right;
+          gap: 3px;
           flex-shrink: 0;
         }
 
-        .sm-time {
-          font-size: 20px;
-          font-weight: 800;
-          color: rgba(255,255,255,0.9);
-          margin: 0;
-          font-variant-numeric: tabular-nums;
-          transition: color 0.3s;
+        .sm-px-heart {
+          width: 16px;
+          height: 14px;
+          position: relative;
         }
 
-        .sm-time.low-time {
-          color: #fca5a5;
-          animation: sm-pulse 0.5s ease-in-out infinite alternate;
+        .sm-px-heart::before, .sm-px-heart::after {
+          content: '';
+          position: absolute;
+          background: #f87171;
+          image-rendering: pixelated;
         }
 
-        .sm-time.critical-time {
-          color: #ef4444;
-          animation: sm-pulse 0.25s ease-in-out infinite alternate;
-          text-shadow: 0 0 10px rgba(239,68,68,0.6);
+        .sm-px-heart::before {
+          width: 16px; height: 10px; top: 2px; left: 0;
+          clip-path: polygon(0 40%, 25% 0, 50% 30%, 75% 0, 100% 40%, 50% 100%);
         }
 
-        @keyframes sm-pulse { from { opacity: 1; } to { opacity: 0.4; } }
+        .sm-px-heart.empty::before { background: #374151; }
+        .sm-px-heart.lost { animation: sm-px-heart-break 0.4s ease-out; }
 
-        /* ── Time Progress Bar ── */
-        .sm-time-bar-wrap {
-          height: 4px;
-          background: rgba(255,255,255,0.08);
+        @keyframes sm-px-heart-break {
+          0% { transform: scale(1); }
+          30% { transform: scale(1.3); }
+          100% { transform: scale(1); opacity: 0.5; }
+        }
+
+        /* ── Time Bar ── */
+        .sm-px-timebar {
+          height: 8px;
+          background: #16213e;
+          border-bottom: 2px solid #0f3460;
+          padding: 1px 2px;
           flex-shrink: 0;
-          overflow: hidden;
+          position: relative;
         }
 
-        .sm-time-bar {
+        .sm-px-timebar-fill {
           height: 100%;
-          transition: width 0.1s linear, background 0.5s;
-          border-radius: 0 2px 2px 0;
+          transition: width 0.15s steps(4);
+          image-rendering: pixelated;
         }
 
-        .sm-time-bonus-flash {
-          animation: sm-time-bonus-pulse 0.6s ease-out;
+        .sm-px-timebar.flash { animation: sm-px-time-flash 0.5s steps(3); }
+
+        @keyframes sm-px-time-flash {
+          0% { background: #16213e; }
+          50% { background: #22c55e; }
+          100% { background: #16213e; }
         }
 
-        @keyframes sm-time-bonus-pulse {
-          0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.6); }
-          50% { box-shadow: 0 0 12px 4px rgba(34,197,94,0.4); }
-          100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+        .sm-px-time-text {
+          position: absolute;
+          right: 6px;
+          top: -1px;
+          font-size: 6px;
+          color: #94a3b8;
         }
+
+        .sm-px-time-text.warn { color: #fbbf24; animation: sm-px-blink 0.5s steps(1) infinite; }
+        .sm-px-time-text.danger { color: #ef4444; animation: sm-px-blink 0.25s steps(1) infinite; }
+
+        @keyframes sm-px-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
 
         /* ── Meta Row ── */
-        .sm-meta-row {
+        .sm-px-meta {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 6px 14px;
+          padding: 6px 10px;
           flex-shrink: 0;
-        }
-
-        .sm-meta-row p {
-          font-size: 12px;
-          color: rgba(255,255,255,0.5);
-          margin: 0;
-          font-weight: 600;
-        }
-
-        .sm-meta-row strong { color: #fff; font-weight: 800; }
-
-        .sm-combo-tag {
-          display: inline-flex;
-          align-items: center;
           gap: 4px;
-          padding: 2px 8px;
-          border-radius: 10px;
-          font-size: 12px;
-          font-weight: 800;
-          background: rgba(59,130,246,0.2);
-          border: 1px solid rgba(59,130,246,0.3);
-          transition: all 0.2s;
         }
 
-        .sm-difficulty-badge {
-          padding: 2px 8px;
-          border-radius: 10px;
-          font-size: 11px;
-          font-weight: 800;
-          border: 1px solid;
+        .sm-px-tag {
+          font-size: 7px;
+          padding: 3px 6px;
+          border: 2px solid;
+          display: inline-block;
         }
 
-        /* ── Fever Banner ── */
-        .sm-fever-banner {
-          background: linear-gradient(90deg, rgba(250,204,21,0.15), rgba(245,158,11,0.2), rgba(250,204,21,0.15));
-          border-top: 1px solid rgba(250,204,21,0.3);
-          border-bottom: 1px solid rgba(250,204,21,0.3);
-          padding: 4px 14px;
+        /* ── Fever Bar ── */
+        .sm-px-fever {
+          background: #1a1a2e;
+          border-top: 2px solid #facc15;
+          border-bottom: 2px solid #facc15;
+          padding: 4px 10px;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          animation: sm-fever-glow 0.5s ease-in-out infinite alternate;
+          flex-shrink: 0;
+          animation: sm-px-fever-bg 0.4s steps(2) infinite alternate;
+        }
+
+        @keyframes sm-px-fever-bg {
+          from { background: #1a1a2e; }
+          to { background: #2d2006; }
+        }
+
+        .sm-px-fever-text {
+          font-size: 10px;
+          color: #facc15;
+          margin: 0;
+          text-shadow: 2px 2px 0 #78350f;
+        }
+
+        .sm-px-fever-timer { font-size: 8px; color: #fbbf24; margin: 0; }
+
+        /* ── Power-up indicator ── */
+        .sm-px-powerup-bar {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 3px 10px;
+          background: rgba(0,0,0,0.3);
           flex-shrink: 0;
         }
 
-        @keyframes sm-fever-glow {
-          from { background: linear-gradient(90deg, rgba(250,204,21,0.1), rgba(245,158,11,0.15), rgba(250,204,21,0.1)); }
-          to { background: linear-gradient(90deg, rgba(250,204,21,0.2), rgba(245,158,11,0.3), rgba(250,204,21,0.2)); }
+        .sm-px-powerup-label { font-size: 7px; margin: 0; }
+        .sm-px-powerup-meter {
+          flex: 1;
+          height: 4px;
+          background: #1e293b;
+        }
+        .sm-px-powerup-meter-fill {
+          height: 100%;
+          transition: width 0.15s steps(4);
         }
 
-        .sm-fever-text {
-          color: #facc15;
-          font-size: 14px;
-          font-weight: 900;
-          margin: 0;
-          letter-spacing: 2px;
-          text-shadow: 0 0 8px rgba(250,204,21,0.5);
-        }
-
-        .sm-fever-timer {
-          color: #fbbf24;
-          font-size: 12px;
-          font-weight: 700;
-          margin: 0;
-          font-variant-numeric: tabular-nums;
-        }
-
-        /* ── Sequence Display (main area, fills remaining space) ── */
-        .sm-sequence-area {
+        /* ── Main Sequence Area ── */
+        .sm-px-main {
           flex: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 12px 14px;
-          gap: 12px;
+          padding: 10px;
+          gap: 10px;
           min-height: 0;
           position: relative;
         }
 
-        .sm-pattern-label {
-          font-size: 13px;
-          color: rgba(147,197,253,0.7);
-          margin: 0;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 2px;
+        .sm-px-pattern-tag {
+          font-size: 8px;
+          color: #94a3b8;
+          padding: 2px 8px;
+          border: 2px solid #334155;
+          background: #1e293b;
+          animation: sm-px-tag-in 0.2s steps(3);
         }
 
-        .sm-sequence-box {
+        @keyframes sm-px-tag-in {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .sm-px-seq-box {
           display: flex;
           align-items: center;
           justify-content: center;
           flex-wrap: wrap;
-          gap: 6px;
-          padding: 16px 14px;
-          background: rgba(37,99,235,0.1);
-          border: 2px solid rgba(59,130,246,0.25);
-          border-radius: 16px;
+          gap: 2px;
+          padding: 14px 10px;
+          background: #16213e;
+          border: 3px solid #0f3460;
           width: 100%;
-          min-height: 80px;
-          transition: border-color 0.3s, background 0.3s;
+          min-height: 72px;
+          transition: border-color 0.2s steps(2);
         }
 
-        .sm-sequence-box.low-time {
-          border-color: rgba(239,68,68,0.4);
-          background: rgba(239,68,68,0.08);
-        }
+        .sm-px-seq-box.boss-box { border-color: #f59e0b; box-shadow: 0 0 0 2px #78350f; }
+        .sm-px-seq-box.low-time-box { border-color: #dc2626; }
+        .sm-px-seq-box.fever-box { border-color: #facc15; }
 
-        .sm-sequence-box.fever {
-          border-color: rgba(250,204,21,0.4);
-          background: rgba(250,204,21,0.06);
-        }
-
-        .sm-num {
-          font-size: clamp(24px, 7vw, 36px);
-          font-weight: 800;
+        .sm-px-num-cell {
+          font-size: clamp(18px, 5.5vw, 28px);
           color: #93c5fd;
           padding: 2px 4px;
-          font-variant-numeric: tabular-nums;
+          text-shadow: 2px 2px 0 #1e3a5f;
           opacity: 0;
-          transform: translateY(8px);
-          transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+          transition: opacity 0.1s steps(2);
         }
 
-        .sm-num.revealed {
-          opacity: 1;
-          transform: translateY(0);
-        }
+        .sm-px-num-cell.on { opacity: 1; }
 
-        .sm-arrow {
-          color: rgba(147,197,253,0.35);
-          font-size: 18px;
-          font-weight: 400;
-        }
+        .sm-px-sep { color: #334155; font-size: 14px; margin: 0 1px; }
 
-        .sm-unknown {
-          font-size: clamp(32px, 9vw, 44px);
-          font-weight: 900;
+        .sm-px-mystery {
+          font-size: clamp(24px, 7vw, 36px);
           color: #60a5fa;
-          background: rgba(37,99,235,0.15);
-          border: 2px dashed rgba(96,165,250,0.5);
-          border-radius: 12px;
-          padding: 2px 16px;
-          animation: sm-question-bounce 1.2s ease-in-out infinite alternate;
-          text-shadow: 0 0 16px rgba(96,165,250,0.4);
+          background: #0f3460;
+          border: 2px dashed #3b82f6;
+          padding: 2px 12px;
+          animation: sm-px-mystery-blink 0.8s steps(1) infinite;
+          text-shadow: 2px 2px 0 #1e3a5f;
         }
 
-        @keyframes sm-question-bounce {
-          0% { transform: translateY(0) scale(1); }
-          100% { transform: translateY(-6px) scale(1.05); }
+        @keyframes sm-px-mystery-blink {
+          0% { border-color: #3b82f6; }
+          50% { border-color: #1d4ed8; }
+        }
+
+        /* Stars */
+        .sm-px-stars {
+          display: flex;
+          gap: 4px;
+          height: 14px;
+        }
+
+        .sm-px-star {
+          width: 12px;
+          height: 12px;
+          display: inline-block;
+          clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+        }
+
+        .sm-px-star.filled { background: #fbbf24; animation: sm-px-star-pop 0.3s steps(3); }
+        .sm-px-star.empty { background: #374151; }
+
+        @keyframes sm-px-star-pop {
+          0% { transform: scale(0); }
+          60% { transform: scale(1.4); }
+          100% { transform: scale(1); }
         }
 
         /* ── Hint ── */
-        .sm-hint-area {
+        .sm-px-hint {
           display: flex;
           align-items: center;
-          gap: 8px;
-          min-height: 28px;
+          gap: 6px;
+          min-height: 20px;
         }
 
-        .sm-hint-btn {
-          font-size: 11px;
-          font-weight: 700;
-          color: rgba(250,204,21,0.8);
-          background: rgba(250,204,21,0.1);
-          border: 1px solid rgba(250,204,21,0.3);
-          border-radius: 8px;
-          padding: 4px 10px;
+        .sm-px-hint-btn {
+          font-family: 'Press Start 2P', monospace;
+          font-size: 7px;
+          color: #fbbf24;
+          background: #1e293b;
+          border: 2px solid #fbbf24;
+          padding: 4px 8px;
           cursor: pointer;
-          transition: all 0.15s;
           -webkit-tap-highlight-color: transparent;
-          position: relative;
-          overflow: hidden;
         }
 
-        .sm-hint-btn:disabled {
-          color: rgba(255,255,255,0.3);
-          background: rgba(255,255,255,0.05);
-          border-color: rgba(255,255,255,0.1);
+        .sm-px-hint-btn:disabled {
+          color: #475569;
+          border-color: #334155;
           cursor: default;
         }
 
-        .sm-hint-btn:active:not(:disabled) {
-          transform: scale(0.95);
-          background: rgba(250,204,21,0.2);
-        }
+        .sm-px-hint-btn:active:not(:disabled) { background: #334155; }
 
-        .sm-hint-cooldown-bar {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          height: 2px;
-          background: rgba(250,204,21,0.5);
-          transition: width 0.1s linear;
-        }
-
-        .sm-hint-text {
-          font-size: 13px;
-          color: #fbbf24;
-          margin: 0;
-          font-weight: 700;
-          animation: sm-hint-appear 0.3s ease-out;
-        }
-
-        @keyframes sm-hint-appear {
-          from { opacity: 0; transform: translateY(4px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        .sm-px-hint-cd { font-size: 6px; color: #475569; }
 
         /* ── Choices ── */
-        .sm-choices {
+        .sm-px-choices {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 10px;
-          padding: 10px 14px;
+          gap: 8px;
+          padding: 8px 10px;
           flex-shrink: 0;
         }
 
-        .sm-choice {
-          font-size: clamp(20px, 5.5vw, 26px);
-          font-weight: 800;
-          padding: 20px 8px;
-          border-radius: 14px;
-          border: 2px solid rgba(59,130,246,0.3);
-          background: linear-gradient(180deg, rgba(37,99,235,0.15) 0%, rgba(30,64,175,0.1) 100%);
-          color: #e0e7ff;
+        .sm-px-btn {
+          font-family: 'Press Start 2P', monospace;
+          font-size: clamp(14px, 4vw, 20px);
+          padding: 16px 6px;
+          border: 3px solid #334155;
+          background: #1e293b;
+          color: #cbd5e1;
           cursor: pointer;
-          transition: background 0.12s, border-color 0.12s, transform 0.08s;
-          font-variant-numeric: tabular-nums;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+          transition: all 0.08s steps(2);
           -webkit-tap-highlight-color: transparent;
           touch-action: manipulation;
+          text-shadow: 1px 1px 0 #0f172a;
           position: relative;
-          overflow: hidden;
         }
 
-        .sm-choice::before {
+        .sm-px-btn::after {
           content: '';
           position: absolute;
-          inset: 0;
-          background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 50%);
-          pointer-events: none;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          background: #0f172a;
         }
 
-        .sm-choice:active:not(:disabled) {
-          transform: scale(0.94);
-          background: rgba(37,99,235,0.25);
+        .sm-px-btn:active:not(:disabled) {
+          transform: translateY(2px);
+          border-color: #60a5fa;
         }
 
-        .sm-choice:disabled { cursor: default; }
+        .sm-px-btn:active:not(:disabled)::after { height: 0; }
 
-        .sm-choice.correct-flash {
-          background: linear-gradient(180deg, #22c55e, #16a34a) !important;
-          border-color: #16a34a !important;
-          color: #fff !important;
-          animation: sm-pop 0.35s ease-out;
-          box-shadow: 0 0 20px rgba(34,197,94,0.5);
+        .sm-px-btn:disabled { cursor: default; }
+
+        .sm-px-btn.correct-flash {
+          background: #166534 !important;
+          border-color: #22c55e !important;
+          color: #4ade80 !important;
+          animation: sm-px-correct-anim 0.35s steps(4);
         }
 
-        .sm-choice.wrong-flash {
-          background: linear-gradient(180deg, #ef4444, #dc2626) !important;
-          border-color: #dc2626 !important;
-          color: #fff !important;
-          animation: sm-shake 0.35s ease-out;
+        .sm-px-btn.wrong-flash {
+          background: #7f1d1d !important;
+          border-color: #ef4444 !important;
+          color: #fca5a5 !important;
+          animation: sm-px-shake 0.35s steps(6);
         }
 
-        .sm-choice.reveal-correct {
-          background: rgba(34,197,94,0.15) !important;
+        .sm-px-btn.reveal-correct {
           border-color: #22c55e !important;
           color: #4ade80 !important;
         }
 
-        .sm-choice.hint-highlight {
-          border-color: rgba(239,68,68,0.5) !important;
-          background: rgba(239,68,68,0.1) !important;
-          color: rgba(255,255,255,0.3) !important;
+        .sm-px-btn.hint-x {
+          border-color: #991b1b !important;
+          color: #475569 !important;
+          background: #1a1a2e !important;
+          text-decoration: line-through;
         }
 
-        /* ── Bottom Bar ── */
-        .sm-bottom-bar {
+        @keyframes sm-px-correct-anim {
+          0% { transform: scale(1); }
+          30% { transform: scale(1.06); }
+          100% { transform: scale(1); }
+        }
+
+        @keyframes sm-px-shake {
+          0% { transform: translateX(0); }
+          16% { transform: translateX(-5px); }
+          33% { transform: translateX(5px); }
+          50% { transform: translateX(-3px); }
+          66% { transform: translateX(3px); }
+          100% { transform: translateX(0); }
+        }
+
+        /* ── Bottom ── */
+        .sm-px-bottom {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 8px 14px 12px;
+          padding: 6px 10px 10px;
           flex-shrink: 0;
         }
 
-        .sm-exit-btn {
-          font-size: 12px;
-          font-weight: 600;
-          color: rgba(255,255,255,0.4);
+        .sm-px-exit {
+          font-family: 'Press Start 2P', monospace;
+          font-size: 7px;
+          color: #475569;
           background: transparent;
-          border: 1px solid rgba(255,255,255,0.12);
-          border-radius: 8px;
-          padding: 6px 14px;
+          border: 2px solid #334155;
+          padding: 4px 10px;
           cursor: pointer;
           -webkit-tap-highlight-color: transparent;
         }
 
-        .sm-exit-btn:active { background: rgba(255,255,255,0.06); }
+        .sm-px-exit:active { border-color: #475569; }
 
-        .sm-streak-badge {
-          font-size: 11px;
-          font-weight: 700;
-          color: #f59e0b;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
+        .sm-px-streak { font-size: 7px; color: #f59e0b; }
 
-        /* ── Level Up Overlay ── */
-        .sm-levelup-overlay {
+        /* ── Overlays ── */
+        .sm-px-overlay {
           position: absolute;
           inset: 0;
           display: flex;
           align-items: center;
           justify-content: center;
           pointer-events: none;
-          z-index: 20;
-          animation: sm-levelup-in 0.5s ease-out;
+          z-index: 30;
         }
 
-        .sm-levelup-text {
-          font-size: 36px;
-          font-weight: 900;
-          color: #fff;
-          text-shadow: 0 0 20px rgba(59,130,246,0.8), 0 4px 12px rgba(0,0,0,0.4);
-          animation: sm-levelup-scale 2s ease-out forwards;
+        .sm-px-levelup-txt {
+          font-size: 20px;
+          color: #60a5fa;
+          text-shadow: 3px 3px 0 #1e3a5f, -1px -1px 0 #93c5fd;
+          animation: sm-px-levelup 2s steps(6) forwards;
         }
 
-        @keyframes sm-levelup-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
+        @keyframes sm-px-levelup {
+          0% { transform: scale(0); opacity: 0; }
+          15% { transform: scale(1.3); opacity: 1; }
+          30% { transform: scale(1); opacity: 1; }
+          80% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(-20px); }
         }
 
-        @keyframes sm-levelup-scale {
-          0% { transform: scale(0.5); opacity: 0; }
-          20% { transform: scale(1.2); opacity: 1; }
+        .sm-px-streak-txt {
+          font-size: 14px;
+          color: #f59e0b;
+          text-shadow: 2px 2px 0 #78350f;
+          animation: sm-px-levelup 1.5s steps(6) forwards;
+        }
+
+        .sm-px-perfect-txt {
+          font-size: 18px;
+          color: #fbbf24;
+          text-shadow: 2px 2px 0 #92400e;
+          animation: sm-px-perfect 0.8s steps(4) forwards;
+        }
+
+        @keyframes sm-px-perfect {
+          0% { transform: scale(0) rotate(-10deg); opacity: 0; }
+          30% { transform: scale(1.4) rotate(5deg); opacity: 1; }
+          60% { transform: scale(1) rotate(0deg); opacity: 1; }
+          100% { opacity: 0; transform: translateY(-15px); }
+        }
+
+        .sm-px-boss-txt {
+          font-size: 16px;
+          color: #f87171;
+          text-shadow: 2px 2px 0 #7f1d1d;
+          animation: sm-px-boss-flash 1.5s steps(3) forwards;
+        }
+
+        @keyframes sm-px-boss-flash {
+          0% { transform: scale(0); opacity: 0; }
+          10% { transform: scale(1.5); opacity: 1; }
+          20% { transform: scale(0.9); }
+          30% { transform: scale(1.1); }
+          50% { transform: scale(1); opacity: 1; }
+          80% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+
+        .sm-px-powerup-get {
+          font-size: 12px;
+          text-shadow: 2px 2px 0 #0f172a;
+          animation: sm-px-powerup-pop 1.2s steps(4) forwards;
+          position: absolute;
+          top: 40%;
+          z-index: 35;
+        }
+
+        @keyframes sm-px-powerup-pop {
+          0% { transform: scale(0); opacity: 0; }
+          20% { transform: scale(1.5); opacity: 1; }
           40% { transform: scale(1); opacity: 1; }
           80% { opacity: 1; }
-          100% { opacity: 0; transform: scale(1.1) translateY(-20px); }
-        }
-
-        /* ── Streak Milestone ── */
-        .sm-streak-milestone {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 24px;
-          font-weight: 900;
-          color: #f59e0b;
-          text-shadow: 0 0 16px rgba(245,158,11,0.6);
-          pointer-events: none;
-          z-index: 15;
-          animation: sm-streak-pop 1.5s ease-out forwards;
-        }
-
-        @keyframes sm-streak-pop {
-          0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
-          20% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
-          40% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-          80% { opacity: 1; }
-          100% { opacity: 0; transform: translate(-50%, -70%) scale(0.9); }
-        }
-
-        @keyframes sm-pop {
-          0% { transform: scale(1); }
-          40% { transform: scale(1.1); }
-          100% { transform: scale(1); }
-        }
-
-        @keyframes sm-shake {
-          0% { transform: translateX(0); }
-          20% { transform: translateX(-7px); }
-          40% { transform: translateX(7px); }
-          60% { transform: translateX(-4px); }
-          80% { transform: translateX(4px); }
-          100% { transform: translateX(0); }
+          100% { opacity: 0; transform: translateY(-30px); }
         }
       `}</style>
 
@@ -1059,128 +1140,151 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
-      {/* Level Up Overlay */}
+      {/* Overlays */}
       {showLevelUp && (
-        <div className="sm-levelup-overlay">
-          <span className="sm-levelup-text">LEVEL UP! {showLevelUp}</span>
-        </div>
+        <div className="sm-px-overlay"><span className="sm-px-levelup-txt">LEVEL UP! {showLevelUp}</span></div>
       )}
-
-      {/* Streak Milestone */}
       {showStreakMilestone && (
-        <div className="sm-streak-milestone">
-          {streak} STREAK!
-        </div>
+        <div className="sm-px-overlay"><span className="sm-px-streak-txt">{streak} STREAK!</span></div>
+      )}
+      {showPerfect && (
+        <div className="sm-px-overlay"><span className="sm-px-perfect-txt">PERFECT!</span></div>
+      )}
+      {showBossLabel && (
+        <div className="sm-px-overlay"><span className="sm-px-boss-txt">BOSS ROUND!</span></div>
+      )}
+      {showPowerUpGet && (
+        <span className="sm-px-powerup-get" style={{ color: POWER_UP_COLORS[showPowerUpGet], left: '50%', transform: 'translateX(-50%)' }}>
+          {POWER_UP_LABELS[showPowerUpGet]}
+        </span>
       )}
 
       {/* Header */}
-      <div className="sm-header">
-        <img className="sm-avatar" src={songChangsikImage} alt="" />
-        <div className="sm-header-info">
-          <div className="sm-score-row">
-            <p className="sm-score">{score.toLocaleString()}</p>
-            <p className="sm-best">BEST {displayedBestScore.toLocaleString()}</p>
-          </div>
+      <div className="sm-px-header">
+        <div className={`sm-px-char-wrap ${charReaction}`}>
+          <img src={charImage} alt="" />
         </div>
-        <div className="sm-time-block">
-          <p className={`sm-time ${isCriticalTime ? 'critical-time' : isLowTime ? 'low-time' : ''}`}>{timeSeconds}s</p>
+        <div className="sm-px-header-info">
+          <p className="sm-px-score">{score.toLocaleString()}</p>
+          <p className="sm-px-best">BEST {displayedBestScore.toLocaleString()}</p>
+        </div>
+        <div className="sm-px-lives">
+          {Array.from({ length: MAX_LIVES }, (_, i) => (
+            <span key={i} className={`sm-px-heart ${i < lives ? '' : 'empty'}`} />
+          ))}
         </div>
       </div>
 
-      {/* Time Progress Bar */}
-      <div className={`sm-time-bar-wrap ${timeBonusAnim ? 'sm-time-bonus-flash' : ''}`}>
+      {/* Time Bar */}
+      <div className={`sm-px-timebar ${timeBonusAnim ? 'flash' : ''}`}>
         <div
-          className="sm-time-bar"
+          className="sm-px-timebar-fill"
           style={{
             width: `${timeProgressPercent}%`,
-            background: isCriticalTime
-              ? '#ef4444'
-              : isLowTime
-                ? '#f59e0b'
-                : 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+            background: isCriticalTime ? '#ef4444' : isLowTime ? '#fbbf24' : '#3b82f6',
           }}
         />
+        <span className={`sm-px-time-text ${isCriticalTime ? 'danger' : isLowTime ? 'warn' : ''}`}>
+          {freezeActiveRef.current ? 'FROZEN' : `${timeSeconds}s`}
+        </span>
       </div>
 
-      {/* Meta Row */}
-      <div className="sm-meta-row">
-        <span className="sm-combo-tag" style={{
-          borderColor: combo > 0 ? comboColor : 'rgba(59,130,246,0.3)',
-          color: combo > 0 ? comboColor : 'rgba(255,255,255,0.5)',
-          background: combo > 0 ? `${comboColor}15` : 'rgba(59,130,246,0.1)',
-        }}>
-          x{combo}
-          {comboLabel && <span style={{ fontSize: 10 }}>{comboLabel}</span>}
+      {/* Meta */}
+      <div className="sm-px-meta">
+        <span className="sm-px-tag" style={{ color: combo > 0 ? comboColor : '#475569', borderColor: combo > 0 ? comboColor : '#334155' }}>
+          x{combo} {comboLabel ?? ''}
         </span>
-        <p>Solved <strong>{solvedCount}</strong></p>
-        <span className="sm-difficulty-badge" style={{ color: difficultyColor, borderColor: `${difficultyColor}60` }}>
+        <span className="sm-px-tag" style={{ color: '#94a3b8', borderColor: '#334155' }}>
+          #{solvedCount}
+        </span>
+        <span className="sm-px-tag" style={{ color: difficultyColor, borderColor: difficultyColor }}>
           {difficultyLabel}
         </span>
       </div>
 
-      {/* Fever Banner */}
+      {/* Fever */}
       {isFever && (
-        <div className="sm-fever-banner">
-          <p className="sm-fever-text">FEVER x{FEVER_MULTIPLIER}</p>
-          <p className="sm-fever-timer">{(feverRemainingMs / 1000).toFixed(1)}s</p>
+        <div className="sm-px-fever">
+          <p className="sm-px-fever-text">FEVER x{FEVER_MULTIPLIER}!</p>
+          <p className="sm-px-fever-timer">{(feverRemainingMs / 1000).toFixed(1)}s</p>
         </div>
       )}
 
-      {/* Sequence Display Area */}
-      <div className="sm-sequence-area">
-        {showHint && (
-          <p className="sm-pattern-label">{problem.patternLabel} Pattern ({patternToEmoji(problem.patternKind)})</p>
-        )}
+      {/* Active Power-up */}
+      {activePowerUp && (
+        <div className="sm-px-powerup-bar">
+          <p className="sm-px-powerup-label" style={{ color: POWER_UP_COLORS[activePowerUp.kind] }}>
+            {POWER_UP_LABELS[activePowerUp.kind]}
+          </p>
+          <div className="sm-px-powerup-meter">
+            <div
+              className="sm-px-powerup-meter-fill"
+              style={{
+                width: `${(activePowerUp.remainingMs / POWER_UP_DURATION[activePowerUp.kind]) * 100}%`,
+                background: POWER_UP_COLORS[activePowerUp.kind],
+              }}
+            />
+          </div>
+        </div>
+      )}
 
-        <div className={`sm-sequence-box ${isFever ? 'fever' : isLowTime ? 'low-time' : ''}`}>
+      {/* Main Area */}
+      <div className="sm-px-main">
+        {showHint && <span className="sm-px-pattern-tag">{problem.patternLabel}</span>}
+
+        <div className={`sm-px-seq-box ${problem.isBoss ? 'boss-box' : isFever ? 'fever-box' : isLowTime ? 'low-time-box' : ''}`}>
           {problem.displayed.map((num, index) => (
-            <span key={`num-${index}`}>
-              <span className={`sm-num ${numberRevealIndex >= index ? 'revealed' : ''}`}>{num}</span>
-              {index < problem.displayed.length - 1 && <span className="sm-arrow">, </span>}
+            <span key={`n-${index}`}>
+              <span className={`sm-px-num-cell ${numberRevealIndex >= index ? 'on' : ''}`}>{num}</span>
+              {index < problem.displayed.length - 1 && <span className="sm-px-sep">,</span>}
             </span>
           ))}
-          <span className="sm-arrow">, </span>
-          <span className="sm-num sm-unknown revealed">?</span>
+          <span className="sm-px-sep">,</span>
+          <span className="sm-px-num-cell sm-px-mystery on">?</span>
         </div>
 
-        <div className="sm-hint-area">
+        {/* Stars */}
+        <div className="sm-px-stars">
+          {[0, 1, 2].map(i => (
+            <span key={i} className={`sm-px-star ${i < pixelStars ? 'filled' : 'empty'}`} />
+          ))}
+        </div>
+
+        {/* Hint */}
+        <div className="sm-px-hint">
           <button
-            className="sm-hint-btn"
+            className="sm-px-hint-btn"
             onClick={useHint}
             disabled={hintAvailableMs > 0 || showHint}
             type="button"
           >
-            HINT (-{HINT_PENALTY}pt)
-            {hintAvailableMs > 0 && (
-              <span className="sm-hint-cooldown-bar" style={{ width: `${hintCooldownPercent}%` }} />
-            )}
+            HINT -{HINT_PENALTY}PT
           </button>
           {hintAvailableMs > 0 && (
-            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{Math.ceil(hintAvailableMs / 1000)}s</span>
+            <span className="sm-px-hint-cd">{Math.ceil(hintAvailableMs / 1000)}s</span>
           )}
         </div>
       </div>
 
       {/* Choices */}
-      <div className="sm-choices">
+      <div className="sm-px-choices">
         {problem.choices.map((choice, index) => {
-          let feedbackClass = ''
+          let fc = ''
           if (feedback !== null) {
             if (feedback.choiceIndex === index) {
-              feedbackClass = feedback.kind === 'correct' ? 'correct-flash' : 'wrong-flash'
+              fc = feedback.kind === 'correct' ? 'correct-flash' : 'wrong-flash'
             } else if (feedback.kind === 'wrong' && choice === problem.answer) {
-              feedbackClass = 'reveal-correct'
+              fc = 'reveal-correct'
             }
           }
-          // Hint: eliminate one wrong answer
-          const isHintEliminated = showHint && !feedback && choice !== problem.answer && index === problem.choices.findIndex(c => c !== problem.answer)
+          const isHintX = showHint && !feedback && choice !== problem.answer && index === problem.choices.findIndex(c => c !== problem.answer)
           return (
             <button
-              className={`sm-choice ${feedbackClass} ${isHintEliminated ? 'hint-highlight' : ''}`}
-              key={`choice-${index}`}
+              className={`sm-px-btn ${fc} ${isHintX ? 'hint-x' : ''}`}
+              key={`c-${index}`}
               type="button"
               onClick={() => handleChoice(index)}
-              disabled={lockedRef.current || isHintEliminated}
+              disabled={lockedRef.current || isHintX}
             >
               {choice}
             </button>
@@ -1188,14 +1292,10 @@ function SequenceMasterGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         })}
       </div>
 
-      {/* Bottom Bar */}
-      <div className="sm-bottom-bar">
-        <button className="sm-exit-btn" type="button" onClick={handleExit}>EXIT</button>
-        {streak >= 3 && (
-          <span className="sm-streak-badge">
-            {streak} streak
-          </span>
-        )}
+      {/* Bottom */}
+      <div className="sm-px-bottom">
+        <button className="sm-px-exit" type="button" onClick={handleExit}>EXIT</button>
+        {streak >= 3 && <span className="sm-px-streak">{streak} STREAK</span>}
       </div>
     </section>
   )

@@ -11,7 +11,11 @@ import comboSfxUrl from '../../../assets/sounds/connect-four-combo.mp3'
 import feverSfxUrl from '../../../assets/sounds/connect-four-fever.mp3'
 import hintSfxUrl from '../../../assets/sounds/connect-four-hint.mp3'
 import hoverSfxUrl from '../../../assets/sounds/connect-four-hover.mp3'
+import levelupSfxUrl from '../../../assets/sounds/connect-four-levelup.mp3'
+import tickSfxUrl from '../../../assets/sounds/connect-four-tick.mp3'
+import threatSfxUrl from '../../../assets/sounds/connect-four-threat.mp3'
 
+// ─── Constants ───────────────────────────────────────────
 const COLS = 7
 const ROWS = 6
 const ROUND_DURATION_MS = 60000
@@ -19,198 +23,147 @@ const WIN_SCORE = 40
 const DRAW_SCORE = 15
 const AI_DELAY_MS = 400
 const LOW_TIME_THRESHOLD_MS = 10000
+const CRITICAL_TIME_MS = 5000
 const DROP_ANIMATION_MS = 350
 const STREAK_BONUS_PER_WIN = 10
 const QUICK_WIN_MOVES = 10
 const QUICK_WIN_BONUS = 20
+const PERFECT_WIN_BONUS = 30
 const FEVER_STREAK_THRESHOLD = 3
 const FEVER_MULTIPLIER = 2
 const MAX_HINTS = 3
 const HINT_COOLDOWN_MS = 5000
 const POWER_UP_INTERVAL_WINS = 3
+const TIME_BONUS_PER_WIN_SEC = 5000
+const COMBO_THRESHOLD = 2
+const THREAT_CHECK_INTERVAL = 2
 
+// ─── Types ───────────────────────────────────────────────
 type CellValue = 0 | 1 | 2
 type Board = CellValue[][]
 type GamePhase = 'player-turn' | 'ai-turn' | 'win' | 'lose' | 'draw' | 'idle'
-type PowerUpType = 'double-turn' | 'column-clear' | 'undo'
+type PowerUpType = 'double-turn' | 'column-clear' | 'undo' | 'time-bonus'
 
-interface WinLine {
-  readonly cells: ReadonlyArray<{ row: number; col: number }>
-}
-
-interface PowerUp {
-  readonly type: PowerUpType
-  readonly label: string
-  readonly icon: string
-}
+interface WinLine { readonly cells: ReadonlyArray<{ row: number; col: number }> }
+interface PowerUp { readonly type: PowerUpType; readonly label: string; readonly icon: string }
 
 const POWER_UPS: PowerUp[] = [
-  { type: 'double-turn', label: 'Double Turn', icon: '2x' },
-  { type: 'column-clear', label: 'Clear Column', icon: 'X' },
-  { type: 'undo', label: 'Undo', icon: '<' },
+  { type: 'double-turn', label: 'DOUBLE', icon: 'x2' },
+  { type: 'column-clear', label: 'CLEAR', icon: 'XX' },
+  { type: 'undo', label: 'UNDO', icon: '<<' },
+  { type: 'time-bonus', label: '+10s', icon: '+T' },
 ]
 
+const WIN_EMOJIS = ['*', '+', 'o', '^'] as const
+
+// ─── Board Logic ─────────────────────────────────────────
 function createEmptyBoard(): Board {
-  return Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => 0 as CellValue))
+  return Array.from({ length: ROWS }, () => Array(COLS).fill(0))
 }
-
-function cloneBoard(board: Board): Board {
-  return board.map((row) => [...row])
-}
-
-function getAvailableRow(board: Board, col: number): number {
-  for (let row = ROWS - 1; row >= 0; row -= 1) {
-    if (board[row][col] === 0) return row
-  }
+function cloneBoard(b: Board): Board { return b.map(r => [...r]) }
+function getAvailableRow(b: Board, c: number): number {
+  for (let r = ROWS - 1; r >= 0; r--) if (b[r][c] === 0) return r
   return -1
 }
-
-function getAvailableCols(board: Board): number[] {
-  const cols: number[] = []
-  for (let col = 0; col < COLS; col += 1) {
-    if (board[0][col] === 0) cols.push(col)
-  }
-  return cols
+function getAvailableCols(b: Board): number[] {
+  return Array.from({ length: COLS }, (_, c) => c).filter(c => b[0][c] === 0)
 }
-
-function checkWinAt(board: Board, player: CellValue): WinLine | null {
-  const directions = [
-    { dr: 0, dc: 1 },
-    { dr: 1, dc: 0 },
-    { dr: 1, dc: 1 },
-    { dr: 1, dc: -1 },
-  ]
-
-  for (let row = 0; row < ROWS; row += 1) {
-    for (let col = 0; col < COLS; col += 1) {
-      if (board[row][col] !== player) continue
-
-      for (const { dr, dc } of directions) {
-        const cells: { row: number; col: number }[] = [{ row, col }]
-        let valid = true
-
-        for (let step = 1; step < 4; step += 1) {
-          const nextRow = row + dr * step
-          const nextCol = col + dc * step
-          if (nextRow < 0 || nextRow >= ROWS || nextCol < 0 || nextCol >= COLS || board[nextRow][nextCol] !== player) {
-            valid = false
-            break
-          }
-          cells.push({ row: nextRow, col: nextCol })
-        }
-
-        if (valid) return { cells }
+function checkWinAt(b: Board, p: CellValue): WinLine | null {
+  const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]]
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (b[r][c] !== p) continue
+    for (const [dr, dc] of dirs) {
+      const cells = [{ row: r, col: c }]
+      let ok = true
+      for (let s = 1; s < 4; s++) {
+        const nr = r + dr * s, nc = c + dc * s
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || b[nr][nc] !== p) { ok = false; break }
+        cells.push({ row: nr, col: nc })
       }
+      if (ok) return { cells }
     }
   }
-
   return null
 }
-
-function isBoardFull(board: Board): boolean {
-  for (let col = 0; col < COLS; col += 1) {
-    if (board[0][col] === 0) return false
-  }
-  return true
-}
-
-function findWinningCol(board: Board, player: CellValue): number {
-  for (let col = 0; col < COLS; col += 1) {
-    const row = getAvailableRow(board, col)
-    if (row === -1) continue
-    const testBoard = cloneBoard(board)
-    testBoard[row][col] = player
-    if (checkWinAt(testBoard, player) !== null) return col
+function isBoardFull(b: Board): boolean { return b[0].every(v => v !== 0) }
+function findWinningCol(b: Board, p: CellValue): number {
+  for (let c = 0; c < COLS; c++) {
+    const r = getAvailableRow(b, c)
+    if (r === -1) continue
+    const t = cloneBoard(b); t[r][c] = p
+    if (checkWinAt(t, p)) return c
   }
   return -1
 }
 
-function countThreats(board: Board, player: CellValue): number[] {
-  const threats = new Array(COLS).fill(0)
-  for (let col = 0; col < COLS; col += 1) {
-    const row = getAvailableRow(board, col)
-    if (row === -1) continue
-    const testBoard = cloneBoard(board)
-    testBoard[row][col] = player
-
-    const directions = [
-      { dr: 0, dc: 1 }, { dr: 1, dc: 0 }, { dr: 1, dc: 1 }, { dr: 1, dc: -1 },
-    ]
-    for (const { dr, dc } of directions) {
-      let count = 1
-      for (let d = -1; d <= 1; d += 2) {
-        for (let step = 1; step < 4; step += 1) {
-          const nr = row + dr * step * d
-          const nc = col + dc * step * d
-          if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || testBoard[nr][nc] !== player) break
-          count += 1
-        }
+function countThreats(b: Board, p: CellValue): number[] {
+  const threats = Array(COLS).fill(0)
+  const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]]
+  for (let c = 0; c < COLS; c++) {
+    const r = getAvailableRow(b, c)
+    if (r === -1) continue
+    const t = cloneBoard(b); t[r][c] = p
+    for (const [dr, dc] of dirs) {
+      let cnt = 1
+      for (const d of [-1, 1]) for (let s = 1; s < 4; s++) {
+        const nr = r + dr * s * d, nc = c + dc * s * d
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || t[nr][nc] !== p) break
+        cnt++
       }
-      if (count >= 3) threats[col] += count
+      if (cnt >= 3) threats[c] += cnt
     }
   }
   return threats
 }
 
-function aiChooseCol(board: Board, smartProbability: number = 1): number {
-  const available = getAvailableCols(board)
-  if (available.length === 0) return -1
-
-  if (Math.random() > smartProbability) {
-    return available[Math.floor(Math.random() * available.length)]
-  }
-
-  const winCol = findWinningCol(board, 2)
-  if (winCol !== -1) return winCol
-
-  const blockCol = findWinningCol(board, 1)
-  if (blockCol !== -1) return blockCol
-
-  const threats = countThreats(board, 2)
-  const playerThreats = countThreats(board, 1)
-
-  let bestCol = available[0]
-  let bestScore = -Infinity
-  for (const col of available) {
-    let s = threats[col] * 2 - playerThreats[col]
-    s += (3 - Math.abs(col - 3)) * 0.5
-    if (s > bestScore) {
-      bestScore = s
-      bestCol = col
+function hasThreeInRow(b: Board, p: CellValue): boolean {
+  const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]]
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (b[r][c] !== p) continue
+    for (const [dr, dc] of dirs) {
+      let cnt = 1
+      for (let s = 1; s < 3; s++) {
+        const nr = r + dr * s, nc = c + dc * s
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || b[nr][nc] !== p) break
+        cnt++
+      }
+      if (cnt >= 3) return true
     }
   }
-  return bestCol
+  return false
 }
 
-function getAiSmartProbability(totalWins: number): number {
-  if (totalWins < 2) return 0.3
-  if (totalWins < 4) return 0.5
-  if (totalWins < 7) return 0.7
-  if (totalWins < 10) return 0.85
-  return 1.0
-}
-
-function getHintCol(board: Board): number {
-  const winCol = findWinningCol(board, 1)
-  if (winCol !== -1) return winCol
-  const blockCol = findWinningCol(board, 2)
-  if (blockCol !== -1) return blockCol
-  const threats = countThreats(board, 1)
-  const available = getAvailableCols(board)
-  let bestCol = available[0]
-  let bestThreat = -1
-  for (const col of available) {
-    const t = threats[col] + (3 - Math.abs(col - 3)) * 0.3
-    if (t > bestThreat) {
-      bestThreat = t
-      bestCol = col
-    }
+function aiChooseCol(b: Board, smart: number): number {
+  const avail = getAvailableCols(b)
+  if (avail.length === 0) return -1
+  if (Math.random() > smart) return avail[Math.floor(Math.random() * avail.length)]
+  const wc = findWinningCol(b, 2); if (wc !== -1) return wc
+  const bc = findWinningCol(b, 1); if (bc !== -1) return bc
+  const thr = countThreats(b, 2), pthr = countThreats(b, 1)
+  let best = avail[0], bestS = -Infinity
+  for (const c of avail) {
+    const s = thr[c] * 2 - pthr[c] + (3 - Math.abs(c - 3)) * 0.5
+    if (s > bestS) { bestS = s; best = c }
   }
-  return bestCol
+  return best
 }
 
+function getAiSmartProb(w: number): number {
+  if (w < 2) return 0.3; if (w < 4) return 0.5; if (w < 7) return 0.7; if (w < 10) return 0.85; return 1
+}
+
+function getHintCol(b: Board): number {
+  const wc = findWinningCol(b, 1); if (wc !== -1) return wc
+  const bc = findWinningCol(b, 2); if (bc !== -1) return bc
+  const thr = countThreats(b, 1), avail = getAvailableCols(b)
+  let best = avail[0], bestT = -1
+  for (const c of avail) { const t = thr[c] + (3 - Math.abs(c - 3)) * 0.3; if (t > bestT) { bestT = t; best = c } }
+  return best
+}
+
+// ─── Game Component ──────────────────────────────────────
 function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const [board, setBoard] = useState<Board>(() => createEmptyBoard())
+  const [board, setBoard] = useState<Board>(createEmptyBoard)
   const [phase, setPhase] = useState<GamePhase>('player-turn')
   const [score, setScore] = useState(0)
   const [wins, setWins] = useState(0)
@@ -222,7 +175,6 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [lastDropCol, setLastDropCol] = useState<number | null>(null)
   const [winStreak, setWinStreak] = useState(0)
   const [isFever, setIsFever] = useState(false)
-  const [movesThisRound, setMovesThisRound] = useState(0)
   const [hintCol, setHintCol] = useState<number | null>(null)
   const [hintsRemaining, setHintsRemaining] = useState(MAX_HINTS)
   const [hintCooldown, setHintCooldown] = useState(false)
@@ -232,490 +184,298 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [prevBoard, setPrevBoard] = useState<Board | null>(null)
   const [roundNumber, setRoundNumber] = useState(1)
   const [lastScoreGain, setLastScoreGain] = useState(0)
+  const [comboCount, setComboCount] = useState(0)
+  const [showThreatWarning, setShowThreatWarning] = useState(false)
 
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const finishedRef = useRef(false)
   const winStreakRef = useRef(0)
-  const movesThisRoundRef = useRef(0)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
+  const movesRef = useRef(0)
+  const rafRef = useRef<number | null>(null)
+  const lastFrameRef = useRef<number | null>(null)
   const aiTimerRef = useRef<number | null>(null)
   const dropTimerRef = useRef<number | null>(null)
   const hintTimerRef = useRef<number | null>(null)
   const winsRef = useRef(0)
   const panelRef = useRef<HTMLDivElement>(null)
-
+  const comboRef = useRef(0)
+  const lastTickSfxRef = useRef(0)
+  const perfectRef = useRef(true)
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map())
 
-  const effects = useGameEffects({ maxParticles: 40 })
+  const fx = useGameEffects({ maxParticles: 50 })
 
-  const getAudio = useCallback((url: string): HTMLAudioElement => {
-    let audio = audioPoolRef.current.get(url)
-    if (!audio) {
-      audio = new Audio(url)
-      audio.preload = 'auto'
-      audioPoolRef.current.set(url, audio)
-    }
-    return audio
+  const getAudio = useCallback((url: string) => {
+    let a = audioPoolRef.current.get(url)
+    if (!a) { a = new Audio(url); a.preload = 'auto'; audioPoolRef.current.set(url, a) }
+    return a
   }, [])
 
-  const playSfx = useCallback((url: string, volume = 0.5, playbackRate = 1) => {
-    const audio = getAudio(url)
-    audio.currentTime = 0
-    audio.volume = volume
-    audio.playbackRate = playbackRate
-    void audio.play().catch(() => {})
+  const sfx = useCallback((url: string, vol = 0.5, rate = 1) => {
+    const a = getAudio(url); a.currentTime = 0; a.volume = vol; a.playbackRate = rate
+    void a.play().catch(() => {})
   }, [getAudio])
 
-  const finishGame = useCallback(() => {
+  const finish = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
-
-    if (aiTimerRef.current !== null) {
-      window.clearTimeout(aiTimerRef.current)
-      aiTimerRef.current = null
-    }
-    if (dropTimerRef.current !== null) {
-      window.clearTimeout(dropTimerRef.current)
-      dropTimerRef.current = null
-    }
-    if (hintTimerRef.current !== null) {
-      window.clearTimeout(hintTimerRef.current)
-      hintTimerRef.current = null
-    }
-
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
-    onFinish({ score: scoreRef.current, durationMs: elapsedMs })
+    for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef]) { if (ref.current !== null) { window.clearTimeout(ref.current); ref.current = null } }
+    onFinish({ score: scoreRef.current, durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)) })
   }, [onFinish])
 
   const startNewRound = useCallback(() => {
     setBoard(createEmptyBoard())
     setPhase('player-turn')
-    setWinLine(null)
-    setDroppingCell(null)
-    setLastDropCol(null)
-    setHintCol(null)
-    setPrevBoard(null)
-    setDoubleTurnActive(false)
-    movesThisRoundRef.current = 0
-    setMovesThisRound(0)
-    setRoundNumber((prev) => prev + 1)
+    setWinLine(null); setDroppingCell(null); setLastDropCol(null); setHintCol(null)
+    setPrevBoard(null); setDoubleTurnActive(false); setShowThreatWarning(false)
+    movesRef.current = 0; perfectRef.current = true
+    setRoundNumber(p => p + 1)
+
+    sfx(levelupSfxUrl, 0.4)
 
     if (winsRef.current > 0 && winsRef.current % POWER_UP_INTERVAL_WINS === 0) {
-      const randomPower = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)]
-      setActivePowerUp(randomPower.type)
-      playSfx(comboSfxUrl, 0.5)
+      const rp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)]
+      setActivePowerUp(rp.type)
+      sfx(comboSfxUrl, 0.5)
     }
-  }, [playSfx])
+  }, [sfx])
 
-  const resolveRound = useCallback(
-    (result: 'win' | 'lose' | 'draw') => {
-      let addedScore = result === 'win' ? WIN_SCORE : result === 'draw' ? DRAW_SCORE : 0
+  const resolveRound = useCallback((result: 'win' | 'lose' | 'draw') => {
+    let added = result === 'win' ? WIN_SCORE : result === 'draw' ? DRAW_SCORE : 0
 
-      if (result === 'win') {
-        const nextStreak = winStreakRef.current + 1
-        winStreakRef.current = nextStreak
-        setWinStreak(nextStreak)
+    if (result === 'win') {
+      const ns = winStreakRef.current + 1; winStreakRef.current = ns; setWinStreak(ns)
+      const fever = ns >= FEVER_STREAK_THRESHOLD; setIsFever(fever)
+      added += Math.min(ns, 5) * STREAK_BONUS_PER_WIN
+      if (movesRef.current <= QUICK_WIN_MOVES) added += QUICK_WIN_BONUS
+      if (perfectRef.current) added += PERFECT_WIN_BONUS
+      if (fever) added *= FEVER_MULTIPLIER
 
-        const feverActive = nextStreak >= FEVER_STREAK_THRESHOLD
-        setIsFever(feverActive)
+      const nc = comboRef.current + 1; comboRef.current = nc; setComboCount(nc)
+      if (nc >= COMBO_THRESHOLD) added += nc * 5
 
-        addedScore += Math.min(nextStreak, 5) * STREAK_BONUS_PER_WIN
-        if (movesThisRoundRef.current <= QUICK_WIN_MOVES) addedScore += QUICK_WIN_BONUS
-        if (feverActive) addedScore *= FEVER_MULTIPLIER
+      remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_PER_WIN_SEC)
 
-        winsRef.current += 1
-        setWins((prev) => prev + 1)
-        setPhase('win')
-
-        playSfx(winSfxUrl, 0.6)
-        if (feverActive) {
-          setTimeout(() => playSfx(feverSfxUrl, 0.5), 300)
-        }
-
-        const rect = panelRef.current?.getBoundingClientRect()
-        if (rect) {
-          effects.comboHitBurst(rect.width / 2, rect.height / 2, nextStreak, addedScore, ['🎉', '🏆', '⭐', '💎'])
-          effects.triggerShake(8, 200)
-        }
-      } else if (result === 'lose') {
-        winStreakRef.current = 0
-        setWinStreak(0)
-        setIsFever(false)
-        setLosses((prev) => prev + 1)
-        setPhase('lose')
-        playSfx(loseSfxUrl, 0.5)
-        effects.triggerFlash('rgba(239,68,68,0.3)', 150)
-        effects.triggerShake(6, 150)
-      } else {
-        setDraws((prev) => prev + 1)
-        setPhase('draw')
-        playSfx(drawSfxUrl, 0.45)
-      }
-
-      setLastScoreGain(addedScore)
-      const nextScore = scoreRef.current + addedScore
-      scoreRef.current = nextScore
-      setScore(nextScore)
-
-      if (dropTimerRef.current !== null) window.clearTimeout(dropTimerRef.current)
-      dropTimerRef.current = window.setTimeout(() => {
-        dropTimerRef.current = null
-        if (!finishedRef.current) startNewRound()
-      }, 1500)
-    },
-    [playSfx, startNewRound, effects],
-  )
-
-  const placePiece = useCallback(
-    (currentBoard: Board, col: number, player: CellValue): Board | null => {
-      const row = getAvailableRow(currentBoard, col)
-      if (row === -1) return null
-
-      const nextBoard = cloneBoard(currentBoard)
-      nextBoard[row][col] = player
-
-      setDroppingCell({ row, col })
-      setLastDropCol(col)
-      setBoard(nextBoard)
-      setHintCol(null)
-
-      playSfx(dropSfxUrl, 0.45, 0.85 + row * 0.05)
+      winsRef.current++; setWins(p => p + 1); setPhase('win')
+      sfx(winSfxUrl, 0.6)
+      if (fever) setTimeout(() => sfx(feverSfxUrl, 0.5), 300)
+      if (nc >= COMBO_THRESHOLD) setTimeout(() => sfx(comboSfxUrl, 0.4), 150)
 
       const rect = panelRef.current?.getBoundingClientRect()
       if (rect) {
-        const cellSize = Math.min((rect.width - 24) / COLS, (rect.height * 0.55) / ROWS)
-        const gridLeft = (rect.width - cellSize * COLS) / 2
-        const gridTop = rect.height * 0.22
-        const cx = gridLeft + col * cellSize + cellSize / 2
-        const cy = gridTop + row * cellSize + cellSize / 2
-        effects.spawnParticles(3, cx, cy, undefined, 'circle')
+        fx.comboHitBurst(rect.width / 2, rect.height / 2, ns, added, WIN_EMOJIS)
+        fx.triggerShake(8, 250)
+        for (let i = 0; i < 3; i++) setTimeout(() => fx.spawnParticles(4, rect.width * Math.random(), rect.height * 0.3, WIN_EMOJIS, 'circle'), i * 100)
       }
+    } else if (result === 'lose') {
+      winStreakRef.current = 0; setWinStreak(0); setIsFever(false)
+      comboRef.current = 0; setComboCount(0); perfectRef.current = false
+      setLosses(p => p + 1); setPhase('lose')
+      sfx(loseSfxUrl, 0.5)
+      fx.triggerFlash('rgba(255,0,77,0.35)', 200)
+      fx.triggerShake(10, 200)
+    } else {
+      setDraws(p => p + 1); setPhase('draw')
+      sfx(drawSfxUrl, 0.45)
+    }
 
-      const win = checkWinAt(nextBoard, player)
-      if (win !== null) {
-        setWinLine(win)
-        resolveRound(player === 1 ? 'win' : 'lose')
-        return nextBoard
-      }
+    setLastScoreGain(added)
+    scoreRef.current += added; setScore(scoreRef.current)
 
-      if (isBoardFull(nextBoard)) {
-        resolveRound('draw')
-        return nextBoard
-      }
+    if (dropTimerRef.current !== null) window.clearTimeout(dropTimerRef.current)
+    dropTimerRef.current = window.setTimeout(() => { dropTimerRef.current = null; if (!finishedRef.current) startNewRound() }, 1500)
+  }, [sfx, startNewRound, fx])
 
-      return nextBoard
-    },
-    [playSfx, resolveRound, effects],
-  )
+  const placePiece = useCallback((cur: Board, col: number, player: CellValue): Board | null => {
+    const row = getAvailableRow(cur, col)
+    if (row === -1) return null
+    const next = cloneBoard(cur); next[row][col] = player
+    setDroppingCell({ row, col }); setLastDropCol(col); setBoard(next); setHintCol(null)
+    sfx(dropSfxUrl, 0.5, 0.8 + row * 0.06)
 
-  const runAiTurn = useCallback(
-    (currentBoard: Board) => {
-      if (finishedRef.current) return
+    const rect = panelRef.current?.getBoundingClientRect()
+    if (rect) {
+      const cw = (rect.width - 20) / COLS
+      fx.spawnParticles(3, (rect.width - cw * COLS) / 2 + col * cw + cw / 2, rect.height * 0.22 + row * cw + cw / 2, undefined, 'circle')
+    }
 
-      if (aiTimerRef.current !== null) window.clearTimeout(aiTimerRef.current)
+    if (player === 2 && movesRef.current % THREAT_CHECK_INTERVAL === 0 && hasThreeInRow(next, 2)) {
+      setShowThreatWarning(true); sfx(threatSfxUrl, 0.35)
+      setTimeout(() => setShowThreatWarning(false), 1500)
+    }
 
-      aiTimerRef.current = window.setTimeout(() => {
-        aiTimerRef.current = null
-        if (finishedRef.current) return
+    const win = checkWinAt(next, player)
+    if (win) { setWinLine(win); resolveRound(player === 1 ? 'win' : 'lose'); return next }
+    if (isBoardFull(next)) { resolveRound('draw'); return next }
+    return next
+  }, [sfx, resolveRound, fx])
 
-        const col = aiChooseCol(currentBoard, getAiSmartProbability(winStreakRef.current))
-        if (col === -1) return
+  const runAi = useCallback((cur: Board) => {
+    if (finishedRef.current) return
+    if (aiTimerRef.current !== null) window.clearTimeout(aiTimerRef.current)
+    aiTimerRef.current = window.setTimeout(() => {
+      aiTimerRef.current = null; if (finishedRef.current) return
+      const c = aiChooseCol(cur, getAiSmartProb(winStreakRef.current)); if (c === -1) return
+      const next = placePiece(cur, c, 2); if (!next) return
+      if (!checkWinAt(next, 2) && !isBoardFull(next)) setPhase('player-turn')
+    }, AI_DELAY_MS)
+  }, [placePiece])
 
-        const nextBoard = placePiece(currentBoard, col, 2)
-        if (nextBoard === null) return
-
-        const aiWin = checkWinAt(nextBoard, 2)
-        const full = isBoardFull(nextBoard)
-        if (aiWin === null && !full) setPhase('player-turn')
-      }, AI_DELAY_MS)
-    },
-    [placePiece],
-  )
-
-  const handleColumnClick = useCallback(
-    (col: number) => {
-      if (finishedRef.current || phase !== 'player-turn') return
-
-      setPrevBoard(cloneBoard(board))
-      movesThisRoundRef.current += 1
-      setMovesThisRound(movesThisRoundRef.current)
-      const nextBoard = placePiece(board, col, 1)
-      if (nextBoard === null) return
-
-      const playerWin = checkWinAt(nextBoard, 1)
-      const full = isBoardFull(nextBoard)
-      if (playerWin === null && !full) {
-        if (doubleTurnActive) {
-          setDoubleTurnActive(false)
-          playSfx(comboSfxUrl, 0.4)
-        } else {
-          setPhase('ai-turn')
-          runAiTurn(nextBoard)
-        }
-      }
-    },
-    [board, phase, placePiece, runAiTurn, doubleTurnActive, playSfx],
-  )
+  const handleClick = useCallback((col: number) => {
+    if (finishedRef.current || phase !== 'player-turn') return
+    setPrevBoard(cloneBoard(board))
+    movesRef.current++
+    const next = placePiece(board, col, 1); if (!next) return
+    if (!checkWinAt(next, 1) && !isBoardFull(next)) {
+      if (doubleTurnActive) { setDoubleTurnActive(false); sfx(comboSfxUrl, 0.4) }
+      else { setPhase('ai-turn'); runAi(next) }
+    }
+  }, [board, phase, placePiece, runAi, doubleTurnActive, sfx])
 
   const useHint = useCallback(() => {
     if (hintsRemaining <= 0 || hintCooldown || phase !== 'player-turn') return
-    const col = getHintCol(board)
-    setHintCol(col)
-    setHintsRemaining((prev) => prev - 1)
-    setHintCooldown(true)
-    playSfx(hintSfxUrl, 0.4)
-
+    setHintCol(getHintCol(board)); setHintsRemaining(p => p - 1); setHintCooldown(true); sfx(hintSfxUrl, 0.4)
     if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current)
-    hintTimerRef.current = window.setTimeout(() => {
-      hintTimerRef.current = null
-      setHintCol(null)
-      setHintCooldown(false)
-    }, HINT_COOLDOWN_MS)
-  }, [board, hintsRemaining, hintCooldown, phase, playSfx])
+    hintTimerRef.current = window.setTimeout(() => { hintTimerRef.current = null; setHintCol(null); setHintCooldown(false) }, HINT_COOLDOWN_MS)
+  }, [board, hintsRemaining, hintCooldown, phase, sfx])
 
-  const usePowerUp = useCallback(() => {
+  const usePower = useCallback(() => {
     if (activePowerUp === null || phase !== 'player-turn') return
-
-    if (activePowerUp === 'double-turn') {
-      setDoubleTurnActive(true)
-      playSfx(feverSfxUrl, 0.4)
-    } else if (activePowerUp === 'undo' && prevBoard !== null) {
-      setBoard(prevBoard)
-      setPrevBoard(null)
-      playSfx(hintSfxUrl, 0.4)
-    } else if (activePowerUp === 'column-clear') {
-      const newBoard = cloneBoard(board)
-      for (let row = 0; row < ROWS; row += 1) {
-        if (newBoard[row][3] === 2) {
-          newBoard[row][3] = 0
-        }
+    if (activePowerUp === 'double-turn') { setDoubleTurnActive(true); sfx(feverSfxUrl, 0.4) }
+    else if (activePowerUp === 'undo' && prevBoard) { setBoard(prevBoard); setPrevBoard(null); sfx(hintSfxUrl, 0.4) }
+    else if (activePowerUp === 'time-bonus') { remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + 10000); sfx(levelupSfxUrl, 0.5); fx.triggerFlash('rgba(0,228,54,0.2)', 100) }
+    else if (activePowerUp === 'column-clear') {
+      const nb = cloneBoard(board)
+      for (let r = 0; r < ROWS; r++) if (nb[r][3] === 2) nb[r][3] = 0
+      for (let c = 0; c < COLS; c++) {
+        const pcs: CellValue[] = []
+        for (let r = ROWS - 1; r >= 0; r--) if (nb[r][c] !== 0) pcs.push(nb[r][c])
+        for (let r = 0; r < ROWS; r++) nb[r][c] = 0
+        for (let i = 0; i < pcs.length; i++) nb[ROWS - 1 - i][c] = pcs[i]
       }
-      // Re-apply gravity
-      for (let col = 0; col < COLS; col += 1) {
-        const pieces: CellValue[] = []
-        for (let row = ROWS - 1; row >= 0; row -= 1) {
-          if (newBoard[row][col] !== 0) pieces.push(newBoard[row][col])
-        }
-        for (let row = 0; row < ROWS; row += 1) {
-          newBoard[row][col] = 0
-        }
-        for (let i = 0; i < pieces.length; i += 1) {
-          newBoard[ROWS - 1 - i][col] = pieces[i]
-        }
-      }
-      setBoard(newBoard)
-      playSfx(comboSfxUrl, 0.5)
-      effects.triggerFlash('rgba(59,130,246,0.3)', 120)
+      setBoard(nb); sfx(comboSfxUrl, 0.5); fx.triggerFlash('rgba(41,173,255,0.3)', 120)
     }
-
     setActivePowerUp(null)
-  }, [activePowerUp, phase, board, prevBoard, playSfx, effects])
-
-  // Preload all audio
-  useEffect(() => {
-    const urls = [dropSfxUrl, winSfxUrl, loseSfxUrl, drawSfxUrl, comboSfxUrl, feverSfxUrl, hintSfxUrl, hoverSfxUrl]
-    for (const url of urls) getAudio(url)
-
-    return () => {
-      if (aiTimerRef.current !== null) window.clearTimeout(aiTimerRef.current)
-      if (dropTimerRef.current !== null) window.clearTimeout(dropTimerRef.current)
-      if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current)
-      effects.cleanup()
-    }
-  }, [getAudio, effects])
+  }, [activePowerUp, phase, board, prevBoard, sfx, fx])
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        onExit()
-      }
-      if (event.code === 'KeyH') useHint()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    const urls = [dropSfxUrl, winSfxUrl, loseSfxUrl, drawSfxUrl, comboSfxUrl, feverSfxUrl, hintSfxUrl, hoverSfxUrl, levelupSfxUrl, tickSfxUrl, threatSfxUrl]
+    for (const u of urls) getAudio(u)
+    return () => { for (const ref of [aiTimerRef, dropTimerRef, hintTimerRef]) if (ref.current !== null) window.clearTimeout(ref.current); fx.cleanup() }
+  }, [getAudio, fx])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } else if (e.code === 'KeyH') useHint() }
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   }, [onExit, useHint])
 
-  // Game timer
   useEffect(() => {
-    lastFrameAtRef.current = null
-
+    lastFrameRef.current = null
     const step = (now: number) => {
-      if (finishedRef.current) { animationFrameRef.current = null; return }
-
-      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
-
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
-      setRemainingMs(remainingMsRef.current)
-
-      effects.updateParticles()
-
-      if (remainingMsRef.current <= 0) {
-        playSfx(loseSfxUrl, 0.6)
-        finishGame()
-        animationFrameRef.current = null
-        return
+      if (finishedRef.current) { rafRef.current = null; return }
+      if (lastFrameRef.current === null) lastFrameRef.current = now
+      const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS); lastFrameRef.current = now
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - dt); setRemainingMs(remainingMsRef.current)
+      fx.updateParticles()
+      if (remainingMsRef.current <= CRITICAL_TIME_MS && remainingMsRef.current > 0 && now - lastTickSfxRef.current > 1000) {
+        sfx(tickSfxUrl, 0.2, 1.2); lastTickSfxRef.current = now
       }
-
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (remainingMsRef.current <= 0) { sfx(loseSfxUrl, 0.6); finish(); rafRef.current = null; return }
+      rafRef.current = requestAnimationFrame(step)
     }
+    rafRef.current = requestAnimationFrame(step)
+    return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); lastFrameRef.current = null }
+  }, [finish, sfx, fx])
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
+  const isWinCell = useCallback((r: number, c: number) => winLine?.cells.some(cell => cell.row === r && cell.col === c) ?? false, [winLine])
+  const isDrop = useCallback((r: number, c: number) => droppingCell?.row === r && droppingCell?.col === c, [droppingCell])
 
-    return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
-    }
-  }, [finishGame, playSfx, effects])
+  const bestDisp = useMemo(() => Math.max(bestScore, score), [bestScore, score])
+  const isLow = remainingMs <= LOW_TIME_THRESHOLD_MS
+  const isCrit = remainingMs <= CRITICAL_TIME_MS
+  const aiLv = Math.round(getAiSmartProb(winStreak) * 5)
+  const pwInfo = activePowerUp ? POWER_UPS.find(p => p.type === activePowerUp) : null
+  const timerPct = (remainingMs / ROUND_DURATION_MS) * 100
+  const shakeStyle = fx.getShakeStyle()
 
-  const isWinCell = useCallback(
-    (row: number, col: number): boolean => {
-      if (winLine === null) return false
-      return winLine.cells.some((cell) => cell.row === row && cell.col === col)
-    },
-    [winLine],
-  )
-
-  const isDroppingCell = useCallback(
-    (row: number, col: number): boolean => {
-      return droppingCell !== null && droppingCell.row === row && droppingCell.col === col
-    },
-    [droppingCell],
-  )
-
-  const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
-  const isGameActive = phase === 'player-turn' || phase === 'ai-turn'
-  const aiLevel = Math.round(getAiSmartProbability(winStreak) * 5)
-  const powerUpInfo = activePowerUp !== null ? POWER_UPS.find((p) => p.type === activePowerUp) : null
-
-  const phaseLabel =
-    phase === 'player-turn' ? 'YOUR TURN'
-    : phase === 'ai-turn' ? 'AI THINKING...'
-    : phase === 'win' ? `WIN! +${lastScoreGain}`
-    : phase === 'lose' ? 'LOSE...'
-    : phase === 'draw' ? `DRAW +${lastScoreGain}`
-    : ''
-
-  const timerPercent = (remainingMs / ROUND_DURATION_MS) * 100
-  const shakeStyle = effects.getShakeStyle()
+  const phaseLabel = phase === 'player-turn' ? 'YOUR TURN'
+    : phase === 'ai-turn' ? 'AI...'
+    : phase === 'win' ? `WIN +${lastScoreGain}`
+    : phase === 'lose' ? 'LOSE'
+    : phase === 'draw' ? `DRAW +${lastScoreGain}` : ''
 
   return (
-    <section
-      ref={panelRef}
-      className="mini-game-panel connect-four-panel"
-      aria-label="connect-four-game"
-      style={{
-        maxWidth: '432px',
-        aspectRatio: '9/16',
-        margin: '0 auto',
-        overflow: 'hidden',
-        position: 'relative',
-        ...(shakeStyle ?? {}),
-      }}
-    >
-      {/* Timer bar */}
-      <div className="cf-timer-bar-container">
-        <div
-          className={`cf-timer-bar ${isLowTime ? 'cf-timer-low' : ''}`}
-          style={{ width: `${timerPercent}%` }}
-        />
-        <span className={`cf-timer-text ${isLowTime ? 'cf-timer-text-low' : ''}`}>
-          {(remainingMs / 1000).toFixed(1)}s
-        </span>
+    <section ref={panelRef} className="mini-game-panel cf-panel" aria-label="connect-four-game"
+      style={{ maxWidth: 432, aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...(shakeStyle ?? {}) }}>
+
+      <div className="cf-scanlines" />
+
+      {/* Timer */}
+      <div className="cf-timer-wrap">
+        <div className={`cf-timer-fill ${isLow ? 'cf-timer-low' : ''} ${isCrit ? 'cf-timer-crit' : ''}`} style={{ width: `${timerPct}%` }} />
+        <span className="cf-timer-txt">{(remainingMs / 1000).toFixed(1)}s</span>
       </div>
 
-      {/* Score strip */}
-      <div className="cf-score-strip">
-        <div className="cf-score-left">
-          <p className="cf-score">{score.toLocaleString()}</p>
-          <p className="cf-best">BEST {displayedBestScore.toLocaleString()}</p>
+      {/* Header */}
+      <div className="cf-hdr">
+        <div>
+          <p className="cf-score-num">{score.toLocaleString()}</p>
+          <p className="cf-best-txt">BEST {bestDisp.toLocaleString()}</p>
         </div>
-        <div className="cf-round-badge">R{roundNumber}</div>
-        <div className="cf-stats-right">
-          <span className="cf-stat cf-stat-win">W{wins}</span>
-          <span className="cf-stat cf-stat-draw">D{draws}</span>
-          <span className="cf-stat cf-stat-loss">L{losses}</span>
+        <div className="cf-round-pill">R{roundNumber}</div>
+        <div className="cf-wdl">
+          <span className="cf-w">W{wins}</span>
+          <span className="cf-d">D{draws}</span>
+          <span className="cf-l">L{losses}</span>
         </div>
       </div>
 
-      {/* Phase + Streak */}
-      <div className="cf-phase-area">
-        <p className={`cf-phase cf-phase-${phase}`}>{phaseLabel}</p>
-        {isFever && (
-          <p className="cf-fever-label">FEVER x{FEVER_MULTIPLIER} (Streak {winStreak})</p>
-        )}
-        {!isFever && winStreak >= 2 && (
-          <p className="cf-streak-label">Streak {winStreak} - AI Lv.{aiLevel}</p>
-        )}
-        {doubleTurnActive && (
-          <p className="cf-double-turn-label">DOUBLE TURN!</p>
-        )}
+      {/* Phase + effects */}
+      <div className="cf-phase-box">
+        <p className={`cf-phase cf-p-${phase}`}>{phaseLabel}</p>
+        {isFever && <p className="cf-fever">FEVER x{FEVER_MULTIPLIER} STREAK {winStreak}</p>}
+        {!isFever && winStreak >= 2 && <p className="cf-streak">STREAK {winStreak} // AI LV.{aiLv}</p>}
+        {doubleTurnActive && <p className="cf-dbl">DOUBLE TURN!</p>}
+        {comboCount >= COMBO_THRESHOLD && phase === 'win' && <p className="cf-combo">COMBO x{comboCount}!</p>}
+        {showThreatWarning && <p className="cf-threat">!! DANGER !!</p>}
       </div>
 
-      {/* Drop buttons */}
-      <div className="cf-drop-buttons">
-        {Array.from({ length: COLS }, (_, col) => {
-          const isHinted = hintCol === col
-          const isHovered = hoveredCol === col
-          const available = getAvailableRow(board, col) !== -1
+      {/* Drop arrows */}
+      <div className="cf-arrows">
+        {Array.from({ length: COLS }, (_, c) => {
+          const hinted = hintCol === c
+          const avail = getAvailableRow(board, c) !== -1
           return (
-            <button
-              key={`drop-${col}`}
-              className={`cf-drop-btn ${lastDropCol === col ? 'cf-drop-active' : ''} ${isHinted ? 'cf-drop-hint' : ''} ${isHovered ? 'cf-drop-hovered' : ''}`}
-              type="button"
-              onClick={() => handleColumnClick(col)}
-              onPointerEnter={() => { setHoveredCol(col); if (available && phase === 'player-turn') playSfx(hoverSfxUrl, 0.15, 1 + col * 0.08) }}
+            <button key={c} type="button"
+              className={`cf-arr ${lastDropCol === c ? 'cf-arr-last' : ''} ${hinted ? 'cf-arr-hint' : ''} ${hoveredCol === c ? 'cf-arr-hov' : ''}`}
+              onClick={() => handleClick(c)}
+              onPointerEnter={() => { setHoveredCol(c); if (avail && phase === 'player-turn') sfx(hoverSfxUrl, 0.12, 0.9 + c * 0.08) }}
               onPointerLeave={() => setHoveredCol(null)}
-              disabled={phase !== 'player-turn' || !available}
-              aria-label={`Column ${col + 1}`}
-            >
-              {isHinted ? '!' : '\u25BC'}
-            </button>
+              disabled={phase !== 'player-turn' || !avail}
+              aria-label={`Col ${c + 1}`}
+            >{hinted ? '!' : 'V'}</button>
           )
         })}
       </div>
 
       {/* Board */}
-      <div className={`cf-grid ${isFever ? 'cf-grid-fever' : ''}`}>
-        {Array.from({ length: ROWS }, (_, row) => (
-          <div key={`row-${row}`} className="cf-row">
-            {Array.from({ length: COLS }, (_, col) => {
-              const cellValue = board[row][col]
-              const isWin = isWinCell(row, col)
-              const isDropping = isDroppingCell(row, col)
-              const isPreview = hoveredCol === col && cellValue === 0 && getAvailableRow(board, col) === row && phase === 'player-turn'
-
-              let cellClass = 'cf-cell'
-              if (cellValue === 1) cellClass += ' cf-cell-player'
-              else if (cellValue === 2) cellClass += ' cf-cell-ai'
-              if (isWin) cellClass += ' cf-cell-win'
-              if (isDropping) cellClass += ' cf-cell-dropping'
-              if (isPreview) cellClass += ' cf-cell-preview'
-
+      <div className={`cf-board ${isFever ? 'cf-board-fever' : ''} ${isCrit ? 'cf-board-crit' : ''}`}>
+        {Array.from({ length: ROWS }, (_, r) => (
+          <div key={r} className="cf-brow">
+            {Array.from({ length: COLS }, (_, c) => {
+              const v = board[r][c]
+              const wc = isWinCell(r, c), dr = isDrop(r, c)
+              const preview = hoveredCol === c && v === 0 && getAvailableRow(board, c) === r && phase === 'player-turn'
               return (
-                <div
-                  key={`cell-${row}-${col}`}
-                  className={cellClass}
-                  onClick={() => handleColumnClick(col)}
-                >
-                  {(cellValue !== 0 || isPreview) && (
-                    <div
-                      className="cf-piece"
-                      style={
-                        isDropping
-                          ? ({ '--cf-drop-rows': row } as React.CSSProperties)
-                          : undefined
-                      }
-                    />
+                <div key={`${r}-${c}`}
+                  className={`cf-slot ${v === 1 ? 'cf-p1' : v === 2 ? 'cf-p2' : ''} ${wc ? 'cf-win' : ''} ${dr ? 'cf-dropping' : ''} ${preview ? 'cf-preview' : ''}`}
+                  onClick={() => handleClick(c)}>
+                  {(v !== 0 || preview) && (
+                    <div className="cf-disc" style={dr ? { '--cf-dr': r } as React.CSSProperties : undefined}>
+                      {v === 1 && <span className="cf-disc-face">P</span>}
+                      {v === 2 && <span className="cf-disc-face">A</span>}
+                    </div>
                   )}
                 </div>
               )
@@ -724,389 +484,139 @@ function ConnectFourGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         ))}
       </div>
 
-      {/* Bottom controls */}
-      <div className="cf-bottom-controls">
-        <button
-          className={`cf-action-btn cf-hint-btn ${hintsRemaining <= 0 || hintCooldown ? 'cf-btn-disabled' : ''}`}
-          type="button"
-          onClick={useHint}
-          disabled={hintsRemaining <= 0 || hintCooldown || phase !== 'player-turn'}
-        >
-          Hint ({hintsRemaining})
+      {/* Bottom bar */}
+      <div className="cf-bottom">
+        <button className={`cf-btn cf-btn-hint ${hintsRemaining <= 0 || hintCooldown ? 'cf-btn-off' : ''}`}
+          type="button" onClick={useHint} disabled={hintsRemaining <= 0 || hintCooldown || phase !== 'player-turn'}>
+          HINT({hintsRemaining})
         </button>
-
-        {powerUpInfo && (
-          <button
-            className="cf-action-btn cf-powerup-btn"
-            type="button"
-            onClick={usePowerUp}
-            disabled={phase !== 'player-turn'}
-          >
-            {powerUpInfo.icon} {powerUpInfo.label}
+        {pwInfo && (
+          <button className="cf-btn cf-btn-pw" type="button" onClick={usePower} disabled={phase !== 'player-turn'}>
+            [{pwInfo.icon}] {pwInfo.label}
           </button>
         )}
-
         <div className="cf-legend">
-          <span className="cf-legend-item"><span className="cf-legend-dot cf-legend-player" /> You</span>
-          <span className="cf-legend-item"><span className="cf-legend-dot cf-legend-ai" /> AI</span>
+          <span><span className="cf-ldot cf-ldot-p" />YOU</span>
+          <span><span className="cf-ldot cf-ldot-a" />AI</span>
         </div>
       </div>
 
-      {/* Effects */}
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
+      <ParticleRenderer particles={fx.particles} />
+      <ScorePopupRenderer popups={fx.scorePopups} />
+      <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
 
       <style>{GAME_EFFECTS_CSS}{`
-        .connect-four-panel {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 4px;
-          padding: 6px 8px;
-          width: 100%;
-          max-width: 432px;
-          margin: 0 auto;
-          user-select: none;
-          background: linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-          font-family: 'Pretendard', -apple-system, sans-serif;
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        .cf-panel {
+          display: flex; flex-direction: column; align-items: center; gap: 3px;
+          padding: 6px; width: 100%; max-width: 432px; margin: 0 auto;
+          user-select: none; background: #1a1a2e;
+          font-family: 'Press Start 2P', monospace; image-rendering: pixelated;
+        }
+        .cf-scanlines {
+          position: absolute; inset: 0; pointer-events: none; z-index: 30;
+          background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
         }
 
-        /* Timer bar */
-        .cf-timer-bar-container {
-          width: 100%;
-          height: 20px;
-          background: rgba(0,0,0,0.4);
-          border-radius: 10px;
-          position: relative;
-          overflow: hidden;
-          flex-shrink: 0;
-        }
-        .cf-timer-bar {
-          height: 100%;
-          background: linear-gradient(90deg, #22c55e, #4ade80);
-          border-radius: 10px;
-          transition: width 0.3s linear;
-        }
-        .cf-timer-low {
-          background: linear-gradient(90deg, #ef4444, #f87171);
-          animation: cf-pulse-bar 0.5s infinite alternate;
-        }
-        .cf-timer-text {
-          position: absolute;
-          right: 8px;
-          top: 50%;
-          transform: translateY(-50%);
-          font-size: 11px;
-          font-weight: 700;
-          color: #fff;
-          text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-        }
-        .cf-timer-text-low {
-          animation: cf-blink 0.5s infinite alternate;
-        }
+        .cf-timer-wrap { width: 100%; height: 16px; background: #0f0f23; border: 2px solid #29adff; position: relative; flex-shrink: 0; }
+        .cf-timer-fill { height: 100%; background: #00e436; transition: width 0.3s linear; }
+        .cf-timer-low { background: #ffa300; }
+        .cf-timer-crit { background: #ff004d; animation: cf-blink 0.3s infinite alternate; }
+        .cf-timer-txt { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 7px; color: #fff; text-shadow: 1px 1px 0 #000; }
 
-        /* Score strip */
-        .cf-score-strip {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          width: 100%;
-          padding: 2px 4px;
-          flex-shrink: 0;
-        }
-        .cf-score-left { display: flex; flex-direction: column; }
-        .cf-score {
-          font-size: clamp(24px, 7vw, 32px);
-          font-weight: 800;
-          color: #fbbf24;
-          margin: 0;
-          line-height: 1.1;
-          text-shadow: 0 2px 8px rgba(251,191,36,0.3);
-        }
-        .cf-best { font-size: 10px; color: #9ca3af; margin: 0; }
-        .cf-round-badge {
-          background: rgba(255,255,255,0.1);
-          border: 1px solid rgba(255,255,255,0.2);
-          border-radius: 8px;
-          padding: 2px 10px;
-          font-size: 13px;
-          font-weight: 700;
-          color: #e5e7eb;
-        }
-        .cf-stats-right {
-          display: flex;
-          gap: 8px;
-          font-size: 13px;
-          font-weight: 700;
-        }
-        .cf-stat-win { color: #22c55e; }
-        .cf-stat-draw { color: #facc15; }
-        .cf-stat-loss { color: #ef4444; }
+        .cf-hdr { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 2px; flex-shrink: 0; }
+        .cf-score-num { font-size: clamp(14px, 4vw, 20px); color: #ffec27; margin: 0; text-shadow: 2px 2px 0 #a16207, 0 0 8px rgba(255,236,39,0.4); }
+        .cf-best-txt { font-size: 6px; color: #7e7e7e; margin: 0; }
+        .cf-round-pill { background: #29adff; color: #fff; padding: 2px 8px; font-size: 8px; border: 2px solid #1d6ca5; box-shadow: 2px 2px 0 #0f0f23; }
+        .cf-wdl { display: flex; gap: 6px; font-size: 8px; }
+        .cf-w { color: #00e436; } .cf-d { color: #ffec27; } .cf-l { color: #ff004d; }
 
-        /* Phase area */
-        .cf-phase-area {
-          text-align: center;
-          min-height: 36px;
-          flex-shrink: 0;
-        }
-        .cf-phase {
-          font-size: clamp(16px, 4.5vw, 20px);
-          font-weight: 800;
-          margin: 0;
-          letter-spacing: 1px;
-        }
-        .cf-phase-player-turn { color: #f87171; }
-        .cf-phase-ai-turn { color: #facc15; animation: cf-pulse 0.8s infinite alternate; }
-        .cf-phase-win { color: #22c55e; animation: cf-pop 0.4s ease-out; }
-        .cf-phase-lose { color: #ef4444; animation: cf-shake-text 0.4s ease-out; }
-        .cf-phase-draw { color: #a78bfa; }
-        .cf-fever-label {
-          margin: 0; color: #fbbf24; font-weight: 800; font-size: 13px;
-          animation: cf-fever-glow 0.5s ease-in-out infinite alternate;
-          text-shadow: 0 0 12px #f59e0b;
-        }
-        .cf-streak-label { margin: 0; color: #22c55e; font-weight: 600; font-size: 11px; }
-        .cf-double-turn-label {
-          margin: 0; color: #60a5fa; font-weight: 800; font-size: 14px;
-          animation: cf-pop 0.3s ease-out;
-          text-shadow: 0 0 8px #3b82f6;
-        }
+        .cf-phase-box { text-align: center; min-height: 28px; flex-shrink: 0; }
+        .cf-phase { font-size: clamp(10px, 3vw, 14px); margin: 0; letter-spacing: 2px; }
+        .cf-p-player-turn { color: #ff004d; }
+        .cf-p-ai-turn { color: #ffec27; animation: cf-blink 0.6s infinite alternate; }
+        .cf-p-win { color: #00e436; animation: cf-bounce 0.4s ease-out; }
+        .cf-p-lose { color: #ff004d; animation: cf-shake 0.4s ease-out; }
+        .cf-p-draw { color: #83769c; }
+        .cf-fever { margin: 0; color: #ffa300; font-size: 8px; animation: cf-glow 0.4s infinite alternate; text-shadow: 0 0 8px #ffa300; }
+        .cf-streak { margin: 0; color: #00e436; font-size: 6px; }
+        .cf-dbl { margin: 0; color: #29adff; font-size: 8px; animation: cf-bounce 0.3s ease-out; text-shadow: 0 0 6px #29adff; }
+        .cf-combo { margin: 0; color: #ff77a8; font-size: 9px; animation: cf-bounce 0.3s ease-out; text-shadow: 0 0 6px #ff77a8; }
+        .cf-threat { margin: 0; color: #ff004d; font-size: 9px; animation: cf-blink 0.2s infinite alternate; text-shadow: 0 0 10px #ff004d; }
 
-        /* Drop buttons */
-        .cf-drop-buttons {
-          display: grid;
-          grid-template-columns: repeat(${COLS}, 1fr);
-          gap: 3px;
-          width: 100%;
-          padding: 0 4px;
-          flex-shrink: 0;
+        .cf-arrows { display: grid; grid-template-columns: repeat(${COLS}, 1fr); gap: 2px; width: 100%; padding: 0 2px; flex-shrink: 0; }
+        .cf-arr {
+          display: flex; align-items: center; justify-content: center;
+          height: clamp(22px, 4vw, 30px); background: #1d2b53; border: 2px solid #29adff; color: #29adff;
+          font-family: 'Press Start 2P', monospace; font-size: clamp(8px, 2vw, 11px); cursor: pointer; transition: all 0.1s;
         }
-        .cf-drop-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: clamp(28px, 5vw, 36px);
-          background: rgba(255,255,255,0.06);
-          border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 8px 8px 3px 3px;
-          color: rgba(255,255,255,0.5);
-          font-size: clamp(12px, 3vw, 16px);
-          cursor: pointer;
-          transition: all 0.15s;
-          font-weight: 700;
-        }
-        .cf-drop-btn:hover:not(:disabled) {
-          background: rgba(239,68,68,0.25);
-          color: #f87171;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(239,68,68,0.2);
-        }
-        .cf-drop-btn:active:not(:disabled) { transform: translateY(1px); }
-        .cf-drop-btn:disabled { opacity: 0.2; cursor: not-allowed; }
-        .cf-drop-active { background: rgba(239,68,68,0.15); }
-        .cf-drop-hint {
-          background: rgba(34,197,94,0.3) !important;
-          color: #22c55e !important;
-          border-color: #22c55e !important;
-          animation: cf-hint-pulse 0.6s infinite alternate;
-          font-weight: 900;
-          font-size: clamp(14px, 3.5vw, 18px);
-        }
-        .cf-drop-hovered {
-          background: rgba(239,68,68,0.15);
-          border-color: rgba(239,68,68,0.3);
-        }
+        .cf-arr:hover:not(:disabled) { background: #29adff; color: #fff; transform: translateY(-2px); box-shadow: 0 2px 0 #1d6ca5; }
+        .cf-arr:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
+        .cf-arr:disabled { opacity: 0.2; cursor: not-allowed; }
+        .cf-arr-last { background: #29366f; }
+        .cf-arr-hint { background: #00e436 !important; color: #fff !important; border-color: #00e436 !important; animation: cf-blink 0.4s infinite alternate; }
+        .cf-arr-hov { background: #29366f; border-color: #ff004d; }
 
-        /* Grid */
-        .cf-grid {
-          display: flex;
-          flex-direction: column;
-          gap: clamp(2px, 0.6vw, 4px);
-          background: linear-gradient(135deg, #1e3a5f, #1a365d);
-          padding: clamp(6px, 1.5vw, 10px);
-          border-radius: 12px;
-          box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
-          border: 2px solid rgba(255,255,255,0.08);
-          flex: 1;
-          min-height: 0;
-          width: 100%;
+        .cf-board {
+          display: flex; flex-direction: column; gap: 2px; background: #1d2b53;
+          border: 3px solid #29adff; padding: clamp(4px, 1vw, 8px);
+          flex: 1; min-height: 0; width: 100%;
+          box-shadow: 4px 4px 0 #0f0f23, inset 0 0 20px rgba(41,173,255,0.1);
         }
-        .cf-grid-fever {
-          border-color: rgba(251,191,36,0.4);
-          box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 30px rgba(251,191,36,0.15), inset 0 1px 0 rgba(255,255,255,0.1);
-          animation: cf-fever-border 1s infinite alternate;
-        }
+        .cf-board-fever { border-color: #ffa300; box-shadow: 4px 4px 0 #0f0f23, 0 0 20px rgba(255,163,0,0.3); animation: cf-fever-border 0.8s infinite alternate; }
+        .cf-board-crit { animation: cf-crit-pulse 0.5s infinite alternate; }
 
-        .cf-row {
-          display: grid;
-          grid-template-columns: repeat(${COLS}, 1fr);
-          gap: clamp(2px, 0.6vw, 4px);
-          flex: 1;
+        .cf-brow { display: grid; grid-template-columns: repeat(${COLS}, 1fr); gap: 2px; flex: 1; }
+        .cf-slot {
+          aspect-ratio: 1; background: #0f0f23; border: 2px solid #29366f;
+          display: flex; align-items: center; justify-content: center;
+          position: relative; cursor: pointer; transition: border-color 0.15s;
         }
+        .cf-slot:hover { border-color: #5f6f9f; }
 
-        .cf-cell {
-          aspect-ratio: 1;
-          border-radius: 50%;
-          background: radial-gradient(circle at 40% 40%, #1e293b, #0f172a);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          overflow: hidden;
-          cursor: pointer;
-          transition: background 0.15s;
-          box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
-        }
-        .cf-cell:hover {
-          background: radial-gradient(circle at 40% 40%, #2a3a50, #1a2540);
-        }
+        .cf-disc { width: 80%; height: 80%; display: flex; align-items: center; justify-content: center; }
+        .cf-disc-face { font-size: clamp(6px, 1.5vw, 10px); color: rgba(255,255,255,0.6); }
 
-        .cf-piece {
-          width: 82%;
-          height: 82%;
-          border-radius: 50%;
-          transition: box-shadow 0.3s;
-        }
+        .cf-p1 .cf-disc { background: #ff004d; border: 2px solid #ab0033; box-shadow: inset -2px -2px 0 #ab0033, inset 2px 2px 0 #ff77a8, 2px 2px 0 rgba(0,0,0,0.4); }
+        .cf-p2 .cf-disc { background: #ffec27; border: 2px solid #a16207; box-shadow: inset -2px -2px 0 #a16207, inset 2px 2px 0 #fff1a8, 2px 2px 0 rgba(0,0,0,0.4); }
+        .cf-preview .cf-disc { background: rgba(255,0,77,0.2); border: 2px dashed #ff004d; box-shadow: none; animation: cf-blink 1s infinite alternate; }
 
-        .cf-cell-player .cf-piece {
-          background: radial-gradient(circle at 35% 35%, #ff8a8a, #dc2626, #991b1b);
-          box-shadow: inset 0 -3px 6px rgba(0,0,0,0.35), 0 2px 6px rgba(220,38,38,0.5), inset 0 2px 4px rgba(255,255,255,0.2);
-        }
-        .cf-cell-ai .cf-piece {
-          background: radial-gradient(circle at 35% 35%, #ffe066, #eab308, #a16207);
-          box-shadow: inset 0 -3px 6px rgba(0,0,0,0.35), 0 2px 6px rgba(234,179,8,0.5), inset 0 2px 4px rgba(255,255,255,0.2);
-        }
-        .cf-cell-preview .cf-piece {
-          background: radial-gradient(circle at 35% 35%, rgba(255,138,138,0.3), rgba(220,38,38,0.15));
-          box-shadow: none;
-          animation: cf-preview-pulse 1s infinite alternate;
-        }
+        .cf-win .cf-disc { animation: cf-win-flash 0.3s infinite alternate; }
+        .cf-win::after { content: ''; position: absolute; inset: -2px; border: 2px solid #fff; animation: cf-win-border 0.6s infinite alternate; }
+        .cf-dropping .cf-disc { animation: cf-drop ${DROP_ANIMATION_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1); }
 
-        .cf-cell-win .cf-piece {
-          animation: cf-win-glow 0.5s infinite alternate;
-        }
-        .cf-cell-win::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          border-radius: 50%;
-          background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 60%);
-          animation: cf-win-ring 1s infinite;
-        }
+        .cf-bottom { display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px; flex-shrink: 0; }
+        .cf-btn { padding: 4px 8px; font-family: 'Press Start 2P', monospace; font-size: 7px; cursor: pointer; transition: all 0.1s; border: 2px solid; }
+        .cf-btn-hint { background: #00e436; border-color: #008f2b; color: #fff; box-shadow: 2px 2px 0 #005c1a; }
+        .cf-btn-hint:hover:not(:disabled) { background: #00ff4d; transform: translateY(-1px); }
+        .cf-btn-pw { background: #29adff; border-color: #1d6ca5; color: #fff; box-shadow: 2px 2px 0 #0f4a7a; animation: cf-bounce 0.5s ease-out; }
+        .cf-btn-pw:hover:not(:disabled) { background: #5fc9ff; transform: translateY(-1px); }
+        .cf-btn-off { opacity: 0.3; cursor: not-allowed; }
 
-        .cf-cell-dropping .cf-piece {
-          animation: cf-drop ${DROP_ANIMATION_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
+        .cf-legend { display: flex; gap: 8px; font-size: 6px; color: #7e7e7e; margin-left: auto; align-items: center; }
+        .cf-legend span { display: flex; align-items: center; gap: 3px; }
+        .cf-ldot { display: inline-block; width: 8px; height: 8px; }
+        .cf-ldot-p { background: #ff004d; border: 1px solid #ab0033; }
+        .cf-ldot-a { background: #ffec27; border: 1px solid #a16207; }
 
-        /* Bottom controls */
-        .cf-bottom-controls {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          width: 100%;
-          padding: 2px 4px;
-          flex-shrink: 0;
-        }
-        .cf-action-btn {
-          padding: 6px 12px;
-          border-radius: 8px;
-          font-size: 12px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: all 0.15s;
-          border: 1px solid;
-        }
-        .cf-hint-btn {
-          background: rgba(34,197,94,0.15);
-          border-color: rgba(34,197,94,0.3);
-          color: #22c55e;
-        }
-        .cf-hint-btn:hover:not(:disabled) {
-          background: rgba(34,197,94,0.3);
-          transform: translateY(-1px);
-        }
-        .cf-powerup-btn {
-          background: rgba(59,130,246,0.15);
-          border-color: rgba(59,130,246,0.3);
-          color: #60a5fa;
-          animation: cf-pop 0.5s ease-out;
-        }
-        .cf-powerup-btn:hover:not(:disabled) {
-          background: rgba(59,130,246,0.3);
-          transform: translateY(-1px);
-        }
-        .cf-btn-disabled { opacity: 0.35; cursor: not-allowed; }
-
-        .cf-legend {
-          display: flex;
-          gap: 12px;
-          font-size: 11px;
-          color: #9ca3af;
-          margin-left: auto;
-        }
-        .cf-legend-item { display: flex; align-items: center; gap: 4px; }
-        .cf-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
-        .cf-legend-player { background: #dc2626; box-shadow: 0 0 6px rgba(220,38,38,0.5); }
-        .cf-legend-ai { background: #eab308; box-shadow: 0 0 6px rgba(234,179,8,0.5); }
-
-        /* Animations */
         @keyframes cf-blink { from { opacity: 1; } to { opacity: 0.3; } }
-        @keyframes cf-pulse { from { opacity: 1; } to { opacity: 0.4; } }
-        @keyframes cf-pulse-bar { from { opacity: 0.8; } to { opacity: 1; } }
-        @keyframes cf-pop {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.2); }
-          100% { transform: scale(1); }
+        @keyframes cf-bounce { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+        @keyframes cf-shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+        @keyframes cf-glow { from { opacity: 0.7; } to { opacity: 1; } }
+        @keyframes cf-win-flash {
+          from { box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), 0 0 4px #fff; transform: scale(1); }
+          to { box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), 0 0 12px #fff; transform: scale(1.08); }
         }
-        @keyframes cf-shake-text {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-6px); }
-          40% { transform: translateX(6px); }
-          60% { transform: translateX(-4px); }
-          80% { transform: translateX(4px); }
-        }
-        @keyframes cf-win-glow {
-          from {
-            box-shadow: inset 0 -3px 6px rgba(0,0,0,0.3), 0 0 8px rgba(255,255,255,0.5);
-            transform: scale(1);
-          }
-          to {
-            box-shadow: inset 0 -3px 6px rgba(0,0,0,0.3), 0 0 20px rgba(255,255,255,0.9);
-            transform: scale(1.1);
-          }
-        }
-        @keyframes cf-win-ring {
-          0% { transform: scale(0.8); opacity: 0.6; }
-          50% { transform: scale(1.2); opacity: 0; }
-          100% { transform: scale(0.8); opacity: 0; }
-        }
+        @keyframes cf-win-border { from { border-color: rgba(255,255,255,0.4); } to { border-color: rgba(255,255,255,1); } }
         @keyframes cf-drop {
-          from {
-            transform: translateY(calc(var(--cf-drop-rows, 0) * -100% - 100%));
-            opacity: 0.6;
-          }
-          60% { opacity: 1; }
-          to {
-            transform: translateY(0);
-            opacity: 1;
-          }
+          from { transform: translateY(calc(var(--cf-dr, 0) * -100% - 100%)); opacity: 0.5; }
+          60% { opacity: 1; } to { transform: translateY(0); opacity: 1; }
         }
-        @keyframes cf-preview-pulse {
-          from { opacity: 0.2; }
-          to { opacity: 0.5; }
-        }
-        @keyframes cf-hint-pulse {
-          from { box-shadow: 0 0 4px rgba(34,197,94,0.3); }
-          to { box-shadow: 0 0 16px rgba(34,197,94,0.7); }
-        }
-        @keyframes cf-fever-glow {
-          from { opacity: 0.7; transform: scale(1); }
-          to { opacity: 1; transform: scale(1.05); }
-        }
-        @keyframes cf-fever-border {
-          from { border-color: rgba(251,191,36,0.2); }
-          to { border-color: rgba(251,191,36,0.5); }
+        @keyframes cf-fever-border { from { border-color: rgba(255,163,0,0.4); } to { border-color: rgba(255,163,0,1); } }
+        @keyframes cf-crit-pulse {
+          from { box-shadow: 4px 4px 0 #0f0f23, 0 0 0 rgba(255,0,77,0); }
+          to { box-shadow: 4px 4px 0 #0f0f23, 0 0 20px rgba(255,0,77,0.4); }
         }
       `}</style>
     </section>
@@ -1121,7 +631,7 @@ export const connectFourModule: MiniGameModule = {
     unlockCost: 50,
     baseReward: 16,
     scoreRewardMultiplier: 1.25,
-    accentColor: '#dc2626',
+    accentColor: '#ff004d',
   },
   Component: ConnectFourGame,
 }

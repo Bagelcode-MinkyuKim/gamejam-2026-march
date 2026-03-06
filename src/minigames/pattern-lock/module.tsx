@@ -59,7 +59,7 @@ function PatternLockGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [phase, setPhase] = useState<GamePhase>('showing')
   const [pattern, setPattern] = useState<number[]>(() => [pickRandomCell()])
-  const [showIndex, setShowIndex] = useState(0)
+  const [_showIndex, setShowIndex] = useState(0)
   const [activeCell, setActiveCell] = useState<number | null>(null)
   const [inputIndex, setInputIndex] = useState(0)
   const [resultFlash, setResultFlash] = useState<'correct' | 'wrong' | null>(null)

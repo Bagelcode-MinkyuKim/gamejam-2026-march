@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
-import { MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 
 import parkSangminImage from '../../../assets/images/same-character/park-sangmin.png'
 import songChangsikImage from '../../../assets/images/same-character/song-changsik.png'
@@ -9,31 +8,49 @@ import parkWankyuImage from '../../../assets/images/same-character/park-wankyu.p
 import kimYeonjaImage from '../../../assets/images/same-character/kim-yeonja.png'
 import seoTaijiImage from '../../../assets/images/same-character/seo-taiji.png'
 
-import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
-import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
-import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 import goSfx from '../../../assets/sounds/reaction-test-go.mp3'
 import tooEarlySfx from '../../../assets/sounds/reaction-test-too-early.mp3'
 import perfectSfx from '../../../assets/sounds/reaction-test-perfect.mp3'
 import lightningSfx from '../../../assets/sounds/reaction-test-lightning.mp3'
 import tickSfx from '../../../assets/sounds/reaction-test-tick.mp3'
 import recordSfx from '../../../assets/sounds/reaction-test-record.mp3'
+import comboSfx from '../../../assets/sounds/reaction-test-combo.mp3'
+import missSfx from '../../../assets/sounds/reaction-test-miss.mp3'
+import roundSfx from '../../../assets/sounds/reaction-test-round.mp3'
+import fakeoutSfx from '../../../assets/sounds/reaction-test-fakeout.mp3'
+import tapHitSfx from '../../../assets/sounds/tap-hit.mp3'
+import tapHitStrongSfx from '../../../assets/sounds/tap-hit-strong.mp3'
+import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
-const TOTAL_ROUNDS = 8
+// ─── Game Config ─────────────────────────────────────────────
+const TOTAL_ROUNDS = 10
+const MAX_LIVES = 3
 const MIN_DELAY_MS = 1500
-const MAX_DELAY_MS = 4500
-const TOO_EARLY_DISPLAY_MS = 1000
-const RESULT_DISPLAY_MS = 1200
+const MAX_DELAY_MS = 4000
+const TOO_EARLY_DISPLAY_MS = 800
+const RESULT_DISPLAY_MS = 1000
 
-const LIGHTNING_ROUND_START = 5
-const LIGHTNING_MIN_DELAY_MS = 600
-const LIGHTNING_MAX_DELAY_MS = 2000
+// Speed ramps: delay shrinks as rounds progress
+const SPEED_RAMP_PER_ROUND = 150 // ms less per round
+const MIN_POSSIBLE_DELAY = 400
 
-const FAST_REACTION_THRESHOLD_MS = 250
-const STREAK_MULTIPLIER_PER = 0.5
+// Lightning mode
+const LIGHTNING_ROUND = 6
+const LIGHTNING_MIN_DELAY = 400
+const LIGHTNING_MAX_DELAY = 1500
 
-const PARTICLE_LIFETIME_MS = 600
-const MAX_PARTICLES = 24
+// Fake-out: chance to flash a trick color before GO
+const FAKEOUT_START_ROUND = 3
+const FAKEOUT_CHANCE = 0.35
+const FAKEOUT_FLASH_MS = 180
+
+// Streak
+const FAST_THRESHOLD_MS = 250
+const STREAK_MULT_PER = 0.5
+
+// Pixel particles
+const PARTICLE_LIFETIME = 500
+const MAX_PARTICLES = 32
 
 const CHARACTER_FACES = [
   { src: parkSangminImage, name: 'park-sangmin' },
@@ -44,42 +61,18 @@ const CHARACTER_FACES = [
   { src: seoTaijiImage, name: 'seo-taiji' },
 ] as const
 
-const HIT_EMOJIS = ['💥', '⚡', '🔥', '💫', '✨', '🌟', '💢', '🎯'] as const
-const HIT_COLORS = [
-  '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6',
-  '#ec4899', '#14b8a6',
-] as const
+const PIXEL_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#fff'] as const
 
-type Phase = 'countdown' | 'ready' | 'go' | 'too-early' | 'result' | 'finished'
+type Phase = 'countdown' | 'ready' | 'fakeout' | 'go' | 'too-early' | 'result' | 'finished'
 
-interface Particle {
-  readonly id: number
-  readonly x: number
-  readonly y: number
-  readonly vx: number
-  readonly vy: number
-  readonly color: string
-  readonly size: number
-  readonly createdAt: number
-  readonly emoji: string
-}
-
-interface Ripple {
-  readonly id: number
-  readonly x: number
-  readonly y: number
-  readonly createdAt: number
-  readonly color: string
+interface PixelParticle {
+  id: number; x: number; y: number; vx: number; vy: number
+  color: string; size: number; createdAt: number
 }
 
 interface FloatingText {
-  readonly id: number
-  readonly text: string
-  readonly x: number
-  readonly y: number
-  readonly color: string
-  readonly size: number
-  readonly createdAt: number
+  id: number; text: string; x: number; y: number
+  color: string; size: number; createdAt: number
 }
 
 function computeScore(avgMs: number): number {
@@ -87,633 +80,608 @@ function computeScore(avgMs: number): number {
 }
 
 function randomDelay(round: number): number {
-  if (round >= LIGHTNING_ROUND_START) {
-    return LIGHTNING_MIN_DELAY_MS + Math.random() * (LIGHTNING_MAX_DELAY_MS - LIGHTNING_MIN_DELAY_MS)
+  if (round >= LIGHTNING_ROUND) {
+    return LIGHTNING_MIN_DELAY + Math.random() * (LIGHTNING_MAX_DELAY - LIGHTNING_MIN_DELAY)
   }
-  return MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS)
+  const base = MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS)
+  return Math.max(MIN_POSSIBLE_DELAY, base - round * SPEED_RAMP_PER_ROUND)
 }
 
-function getReactionGrade(ms: number): { label: string; color: string; emoji: string } {
-  if (ms < 150) return { label: 'PERFECT!', color: '#fbbf24', emoji: '⭐' }
-  if (ms < 200) return { label: 'AMAZING!', color: '#a855f7', emoji: '💎' }
-  if (ms < 250) return { label: 'GREAT!', color: '#22c55e', emoji: '🔥' }
-  if (ms < 350) return { label: 'GOOD', color: '#3b82f6', emoji: '👍' }
-  if (ms < 500) return { label: 'OK', color: '#9ca3af', emoji: '😐' }
-  return { label: 'SLOW', color: '#6b7280', emoji: '🐢' }
+function getGrade(ms: number): { label: string; color: string; stars: number } {
+  if (ms < 120) return { label: 'GODLIKE!!', color: '#ff00ff', stars: 5 }
+  if (ms < 170) return { label: 'PERFECT!', color: '#fbbf24', stars: 4 }
+  if (ms < 220) return { label: 'GREAT!', color: '#22c55e', stars: 3 }
+  if (ms < 320) return { label: 'GOOD', color: '#3b82f6', stars: 2 }
+  if (ms < 450) return { label: 'OK', color: '#9ca3af', stars: 1 }
+  return { label: 'SLOW..', color: '#6b7280', stars: 0 }
 }
 
-function pickRandomFace(prev: number): number {
-  let next = Math.floor(Math.random() * CHARACTER_FACES.length)
-  while (next === prev && CHARACTER_FACES.length > 1) {
-    next = Math.floor(Math.random() * CHARACTER_FACES.length)
-  }
-  return next
+function pickFace(prev: number): number {
+  let n = Math.floor(Math.random() * CHARACTER_FACES.length)
+  while (n === prev && CHARACTER_FACES.length > 1) n = Math.floor(Math.random() * CHARACTER_FACES.length)
+  return n
 }
 
+function shouldFakeout(round: number): boolean {
+  return round >= FAKEOUT_START_ROUND && Math.random() < FAKEOUT_CHANCE
+}
+
+// ─── Component ───────────────────────────────────────────────
 function ReactionTestGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [phase, setPhase] = useState<Phase>('countdown')
   const [countdownNum, setCountdownNum] = useState(3)
-  const [currentRound, setCurrentRound] = useState(0)
-  const [reactionTimes, setReactionTimes] = useState<number[]>([])
-  const [lastReactionMs, setLastReactionMs] = useState<number | null>(null)
-  const [lastGrade, setLastGrade] = useState<{ label: string; color: string; emoji: string } | null>(null)
+  const [round, setRound] = useState(0)
+  const [lives, setLives] = useState(MAX_LIVES)
+  const [times, setTimes] = useState<number[]>([])
+  const [lastMs, setLastMs] = useState<number | null>(null)
+  const [lastGrade, setLastGrade] = useState<ReturnType<typeof getGrade> | null>(null)
   const [finalScore, setFinalScore] = useState(0)
-  const [fastStreak, setFastStreak] = useState(0)
+  const [streak, setStreak] = useState(0)
   const [isLightning, setIsLightning] = useState(false)
-  const [faceIndex, setFaceIndex] = useState(0)
+  const [faceIdx, setFaceIdx] = useState(0)
   const [isShaking, setIsShaking] = useState(false)
   const [shakeIntensity, setShakeIntensity] = useState(0)
-  const [isFlashing, setIsFlashing] = useState(false)
-  const [flashColor, setFlashColor] = useState('rgba(255,255,255,0.6)')
-  const [particles, setParticles] = useState<Particle[]>([])
-  const [ripples, setRipples] = useState<Ripple[]>([])
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([])
+  const [flashColor, setFlashColor] = useState('')
+  const [particles, setParticles] = useState<PixelParticle[]>([])
+  const [floats, setFloats] = useState<FloatingText[]>([])
   const [isNewRecord, setIsNewRecord] = useState(false)
   const [pulseScale, setPulseScale] = useState(1)
+  const [borderGlow, setBorderGlow] = useState('')
+  const [totalScore, setTotalScore] = useState(0)
 
-  const goTimestampRef = useRef(0)
-  const delayTimerRef = useRef<number | null>(null)
-  const tooEarlyTimerRef = useRef<number | null>(null)
-  const finishedRef = useRef(false)
-  const startTimeRef = useRef(performance.now())
-  const fastStreakRef = useRef(0)
-  const currentRoundRef = useRef(0)
-  const faceIndexRef = useRef(0)
+  // Refs for non-render state
+  const goTimeRef = useRef(0)
+  const delayRef = useRef<number | null>(null)
+  const earlyRef = useRef<number | null>(null)
+  const doneRef = useRef(false)
+  const startRef = useRef(performance.now())
+  const streakRef = useRef(0)
+  const roundRef = useRef(0)
+  const faceRef = useRef(0)
   const phaseRef = useRef<Phase>('countdown')
+  const livesRef = useRef(MAX_LIVES)
+  const timesRef = useRef<number[]>([])
+  const totalScoreRef = useRef(0)
 
-  const particleIdRef = useRef(0)
-  const particlesRef = useRef<Particle[]>([])
-  const rippleIdRef = useRef(0)
-  const floatingTextIdRef = useRef(0)
-  const floatingTextsRef = useRef<FloatingText[]>([])
-  const animFrameRef = useRef<number | null>(null)
+  const pidRef = useRef(0)
+  const pRef = useRef<PixelParticle[]>([])
+  const fidRef = useRef(0)
+  const fRef = useRef<FloatingText[]>([])
+  const animRef = useRef<number | null>(null)
+  const shakeRef = useRef<number | null>(null)
+  const flashRef = useRef<number | null>(null)
 
-  const shakeTimerRef = useRef<number | null>(null)
-  const flashTimerRef = useRef<number | null>(null)
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
-  // Audio refs
-  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({
-    tapHit: null,
-    tapHitStrong: null,
-    gameOver: null,
-    go: null,
-    tooEarly: null,
-    perfect: null,
-    lightning: null,
-    tick: null,
-    record: null,
-  })
-
-  const clearTimerSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
+  const clrTimer = (r: { current: number | null }) => {
+    if (r.current !== null) { window.clearTimeout(r.current); r.current = null }
   }
 
-  const playAudio = useCallback((key: string, volume = 0.5, playbackRate = 1) => {
-    const audio = audioRefs.current[key]
-    if (audio === null || audio === undefined) return
-    audio.currentTime = 0
-    audio.volume = volume
-    audio.playbackRate = playbackRate
-    void audio.play().catch(() => {})
+  const play = useCallback((key: string, vol = 0.5, rate = 1) => {
+    const a = audioRefs.current[key]
+    if (!a) return
+    a.currentTime = 0; a.volume = vol; a.playbackRate = rate
+    void a.play().catch(() => {})
   }, [])
 
-  const spawnParticles = useCallback((count: number, cx: number, cy: number, customEmojis?: readonly string[]) => {
+  // Pixel particles (squares, not emoji)
+  const burst = useCallback((count: number, cx: number, cy: number, colors?: readonly string[]) => {
     const now = performance.now()
-    const emojis = customEmojis ?? HIT_EMOJIS
-    const newP: Particle[] = []
+    const cs = colors ?? PIXEL_COLORS
+    const np: PixelParticle[] = []
     for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.8
-      const speed = 80 + Math.random() * 200
-      particleIdRef.current += 1
-      newP.push({
-        id: particleIdRef.current,
-        x: cx + (Math.random() - 0.5) * 30,
-        y: cy + (Math.random() - 0.5) * 30,
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5)
+      const speed = 100 + Math.random() * 250
+      pidRef.current += 1
+      np.push({
+        id: pidRef.current,
+        x: cx + (Math.random() - 0.5) * 20,
+        y: cy + (Math.random() - 0.5) * 20,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        color: HIT_COLORS[Math.floor(Math.random() * HIT_COLORS.length)],
-        size: 6 + Math.random() * 10,
+        color: cs[Math.floor(Math.random() * cs.length)],
+        size: 4 + Math.floor(Math.random() * 8),
         createdAt: now,
-        emoji: emojis[Math.floor(Math.random() * emojis.length)],
       })
     }
-    const merged = [...particlesRef.current, ...newP].slice(-MAX_PARTICLES)
-    particlesRef.current = merged
-    setParticles(merged)
+    const m = [...pRef.current, ...np].slice(-MAX_PARTICLES)
+    pRef.current = m; setParticles(m)
   }, [])
 
-  const addRipple = useCallback((x: number, y: number, color = 'rgba(255,255,255,0.6)') => {
-    rippleIdRef.current += 1
-    setRipples(prev => [...prev, { id: rippleIdRef.current, x, y, createdAt: performance.now(), color }].slice(-6))
+  const float = useCallback((text: string, x: number, y: number, color: string, size = 20) => {
+    fidRef.current += 1
+    const ft: FloatingText = { id: fidRef.current, text, x, y, color, size, createdAt: performance.now() }
+    const m = [...fRef.current, ft].slice(-10)
+    fRef.current = m; setFloats(m)
   }, [])
 
-  const spawnFloatingText = useCallback((text: string, x: number, y: number, color: string, size = 20) => {
-    floatingTextIdRef.current += 1
-    const ft: FloatingText = { id: floatingTextIdRef.current, text, x, y, color, size, createdAt: performance.now() }
-    const merged = [...floatingTextsRef.current, ft].slice(-8)
-    floatingTextsRef.current = merged
-    setFloatingTexts(merged)
+  const shake = useCallback((intensity = 5, ms = 120) => {
+    setIsShaking(true); setShakeIntensity(intensity)
+    clrTimer(shakeRef)
+    shakeRef.current = window.setTimeout(() => { shakeRef.current = null; setIsShaking(false); setShakeIntensity(0) }, ms)
   }, [])
 
-  const triggerShake = useCallback((intensity = 5, durationMs = 120) => {
-    setIsShaking(true)
-    setShakeIntensity(intensity)
-    clearTimerSafe(shakeTimerRef)
-    shakeTimerRef.current = window.setTimeout(() => {
-      shakeTimerRef.current = null
-      setIsShaking(false)
-      setShakeIntensity(0)
-    }, durationMs)
-  }, [])
-
-  const triggerFlash = useCallback((color = 'rgba(255,255,255,0.6)', durationMs = 80) => {
-    setIsFlashing(true)
+  const flash = useCallback((color: string, ms = 80) => {
     setFlashColor(color)
-    clearTimerSafe(flashTimerRef)
-    flashTimerRef.current = window.setTimeout(() => {
-      flashTimerRef.current = null
-      setIsFlashing(false)
-    }, durationMs)
+    clrTimer(flashRef)
+    flashRef.current = window.setTimeout(() => { flashRef.current = null; setFlashColor('') }, ms)
   }, [])
+
+  const glowBorder = useCallback((color: string, ms = 300) => {
+    setBorderGlow(color)
+    setTimeout(() => setBorderGlow(''), ms)
+  }, [])
+
+  // ─── Game Flow ─────────────────────────────────────────
+  const finishGame = useCallback((reasonTimes: number[]) => {
+    if (doneRef.current) return
+    doneRef.current = true
+    phaseRef.current = 'finished'
+    setPhase('finished')
+    const avg = reasonTimes.length > 0
+      ? reasonTimes.reduce((s, t) => s + t, 0) / reasonTimes.length
+      : 999
+    const base = computeScore(avg)
+    const streakBonus = Math.round(streakRef.current * 50)
+    const roundBonus = reasonTimes.length * 20
+    const total = base + streakBonus + roundBonus + totalScoreRef.current
+    setFinalScore(total)
+    setTimeout(() => {
+      play('gameOver', 0.6)
+      burst(16, 180, 250, ['#fbbf24', '#22c55e', '#3b82f6', '#ec4899', '#fff'])
+      if (total > bestScore && bestScore > 0) {
+        setTimeout(() => { setIsNewRecord(true); play('record', 0.7) }, 800)
+      }
+    }, 300)
+  }, [play, burst, bestScore])
 
   const startRound = useCallback(() => {
-    clearTimerSafe(delayTimerRef)
-    clearTimerSafe(tooEarlyTimerRef)
+    clrTimer(delayRef); clrTimer(earlyRef)
     phaseRef.current = 'ready'
     setPhase('ready')
-    setLastReactionMs(null)
-    setLastGrade(null)
+    setLastMs(null); setLastGrade(null)
 
-    const round = currentRoundRef.current
-    const lightning = round >= LIGHTNING_ROUND_START
+    const r = roundRef.current
+    const lightning = r >= LIGHTNING_ROUND
     setIsLightning(lightning)
 
-    if (lightning && round === LIGHTNING_ROUND_START) {
-      playAudio('lightning', 0.5)
-      spawnFloatingText('LIGHTNING!', 100, 80, '#fbbf24', 26)
-      triggerShake(8, 200)
-      triggerFlash('rgba(251,191,36,0.3)', 150)
+    if (lightning && r === LIGHTNING_ROUND) {
+      play('lightning', 0.6)
+      float('LIGHTNING MODE!', 40, 60, '#fbbf24', 24)
+      shake(10, 250)
+      flash('rgba(251,191,36,0.4)', 200)
+      glowBorder('#fbbf24', 500)
     }
 
-    const nextFace = pickRandomFace(faceIndexRef.current)
-    faceIndexRef.current = nextFace
-    setFaceIndex(nextFace)
+    play('round', 0.3, 1 + r * 0.05)
 
-    const delay = randomDelay(round)
-    delayTimerRef.current = window.setTimeout(() => {
-      delayTimerRef.current = null
-      goTimestampRef.current = performance.now()
-      phaseRef.current = 'go'
-      setPhase('go')
-      playAudio('go', 0.6)
-      triggerFlash('rgba(34,197,94,0.4)', 100)
-      setPulseScale(1.15)
-      setTimeout(() => setPulseScale(1), 150)
-    }, delay)
-  }, [playAudio, spawnFloatingText, triggerShake, triggerFlash])
+    const nf = pickFace(faceRef.current); faceRef.current = nf; setFaceIdx(nf)
 
-  const handleTap = useCallback((pointerX?: number, pointerY?: number) => {
-    if (finishedRef.current) return
-    const currentPhase = phaseRef.current
+    const delay = randomDelay(r)
+    const doFakeout = shouldFakeout(r)
 
-    if (currentPhase === 'countdown') return
+    if (doFakeout) {
+      // Fake-out: briefly flash green-ish before going back to red
+      const fakeoutAt = delay * (0.3 + Math.random() * 0.3)
+      delayRef.current = window.setTimeout(() => {
+        phaseRef.current = 'fakeout'
+        setPhase('fakeout')
+        play('fakeout', 0.4)
+        glowBorder('#22c55e', FAKEOUT_FLASH_MS)
 
-    if (currentPhase === 'ready') {
-      clearTimerSafe(delayTimerRef)
+        delayRef.current = window.setTimeout(() => {
+          phaseRef.current = 'ready'
+          setPhase('ready')
+
+          // Real GO after remaining delay
+          delayRef.current = window.setTimeout(() => {
+            delayRef.current = null
+            goTimeRef.current = performance.now()
+            phaseRef.current = 'go'
+            setPhase('go')
+            play('go', 0.6, 1 + r * 0.03)
+            flash('rgba(34,197,94,0.5)', 100)
+            glowBorder('#22c55e', 300)
+            setPulseScale(1.15)
+            setTimeout(() => setPulseScale(1), 150)
+          }, delay - fakeoutAt - FAKEOUT_FLASH_MS)
+        }, FAKEOUT_FLASH_MS)
+      }, fakeoutAt)
+    } else {
+      delayRef.current = window.setTimeout(() => {
+        delayRef.current = null
+        goTimeRef.current = performance.now()
+        phaseRef.current = 'go'
+        setPhase('go')
+        play('go', 0.6, 1 + r * 0.03)
+        flash('rgba(34,197,94,0.5)', 100)
+        glowBorder('#22c55e', 300)
+        setPulseScale(1.15)
+        setTimeout(() => setPulseScale(1), 150)
+      }, delay)
+    }
+  }, [play, float, shake, flash, glowBorder])
+
+  const handleTap = useCallback((px?: number, py?: number) => {
+    if (doneRef.current) return
+    const p = phaseRef.current
+    if (p === 'countdown' || p === 'finished') return
+
+    const tapX = px ?? 180
+    const tapY = py ?? 280
+
+    // Too early (ready or fakeout)
+    if (p === 'ready' || p === 'fakeout') {
+      clrTimer(delayRef)
       phaseRef.current = 'too-early'
       setPhase('too-early')
-      playAudio('tooEarly', 0.5)
-      triggerShake(6, 150)
-      triggerFlash('rgba(249,115,22,0.4)', 100)
-      if (pointerX !== undefined && pointerY !== undefined) {
-        addRipple(pointerX, pointerY, 'rgba(249,115,22,0.6)')
-      }
-      spawnFloatingText('TOO EARLY!', 80 + Math.random() * 80, 120 + Math.random() * 40, '#f97316', 22)
 
-      tooEarlyTimerRef.current = window.setTimeout(() => {
-        tooEarlyTimerRef.current = null
-        startRound()
+      livesRef.current -= 1
+      setLives(livesRef.current)
+      play('miss', 0.6)
+      play('tooEarly', 0.4)
+      shake(8, 200)
+      flash('rgba(239,68,68,0.5)', 150)
+      glowBorder('#ef4444', 400)
+      burst(8, tapX, tapY, ['#ef4444', '#f97316', '#991b1b'])
+      float(p === 'fakeout' ? 'TRICKED!' : 'TOO EARLY!', 60 + Math.random() * 80, 100, '#ef4444', 24)
+
+      // Reset streak
+      streakRef.current = 0; setStreak(0)
+
+      if (livesRef.current <= 0) {
+        float('GAME OVER', 80, 180, '#ef4444', 30)
+        setTimeout(() => finishGame(timesRef.current), 600)
+        return
+      }
+
+      earlyRef.current = window.setTimeout(() => {
+        earlyRef.current = null; startRound()
       }, TOO_EARLY_DISPLAY_MS)
       return
     }
 
-    if (currentPhase === 'go') {
-      const now = performance.now()
-      const reactionMs = Math.round(now - goTimestampRef.current)
-      const clampedMs = Math.min(reactionMs, 9999)
-      setLastReactionMs(clampedMs)
+    // TAP on GO!
+    if (p === 'go') {
+      const ms = Math.round(performance.now() - goTimeRef.current)
+      const clamped = Math.min(ms, 9999)
+      setLastMs(clamped)
 
-      const grade = getReactionGrade(clampedMs)
+      const grade = getGrade(clamped)
       setLastGrade(grade)
 
-      const nextTimes = [...reactionTimes, clampedMs]
-      setReactionTimes(nextTimes)
+      timesRef.current = [...timesRef.current, clamped]
+      setTimes([...timesRef.current])
 
-      if (clampedMs <= FAST_REACTION_THRESHOLD_MS) {
-        fastStreakRef.current += 1
+      // Streak
+      if (clamped <= FAST_THRESHOLD_MS) { streakRef.current += 1 } else { streakRef.current = 0 }
+      setStreak(streakRef.current)
+
+      // Score
+      const mult = 1 + streakRef.current * STREAK_MULT_PER
+      const roundScore = Math.round((500 - Math.min(clamped, 500)) * mult)
+      totalScoreRef.current += roundScore
+      setTotalScore(totalScoreRef.current)
+
+      // Effects based on grade
+      if (grade.stars >= 4) {
+        play('perfect', 0.6)
+        shake(8, 150)
+        flash('rgba(251,191,36,0.4)', 120)
+        burst(14, tapX, tapY, ['#fbbf24', '#fff', '#a855f7', '#ec4899'])
+        float(`${grade.label}`, 50 + Math.random() * 80, 80, grade.color, 28)
+        float(`+${roundScore}`, 120 + Math.random() * 60, 130, '#fbbf24', 22)
+        glowBorder('#fbbf24', 400)
+        setPulseScale(1.25)
+      } else if (grade.stars >= 3) {
+        play('tapHitStrong', 0.6, 1.1)
+        shake(5, 100)
+        flash('rgba(34,197,94,0.3)', 80)
+        burst(8, tapX, tapY, ['#22c55e', '#14b8a6', '#fff'])
+        float(`${grade.label}`, 60 + Math.random() * 80, 90, grade.color, 24)
+        float(`+${roundScore}`, 130 + Math.random() * 50, 135, '#22c55e', 20)
+        glowBorder('#22c55e', 300)
+        setPulseScale(1.15)
+      } else if (grade.stars >= 2) {
+        play('tapHit', 0.5)
+        flash('rgba(59,130,246,0.2)', 60)
+        burst(5, tapX, tapY, ['#3b82f6', '#22c55e'])
+        float(`${grade.label}`, 80 + Math.random() * 60, 100, grade.color, 20)
+        float(`+${roundScore}`, 140, 145, grade.color, 18)
+        setPulseScale(1.08)
       } else {
-        fastStreakRef.current = 0
-      }
-      setFastStreak(fastStreakRef.current)
-
-      const streakMult = 1 + fastStreakRef.current * STREAK_MULTIPLIER_PER
-      const roundScore = Math.round((500 - Math.min(clampedMs, 500)) * streakMult)
-
-      const tapX = pointerX ?? 150
-      const tapY = pointerY ?? 200
-
-      if (pointerX !== undefined && pointerY !== undefined) {
-        addRipple(pointerX, pointerY, grade.color)
-      }
-
-      if (clampedMs < 150) {
-        playAudio('perfect', 0.6)
-        triggerShake(8, 150)
-        triggerFlash('rgba(251,191,36,0.4)', 120)
-        spawnParticles(10, tapX, tapY, ['⭐', '💎', '✨', '🌟'])
-        spawnFloatingText(`${grade.emoji} ${grade.label}`, 60 + Math.random() * 80, 80, grade.color, 28)
-        spawnFloatingText(`+${roundScore}`, 120 + Math.random() * 60, 130, '#fbbf24', 24)
-        setPulseScale(1.2)
-      } else if (clampedMs < 250) {
-        playAudio('tapHitStrong', 0.6, 1.1)
-        triggerShake(5, 100)
-        triggerFlash('rgba(34,197,94,0.3)', 80)
-        spawnParticles(6, tapX, tapY)
-        spawnFloatingText(`${grade.emoji} ${grade.label}`, 60 + Math.random() * 80, 100, grade.color, 22)
-        spawnFloatingText(`+${roundScore}`, 130 + Math.random() * 50, 140, '#22c55e', 20)
-        setPulseScale(1.12)
-      } else if (clampedMs < 350) {
-        playAudio('tapHit', 0.5, 1.0)
-        triggerFlash('rgba(59,130,246,0.2)', 60)
-        spawnParticles(4, tapX, tapY)
-        spawnFloatingText(`${grade.label}`, 80 + Math.random() * 80, 110, grade.color, 18)
-        spawnFloatingText(`+${roundScore}`, 140, 150, grade.color, 18)
-        setPulseScale(1.06)
-      } else {
-        playAudio('tapHit', 0.4, 0.9)
-        spawnParticles(2, tapX, tapY)
-        spawnFloatingText(`+${roundScore}`, 140, 150, '#9ca3af', 16)
+        play('tapHit', 0.3, 0.8)
+        burst(3, tapX, tapY)
+        float(`+${roundScore}`, 140, 150, '#9ca3af', 16)
       }
 
       setTimeout(() => setPulseScale(1), 200)
 
-      if (fastStreakRef.current >= 3) {
-        spawnFloatingText(`STREAK x${fastStreakRef.current}!`, 50 + Math.random() * 100, 60, '#f59e0b', 20)
+      // Combo sound on streak milestones
+      if (streakRef.current === 3 || streakRef.current === 5 || streakRef.current === 8) {
+        play('combo', 0.5, 0.8 + streakRef.current * 0.05)
+        float(`COMBO x${streakRef.current}!`, 40 + Math.random() * 100, 50, '#f59e0b', 22)
       }
 
-      if (nextTimes.length >= TOTAL_ROUNDS) {
-        const avg = nextTimes.reduce((sum, t) => sum + t, 0) / nextTimes.length
-        const score = computeScore(avg)
-        const streakBonus = Math.round(fastStreakRef.current * 50)
-        const totalScore = score + streakBonus
-        setFinalScore(totalScore)
-        phaseRef.current = 'finished'
-        setPhase('finished')
-        finishedRef.current = true
-
-        setTimeout(() => {
-          playAudio('gameOver', 0.6)
-          spawnParticles(12, 150, 200, ['🎉', '🏆', '⭐', '🎊'])
-          if (totalScore > bestScore && bestScore > 0) {
-            setTimeout(() => {
-              setIsNewRecord(true)
-              playAudio('record', 0.7)
-            }, 800)
-          }
-        }, 300)
+      // Check finish
+      if (timesRef.current.length >= TOTAL_ROUNDS) {
+        setTimeout(() => finishGame(timesRef.current), 400)
       } else {
-        phaseRef.current = 'result'
-        setPhase('result')
-        const nextRound = nextTimes.length + 1
-        currentRoundRef.current = nextRound
-        setCurrentRound(nextRound)
+        phaseRef.current = 'result'; setPhase('result')
+        const nr = timesRef.current.length + 1
+        roundRef.current = nr; setRound(nr)
 
-        delayTimerRef.current = window.setTimeout(() => {
-          delayTimerRef.current = null
-          startRound()
+        delayRef.current = window.setTimeout(() => {
+          delayRef.current = null; startRound()
         }, RESULT_DISPLAY_MS)
       }
       return
     }
 
-    if (currentPhase === 'result') {
-      clearTimerSafe(delayTimerRef)
-      startRound()
-      return
+    if (p === 'result') {
+      clrTimer(delayRef); startRound()
     }
-  }, [reactionTimes, startRound, playAudio, triggerShake, triggerFlash, addRipple, spawnParticles, spawnFloatingText, bestScore])
+  }, [startRound, play, shake, flash, glowBorder, burst, float, finishGame])
 
-  // Countdown on mount
+  // ─── Countdown ─────────────────────────────────────────
   useEffect(() => {
-    startTimeRef.current = performance.now()
-    let count = 3
-    setCountdownNum(3)
+    startRef.current = performance.now()
+    let c = 3; setCountdownNum(3)
+    play('tick', 0.4)
+    const iv = setInterval(() => {
+      c -= 1
+      if (c > 0) { setCountdownNum(c); play('tick', 0.4, 1 + (3 - c) * 0.15) }
+      else { clearInterval(iv); roundRef.current = 1; setRound(1); startRound() }
+    }, 700)
+    return () => clearInterval(iv)
+  }, [startRound, play])
 
-    const countdownInterval = setInterval(() => {
-      count -= 1
-      if (count > 0) {
-        setCountdownNum(count)
-        playAudio('tick', 0.4, 1.0 + (3 - count) * 0.15)
-      } else {
-        clearInterval(countdownInterval)
-        currentRoundRef.current = 1
-        setCurrentRound(1)
-        startRound()
-      }
-    }, 800)
-
-    playAudio('tick', 0.4)
-
-    return () => clearInterval(countdownInterval)
-  }, [startRound, playAudio])
-
-  // Preload audio
+  // ─── Audio preload ─────────────────────────────────────
   useEffect(() => {
-    const sources: Record<string, string> = {
-      tapHit: tapHitSfx,
-      tapHitStrong: tapHitStrongSfx,
-      gameOver: gameOverHitSfx,
-      go: goSfx,
-      tooEarly: tooEarlySfx,
-      perfect: perfectSfx,
-      lightning: lightningSfx,
-      tick: tickSfx,
-      record: recordSfx,
+    const srcs: Record<string, string> = {
+      go: goSfx, tooEarly: tooEarlySfx, perfect: perfectSfx,
+      lightning: lightningSfx, tick: tickSfx, record: recordSfx,
+      combo: comboSfx, miss: missSfx, round: roundSfx, fakeout: fakeoutSfx,
+      tapHit: tapHitSfx, tapHitStrong: tapHitStrongSfx, gameOver: gameOverHitSfx,
     }
-    for (const [key, src] of Object.entries(sources)) {
-      const audio = new Audio(src)
-      audio.preload = 'auto'
-      audioRefs.current[key] = audio
+    for (const [k, s] of Object.entries(srcs)) {
+      const a = new Audio(s); a.preload = 'auto'; audioRefs.current[k] = a
     }
-
-    for (const face of CHARACTER_FACES) {
-      const img = new Image()
-      img.src = face.src
-    }
-
+    for (const f of CHARACTER_FACES) { const i = new Image(); i.src = f.src }
     return () => {
-      clearTimerSafe(delayTimerRef)
-      clearTimerSafe(tooEarlyTimerRef)
-      clearTimerSafe(shakeTimerRef)
-      clearTimerSafe(flashTimerRef)
-      for (const key of Object.keys(audioRefs.current)) {
-        audioRefs.current[key] = null
-      }
+      clrTimer(delayRef); clrTimer(earlyRef); clrTimer(shakeRef); clrTimer(flashRef)
+      for (const k of Object.keys(audioRefs.current)) audioRefs.current[k] = null
     }
   }, [])
 
-  // Animation loop for particle/ripple cleanup
+  // ─── Animation loop ────────────────────────────────────
   useEffect(() => {
     const step = () => {
       const now = performance.now()
-      const aliveP = particlesRef.current.filter(p => now - p.createdAt < PARTICLE_LIFETIME_MS)
-      if (aliveP.length !== particlesRef.current.length) {
-        particlesRef.current = aliveP
-        setParticles(aliveP)
-      }
-      const aliveFt = floatingTextsRef.current.filter(ft => now - ft.createdAt < 1200)
-      if (aliveFt.length !== floatingTextsRef.current.length) {
-        floatingTextsRef.current = aliveFt
-        setFloatingTexts(aliveFt)
-      }
-      setRipples(prev => {
-        const filtered = prev.filter(r => now - r.createdAt < 500)
-        return filtered.length === prev.length ? prev : filtered
-      })
-      animFrameRef.current = requestAnimationFrame(step)
+      const ap = pRef.current.filter(p => now - p.createdAt < PARTICLE_LIFETIME)
+      if (ap.length !== pRef.current.length) { pRef.current = ap; setParticles(ap) }
+      const af = fRef.current.filter(f => now - f.createdAt < 1200)
+      if (af.length !== fRef.current.length) { fRef.current = af; setFloats(af) }
+      animRef.current = requestAnimationFrame(step)
     }
-    animFrameRef.current = requestAnimationFrame(step)
-    return () => {
-      if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current)
-    }
+    animRef.current = requestAnimationFrame(step)
+    return () => { if (animRef.current !== null) cancelAnimationFrame(animRef.current) }
   }, [])
 
-  // Keyboard
+  // ─── Keyboard ──────────────────────────────────────────
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') { event.preventDefault(); onExit(); return }
-      if (event.code === 'Space' || event.code === 'Enter') { event.preventDefault(); handleTap() }
+    const h = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onExit() }
+      else if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); handleTap() }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
   }, [handleTap, onExit])
 
-  const onFinishCalledRef = useRef(false)
+  const finishCalledRef = useRef(false)
   const handleFinish = useCallback(() => {
-    if (onFinishCalledRef.current) return
-    onFinishCalledRef.current = true
-    const elapsed = Math.round(Math.max(16.66, performance.now() - startTimeRef.current))
-    onFinish({ score: finalScore, durationMs: elapsed })
+    if (finishCalledRef.current) return; finishCalledRef.current = true
+    onFinish({ score: finalScore, durationMs: Math.round(Math.max(16.66, performance.now() - startRef.current)) })
   }, [finalScore, onFinish])
 
-  const avgReactionMs = reactionTimes.length > 0
-    ? Math.round(reactionTimes.reduce((sum, t) => sum + t, 0) / reactionTimes.length)
-    : 0
-
-  const currentFace = CHARACTER_FACES[faceIndex]
-
-  const handlePointerDown = useCallback((event: React.PointerEvent) => {
-    event.preventDefault()
-    const rect = event.currentTarget.getBoundingClientRect()
-    handleTap(event.clientX - rect.left, event.clientY - rect.top)
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const r = e.currentTarget.getBoundingClientRect()
+    handleTap(e.clientX - r.left, e.clientY - r.top)
   }, [handleTap])
+
+  const avgMs = times.length > 0 ? Math.round(times.reduce((s, t) => s + t, 0) / times.length) : 0
+  const face = CHARACTER_FACES[faceIdx]
 
   const shakeStyle = isShaking
     ? { transform: `translate(${(Math.random() - 0.5) * shakeIntensity * 2}px, ${(Math.random() - 0.5) * shakeIntensity * 2}px)` }
     : undefined
 
+  // Phase-based background
+  const zoneBg = phase === 'go' ? '#0a5c2a'
+    : phase === 'ready' ? '#5c0a0a'
+    : phase === 'fakeout' ? '#2a5c0a'
+    : phase === 'too-early' ? '#5c2a0a'
+    : phase === 'countdown' ? '#1a1a2e'
+    : '#1a1a2e'
+
   return (
-    <section className="mini-game-panel rt-panel" aria-label="reaction-test-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden' }}>
+    <section className="mini-game-panel rt-panel" aria-label="reaction-test-game"
+      style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden' }}>
       <style>{RT_CSS}</style>
 
       {/* Header */}
-      <div className="rt-header">
-        <div>
-          <p className="rt-round-indicator">
-            {phase === 'countdown' ? 'GET READY' : `Round ${currentRound} / ${TOTAL_ROUNDS}`}
+      <div className="rt-hdr">
+        <div className="rt-hdr-left">
+          <p className="rt-round-txt">
+            {phase === 'countdown' ? 'READY' : `R${round}/${TOTAL_ROUNDS}`}
           </p>
           {isLightning && phase !== 'countdown' && phase !== 'finished' && (
-            <p className="rt-lightning-badge">LIGHTNING</p>
+            <span className="rt-badge rt-badge-lightning">LIGHTNING</span>
           )}
         </div>
-        <div style={{ textAlign: 'right' }}>
-          {bestScore > 0 && <p className="rt-best">BEST {bestScore.toLocaleString()}</p>}
-          {fastStreak >= 2 && (
-            <p className="rt-streak">STREAK x{fastStreak} ({(1 + fastStreak * STREAK_MULTIPLIER_PER).toFixed(1)}x)</p>
-          )}
+        <div className="rt-hdr-right">
+          {/* Lives as pixel hearts */}
+          <div className="rt-lives">
+            {Array.from({ length: MAX_LIVES }).map((_, i) => (
+              <span key={`life-${i}`} className={`rt-heart ${i < lives ? 'rt-heart-alive' : 'rt-heart-dead'}`}>
+                {i < lives ? '♥' : '♡'}
+              </span>
+            ))}
+          </div>
+          <p className="rt-score-hdr">{totalScore.toLocaleString()}</p>
         </div>
       </div>
 
-      {/* Progress pips */}
-      {reactionTimes.length > 0 && phase !== 'finished' && (
-        <div className="rt-progress">
-          {reactionTimes.map((time, i) => {
-            const g = getReactionGrade(time)
-            return (
-              <span className="rt-pip" key={`pip-${i}`} style={{ background: g.color, color: '#fff' }}>
-                {time}ms
-              </span>
-            )
+      {/* Progress bar */}
+      {times.length > 0 && phase !== 'finished' && (
+        <div className="rt-prog-bar">
+          {times.map((t, i) => {
+            const g = getGrade(t)
+            return <div key={`b-${i}`} className="rt-prog-seg" style={{ background: g.color, flex: 1 }} />
           })}
-          {Array.from({ length: TOTAL_ROUNDS - reactionTimes.length }).map((_, i) => (
-            <span className="rt-pip rt-pip-empty" key={`empty-${i}`}>---</span>
+          {Array.from({ length: TOTAL_ROUNDS - times.length }).map((_, i) => (
+            <div key={`e-${i}`} className="rt-prog-seg rt-prog-empty" style={{ flex: 1 }} />
           ))}
         </div>
       )}
 
-      {/* Main tap area */}
+      {/* Streak banner */}
+      {streak >= 2 && phase !== 'finished' && (
+        <div className="rt-streak-banner">
+          <span className="rt-streak-txt">STREAK x{streak}</span>
+          <span className="rt-streak-mult">{(1 + streak * STREAK_MULT_PER).toFixed(1)}x</span>
+        </div>
+      )}
+
+      {/* Main game zone */}
       <div
-        className={`rt-tap-zone ${phase === 'go' ? 'rt-tap-go' : ''} ${phase === 'ready' ? 'rt-tap-ready' : ''} ${phase === 'too-early' ? 'rt-tap-early' : ''} ${isLightning && phase !== 'finished' && phase !== 'countdown' ? 'rt-tap-lightning' : ''}`}
-        style={{
-          ...shakeStyle,
-          background: phase === 'go'
-            ? 'linear-gradient(135deg, #16a34a, #22c55e, #15803d)'
-            : phase === 'ready'
-              ? 'linear-gradient(135deg, #dc2626, #b91c1c, #991b1b)'
-              : phase === 'too-early'
-                ? 'linear-gradient(135deg, #f97316, #ea580c, #c2410c)'
-                : phase === 'countdown'
-                  ? 'linear-gradient(135deg, #4b5563, #374151, #1f2937)'
-                  : 'linear-gradient(135deg, #f5f4ef, #ede9df)',
-        }}
-        onPointerDown={handlePointerDown}
-        role="button"
-        tabIndex={0}
-        aria-label="Tap zone"
+        className={`rt-zone ${phase === 'go' ? 'rt-zone-go' : ''} ${phase === 'fakeout' ? 'rt-zone-fakeout' : ''}`}
+        style={{ ...shakeStyle, background: zoneBg, borderColor: borderGlow || 'rgba(255,255,255,0.1)' }}
+        onPointerDown={handlePointerDown} role="button" tabIndex={0} aria-label="Tap zone"
       >
+        {/* Scanline overlay */}
+        <div className="rt-scanlines" />
+
         {/* Flash overlay */}
-        {isFlashing && (
-          <div style={{ position: 'absolute', inset: 0, background: flashColor, pointerEvents: 'none', zIndex: 15, borderRadius: 'inherit' }} />
+        {flashColor && (
+          <div className="rt-flash" style={{ background: flashColor }} />
         )}
 
-        {/* Ripples */}
-        {ripples.map(r => (
-          <div key={r.id} className="rt-ripple" style={{ left: `${r.x}px`, top: `${r.y}px`, borderColor: r.color }} />
-        ))}
-
-        {/* Particles */}
-        {particles.map(p => {
-          const age = performance.now() - p.createdAt
-          const progress = Math.min(1, age / PARTICLE_LIFETIME_MS)
-          const x = p.x + p.vx * progress * 0.4
-          const y = p.y + p.vy * progress * 0.4 - 30 * progress
+        {/* Pixel particles */}
+        {particles.map(pp => {
+          const age = performance.now() - pp.createdAt
+          const prog = Math.min(1, age / PARTICLE_LIFETIME)
+          const x = pp.x + pp.vx * prog * 0.35
+          const y = pp.y + pp.vy * prog * 0.35 - 20 * prog
           return (
-            <span
-              key={p.id}
-              style={{
-                position: 'absolute', left: `${x}px`, top: `${y}px`,
-                fontSize: `${p.size + 8}px`, opacity: 1 - progress,
-                transform: `scale(${1 - progress * 0.6}) rotate(${progress * 180}deg)`,
-                pointerEvents: 'none', zIndex: 10,
-                filter: `drop-shadow(0 0 4px ${p.color})`,
-              }}
-            >
-              {p.emoji}
-            </span>
+            <div key={pp.id} className="rt-pixel-particle" style={{
+              left: `${x}px`, top: `${y}px`,
+              width: `${pp.size * (1 - prog * 0.5)}px`,
+              height: `${pp.size * (1 - prog * 0.5)}px`,
+              background: pp.color,
+              opacity: 1 - prog,
+              boxShadow: `0 0 ${pp.size}px ${pp.color}`,
+            }} />
           )
         })}
 
         {/* Floating texts */}
-        {floatingTexts.map(ft => {
+        {floats.map(ft => {
           const age = performance.now() - ft.createdAt
-          const progress = Math.min(1, age / 1200)
+          const prog = Math.min(1, age / 1200)
           return (
-            <span
-              key={ft.id}
-              className="rt-floating-text"
-              style={{
-                left: `${ft.x}px`, top: `${ft.y}px`, color: ft.color, fontSize: `${ft.size}px`,
-                opacity: 1 - progress,
-                transform: `translateY(${-60 * progress}px) scale(${1.2 - progress * 0.4})`,
-              }}
-            >
-              {ft.text}
-            </span>
+            <span key={ft.id} className="rt-float" style={{
+              left: `${ft.x}px`, top: `${ft.y}px`, color: ft.color, fontSize: `${ft.size}px`,
+              opacity: 1 - prog,
+              transform: `translateY(${-50 * prog}px) scale(${1.2 - prog * 0.4})`,
+            }}>{ft.text}</span>
           )
         })}
 
         {/* Countdown */}
         {phase === 'countdown' && (
-          <div className="rt-countdown-container">
-            <p className="rt-countdown-num" key={countdownNum}>{countdownNum}</p>
-            <p className="rt-countdown-label">GET READY</p>
+          <div className="rt-cd">
+            <p className="rt-cd-num" key={countdownNum}>{countdownNum}</p>
+            <p className="rt-cd-label">GET READY</p>
           </div>
         )}
 
-        {/* Character + phase label */}
+        {/* Gameplay area */}
         {phase !== 'countdown' && phase !== 'finished' && (
-          <div className="rt-character-area" style={{ transform: `scale(${pulseScale})`, transition: 'transform 0.15s ease-out' }}>
-            <img
-              className="rt-character"
-              src={currentFace.src}
-              alt={currentFace.name}
-            />
-            <p className="rt-phase-label" style={{ color: phase === 'go' ? '#fff' : phase === 'too-early' ? '#fff' : 'rgba(255,255,255,0.9)' }}>
+          <div className="rt-play" style={{ transform: `scale(${pulseScale})`, transition: 'transform 0.12s ease-out' }}>
+            <img className="rt-char" src={face.src} alt={face.name} />
+
+            <p className="rt-phase-txt" style={{
+              color: phase === 'go' ? '#4ade80' : phase === 'too-early' ? '#fb923c' : phase === 'fakeout' ? '#86efac' : '#ef4444'
+            }}>
               {phase === 'ready' ? 'WAIT...'
+                : phase === 'fakeout' ? 'WAIT...'
                 : phase === 'go' ? 'TAP NOW!'
                 : phase === 'too-early' ? 'TOO EARLY!'
-                : phase === 'result' && lastReactionMs !== null ? `${lastReactionMs}ms`
+                : phase === 'result' && lastMs !== null ? `${lastMs}ms`
                 : ''}
             </p>
+
             {phase === 'result' && lastGrade && (
-              <p className="rt-grade-label" style={{ color: lastGrade.color }}>
-                {lastGrade.emoji} {lastGrade.label}
-              </p>
+              <div className="rt-grade-row">
+                <span className="rt-grade-txt" style={{ color: lastGrade.color }}>{lastGrade.label}</span>
+                <span className="rt-grade-stars">
+                  {'★'.repeat(lastGrade.stars)}{'☆'.repeat(5 - lastGrade.stars)}
+                </span>
+              </div>
             )}
+
+            {phase === 'go' && <div className="rt-go-ring" />}
+
             {phase === 'ready' && (
-              <p className="rt-hint-label">Wait for green...</p>
-            )}
-            {phase === 'go' && (
-              <div className="rt-go-ring" />
+              <p className="rt-hint">Wait for green...</p>
             )}
           </div>
         )}
 
         {/* Finished overlay */}
         {phase === 'finished' && (
-          <div className="rt-finished-overlay">
-            {isNewRecord && <p className="rt-new-record">NEW RECORD!</p>}
-            <p className="rt-finished-label">RESULT</p>
+          <div className="rt-finish">
+            {isNewRecord && <p className="rt-new-rec">NEW RECORD!</p>}
+            <p className="rt-fin-title">RESULT</p>
 
-            <div className="rt-times-grid">
-              {reactionTimes.map((time, i) => {
-                const g = getReactionGrade(time)
+            <div className="rt-fin-grid">
+              {times.map((t, i) => {
+                const g = getGrade(t)
                 return (
-                  <div className="rt-time-row" key={`r-${i}`}>
-                    <span className="rt-time-round">R{i + 1}</span>
-                    <span className="rt-time-value" style={{ color: g.color }}>{time}ms</span>
-                    <span style={{ fontSize: '14px' }}>{g.emoji}</span>
+                  <div className="rt-fin-row" key={`fr-${i}`}>
+                    <span className="rt-fin-rnd">R{i + 1}</span>
+                    <span className="rt-fin-ms" style={{ color: g.color }}>{t}ms</span>
+                    <span className="rt-fin-stars">{'★'.repeat(g.stars)}</span>
                   </div>
                 )
               })}
             </div>
 
-            <div className="rt-avg-block">
-              <p className="rt-avg-label">AVG</p>
-              <p className="rt-avg-value">{avgReactionMs}ms</p>
+            {times.length > 0 && (
+              <div className="rt-fin-avg">
+                <span className="rt-fin-avg-label">AVG</span>
+                <span className="rt-fin-avg-val">{avgMs}ms</span>
+              </div>
+            )}
+
+            <div className="rt-fin-score-block">
+              <p className="rt-fin-score">{finalScore.toLocaleString()}</p>
+              {bestScore > 0 && <p className="rt-fin-best">BEST {bestScore.toLocaleString()}</p>}
             </div>
 
-            <div className="rt-score-block">
-              <p className="rt-score-value">{finalScore.toLocaleString()}</p>
-              {bestScore > 0 && (
-                <p className="rt-score-best">BEST {bestScore.toLocaleString()}</p>
-              )}
-            </div>
-
-            <div className="rt-final-actions">
-              <button className="rt-btn-primary" type="button" onClick={handleFinish}>Complete</button>
-              <button className="rt-btn-secondary" type="button" onClick={onExit}>Exit</button>
+            <div className="rt-fin-btns">
+              <button className="rt-btn-go" type="button" onClick={handleFinish}>Complete</button>
+              <button className="rt-btn-exit" type="button" onClick={onExit}>Exit</button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Exit button */}
+      {/* Bottom exit */}
       {phase !== 'finished' && (
-        <div className="rt-bottom-actions">
+        <div className="rt-bot">
           <button className="text-button" type="button" onClick={onExit}>Exit</button>
         </div>
       )}
@@ -721,161 +689,242 @@ function ReactionTestGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   )
 }
 
+// ─── CSS: Pixel Art / Dot Game Style ─────────────────────────
 const RT_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
   .rt-panel {
     position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: #f5f4ef;
+    background: #0f0f1a;
     user-select: none;
     -webkit-user-select: none;
     touch-action: manipulation;
+    font-family: 'Press Start 2P', monospace;
+    image-rendering: pixelated;
   }
 
-  .rt-header {
+  .rt-hdr {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    padding: 10px 14px 4px;
+    padding: 10px 12px 4px;
+    background: #16162a;
+    border-bottom: 3px solid #2a2a4a;
   }
 
-  .rt-round-indicator {
-    font-size: clamp(16px, 4.5vw, 20px);
-    font-weight: 900;
-    color: #1f2937;
-    margin: 0;
-  }
+  .rt-hdr-left { display: flex; flex-direction: column; gap: 3px; }
+  .rt-hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 
-  .rt-lightning-badge {
-    font-size: 12px;
-    font-weight: 900;
-    color: #fbbf24;
-    margin: 2px 0 0;
-    letter-spacing: 2px;
-    animation: rt-pulse 0.4s ease-in-out infinite alternate;
-    text-shadow: 0 0 8px rgba(251,191,36,0.5);
-  }
-
-  .rt-best {
-    font-size: 11px;
+  .rt-round-txt {
+    font-size: clamp(11px, 3vw, 14px);
     color: #9ca3af;
     margin: 0;
   }
 
-  .rt-streak {
-    font-size: 12px;
-    font-weight: 800;
-    color: #f59e0b;
-    margin: 2px 0 0;
-    animation: rt-bounce-in 0.3s ease-out;
+  .rt-badge {
+    font-size: 8px;
+    padding: 2px 6px;
+    border: 2px solid;
+    display: inline-block;
   }
 
-  .rt-progress {
+  .rt-badge-lightning {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    animation: rt-blink 0.4s step-start infinite;
+    text-shadow: 0 0 6px #fbbf24;
+  }
+
+  .rt-lives {
     display: flex;
     gap: 4px;
-    padding: 4px 14px;
-    flex-wrap: wrap;
   }
 
-  .rt-pip {
-    flex: 1;
-    min-width: 0;
-    padding: 3px 2px;
-    border-radius: 6px;
-    text-align: center;
+  .rt-heart {
+    font-size: clamp(16px, 4.5vw, 22px);
+    line-height: 1;
+  }
+
+  .rt-heart-alive {
+    color: #ef4444;
+    text-shadow: 0 0 8px rgba(239,68,68,0.6);
+    animation: rt-heart-beat 0.8s ease-in-out infinite;
+  }
+
+  .rt-heart-dead {
+    color: #374151;
+  }
+
+  .rt-score-hdr {
+    font-size: clamp(12px, 3.5vw, 16px);
+    color: #fbbf24;
+    margin: 0;
+    text-shadow: 0 0 6px rgba(251,191,36,0.4);
+  }
+
+  .rt-prog-bar {
+    display: flex;
+    gap: 2px;
+    padding: 4px 12px;
+    height: 8px;
+  }
+
+  .rt-prog-seg {
+    height: 100%;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .rt-prog-empty {
+    background: #1a1a2e !important;
+    border-color: #2a2a4a;
+  }
+
+  .rt-streak-banner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 2px;
+    background: linear-gradient(90deg, transparent, rgba(245,158,11,0.15), transparent);
+  }
+
+  .rt-streak-txt {
     font-size: 10px;
-    font-weight: 700;
-    white-space: nowrap;
+    color: #f59e0b;
+    animation: rt-blink 0.3s step-start infinite;
   }
 
-  .rt-pip-empty {
-    background: #e8e5dc;
-    color: #9ca3af;
+  .rt-streak-mult {
+    font-size: 10px;
+    color: #fbbf24;
+    text-shadow: 0 0 4px #fbbf24;
   }
 
-  .rt-tap-zone {
+  .rt-zone {
     position: relative;
     flex: 1;
-    margin: 6px 14px 0;
-    border-radius: 20px;
+    margin: 4px 8px 0;
+    border: 4px solid rgba(255,255,255,0.1);
     cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    border: 3px solid rgba(0,0,0,0.06);
-    transition: background 0.3s, border-color 0.3s;
+    transition: background 0.2s step-end, border-color 0.15s;
+    image-rendering: pixelated;
   }
 
-  .rt-tap-go {
-    border-color: rgba(34,197,94,0.6);
-    animation: rt-go-pulse 0.3s ease-in-out infinite alternate;
+  .rt-zone-go {
+    border-color: #22c55e !important;
+    box-shadow: inset 0 0 40px rgba(34,197,94,0.2), 0 0 20px rgba(34,197,94,0.3);
   }
 
-  .rt-tap-ready {
-    border-color: rgba(220,38,38,0.3);
+  .rt-zone-fakeout {
+    border-color: #86efac !important;
   }
 
-  .rt-tap-early {
-    border-color: rgba(249,115,22,0.5);
-    animation: rt-shake 0.15s ease-in-out 3;
+  /* CRT Scanlines */
+  .rt-scanlines {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 20;
   }
 
-  .rt-tap-lightning {
-    box-shadow: inset 0 0 30px rgba(251,191,36,0.1), 0 0 15px rgba(251,191,36,0.15);
+  .rt-flash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 18;
   }
 
-  .rt-character-area {
+  .rt-pixel-particle {
+    position: absolute;
+    pointer-events: none;
+    z-index: 15;
+    image-rendering: pixelated;
+  }
+
+  .rt-float {
+    position: absolute;
+    pointer-events: none;
+    z-index: 22;
+    white-space: nowrap;
+    text-shadow: 2px 2px 0 #000, -1px -1px 0 #000;
+    font-family: 'Press Start 2P', monospace;
+  }
+
+  .rt-play {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     z-index: 5;
   }
 
-  .rt-character {
-    width: clamp(200px, 55vw, 280px);
-    height: clamp(200px, 55vw, 280px);
+  .rt-char {
+    width: clamp(180px, 50vw, 260px);
+    height: clamp(180px, 50vw, 260px);
     pointer-events: none;
-    filter: drop-shadow(0 6px 20px rgba(0,0,0,0.2));
+    image-rendering: pixelated;
+    filter: drop-shadow(0 0 12px rgba(255,255,255,0.15));
   }
 
-  .rt-phase-label {
-    font-size: clamp(32px, 9vw, 44px);
-    font-weight: 900;
+  .rt-phase-txt {
+    font-size: clamp(20px, 6vw, 30px);
     margin: 0;
-    text-shadow: 0 3px 12px rgba(0,0,0,0.3);
+    text-shadow: 3px 3px 0 #000;
     letter-spacing: 2px;
-    animation: rt-bounce-in 0.2s ease-out;
+    animation: rt-pop 0.15s step-end;
   }
 
-  .rt-grade-label {
-    font-size: clamp(22px, 6vw, 28px);
-    font-weight: 900;
-    margin: 0;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    animation: rt-bounce-in 0.3s ease-out;
+  .rt-grade-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    animation: rt-pop 0.2s step-end;
   }
 
-  .rt-hint-label {
-    font-size: 14px;
-    color: rgba(255,255,255,0.6);
-    margin: 4px 0 0;
+  .rt-grade-txt {
+    font-size: clamp(16px, 4.5vw, 22px);
+    text-shadow: 2px 2px 0 #000;
+  }
+
+  .rt-grade-stars {
+    font-size: clamp(14px, 4vw, 18px);
+    color: #fbbf24;
+    text-shadow: 0 0 8px rgba(251,191,36,0.5);
+    letter-spacing: 2px;
+  }
+
+  .rt-hint {
+    font-size: 9px;
+    color: rgba(255,255,255,0.4);
+    margin: 8px 0 0;
   }
 
   .rt-go-ring {
     position: absolute;
-    width: 120px;
-    height: 120px;
-    border: 4px solid rgba(255,255,255,0.5);
-    border-radius: 50%;
-    animation: rt-ring-expand 0.6s ease-out infinite;
+    width: 100px;
+    height: 100px;
+    border: 3px solid rgba(34,197,94,0.5);
+    animation: rt-ring 0.5s step-start infinite;
     pointer-events: none;
   }
 
-  .rt-countdown-container {
+  .rt-cd {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -883,42 +932,23 @@ const RT_CSS = `
     z-index: 5;
   }
 
-  .rt-countdown-num {
-    font-size: clamp(80px, 25vw, 120px);
-    font-weight: 900;
+  .rt-cd-num {
+    font-size: clamp(60px, 20vw, 100px);
     color: #fff;
     margin: 0;
-    text-shadow: 0 4px 20px rgba(0,0,0,0.4);
-    animation: rt-countdown-pop 0.6s ease-out;
+    text-shadow: 4px 4px 0 #000, 0 0 20px rgba(255,255,255,0.3);
+    animation: rt-cd-pop 0.5s step-end;
   }
 
-  .rt-countdown-label {
-    font-size: clamp(18px, 5vw, 24px);
-    font-weight: 700;
-    color: rgba(255,255,255,0.7);
+  .rt-cd-label {
+    font-size: clamp(12px, 3.5vw, 16px);
+    color: rgba(255,255,255,0.5);
     margin: 0;
     letter-spacing: 4px;
   }
 
-  .rt-ripple {
-    position: absolute;
-    pointer-events: none;
-    border-radius: 50%;
-    border: 3px solid rgba(255,255,255,0.6);
-    animation: rt-ripple-expand 0.5s ease-out forwards;
-    z-index: 8;
-  }
-
-  .rt-floating-text {
-    position: absolute;
-    pointer-events: none;
-    font-weight: 900;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    z-index: 12;
-    white-space: nowrap;
-  }
-
-  .rt-finished-overlay {
+  /* Finished overlay */
+  .rt-finish {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     display: flex;
@@ -926,170 +956,155 @@ const RT_CSS = `
     align-items: center;
     justify-content: center;
     z-index: 30;
-    background: rgba(0,0,0,0.7);
-    border-radius: 20px;
-    animation: rt-fade-in 0.3s ease-out;
+    background: rgba(0,0,0,0.85);
+    animation: rt-fade 0.3s step-end;
     gap: 10px;
-    padding: 20px;
+    padding: 16px;
   }
 
-  .rt-new-record {
-    font-size: clamp(22px, 6vw, 28px);
-    font-weight: 900;
+  .rt-new-rec {
+    font-size: clamp(14px, 4vw, 18px);
     color: #fbbf24;
     margin: 0;
-    text-shadow: 0 0 20px rgba(251,191,36,0.8), 0 0 40px rgba(251,191,36,0.4);
-    animation: rt-countdown-pop 0.6s ease-out, rt-pulse 0.4s 0.6s ease-in-out infinite alternate;
-    letter-spacing: 3px;
+    text-shadow: 0 0 12px #fbbf24, 2px 2px 0 #000;
+    animation: rt-blink 0.3s step-start infinite;
+    letter-spacing: 2px;
   }
 
-  .rt-finished-label {
-    font-size: 16px;
-    color: rgba(255,255,255,0.6);
+  .rt-fin-title {
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
     margin: 0;
     letter-spacing: 4px;
   }
 
-  .rt-times-grid {
+  .rt-fin-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 4px 16px;
+    gap: 3px 14px;
     width: 100%;
-    max-width: 260px;
+    max-width: 280px;
   }
 
-  .rt-time-row {
+  .rt-fin-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
 
-  .rt-time-round {
-    font-size: 12px;
-    color: rgba(255,255,255,0.5);
-    font-weight: 700;
-    min-width: 24px;
+  .rt-fin-rnd {
+    font-size: 8px;
+    color: rgba(255,255,255,0.4);
+    min-width: 22px;
   }
 
-  .rt-time-value {
-    font-size: 14px;
-    font-weight: 800;
+  .rt-fin-ms {
+    font-size: 10px;
   }
 
-  .rt-avg-block {
+  .rt-fin-stars {
+    font-size: 8px;
+    color: #fbbf24;
+  }
+
+  .rt-fin-avg {
     display: flex;
     align-items: baseline;
     gap: 8px;
   }
 
-  .rt-avg-label {
-    font-size: 14px;
-    color: rgba(255,255,255,0.5);
-    margin: 0;
-    font-weight: 700;
+  .rt-fin-avg-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
   }
 
-  .rt-avg-value {
-    font-size: clamp(28px, 8vw, 36px);
-    font-weight: 900;
+  .rt-fin-avg-val {
+    font-size: clamp(20px, 6vw, 28px);
     color: #fff;
-    margin: 0;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    text-shadow: 2px 2px 0 #000;
   }
 
-  .rt-score-block {
-    text-align: center;
-  }
+  .rt-fin-score-block { text-align: center; }
 
-  .rt-score-value {
-    font-size: clamp(36px, 10vw, 48px);
-    font-weight: 900;
+  .rt-fin-score {
+    font-size: clamp(28px, 8vw, 40px);
     color: #fbbf24;
     margin: 0;
-    text-shadow: 0 0 20px rgba(251,191,36,0.5), 0 4px 12px rgba(0,0,0,0.3);
-    animation: rt-countdown-pop 0.5s ease-out;
+    text-shadow: 0 0 16px rgba(251,191,36,0.5), 3px 3px 0 #000;
+    animation: rt-cd-pop 0.5s step-end;
   }
 
-  .rt-score-best {
-    font-size: 12px;
-    color: rgba(255,255,255,0.5);
+  .rt-fin-best {
+    font-size: 9px;
+    color: rgba(255,255,255,0.4);
     margin: 2px 0 0;
   }
 
-  .rt-final-actions {
+  .rt-fin-btns {
     display: flex;
-    gap: 12px;
+    gap: 10px;
     margin-top: 8px;
   }
 
-  .rt-btn-primary {
-    padding: 12px 32px;
-    border-radius: 12px;
-    border: none;
-    background: linear-gradient(135deg, #16a34a, #22c55e);
-    color: #fff;
-    font-size: 16px;
-    font-weight: 800;
+  .rt-btn-go {
+    padding: 10px 24px;
+    border: 3px solid #22c55e;
+    background: #0a5c2a;
+    color: #4ade80;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(22,163,74,0.4);
   }
 
-  .rt-btn-secondary {
-    padding: 12px 24px;
-    border-radius: 12px;
-    border: 2px solid rgba(255,255,255,0.3);
+  .rt-btn-go:active { background: #22c55e; color: #000; }
+
+  .rt-btn-exit {
+    padding: 10px 16px;
+    border: 3px solid #4b5563;
     background: transparent;
-    color: rgba(255,255,255,0.7);
-    font-size: 14px;
-    font-weight: 700;
+    color: #9ca3af;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
     cursor: pointer;
   }
 
-  .rt-bottom-actions {
+  .rt-bot {
     display: flex;
     justify-content: center;
-    padding: 6px 14px 10px;
+    padding: 4px 12px 8px;
+    background: #16162a;
+    border-top: 3px solid #2a2a4a;
   }
 
-  @keyframes rt-pulse {
-    from { transform: scale(1); }
-    to { transform: scale(1.06); }
+  /* Keyframes */
+  @keyframes rt-blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0.3; }
   }
 
-  @keyframes rt-bounce-in {
-    0% { transform: scale(0.5) translateY(8px); opacity: 0; }
-    60% { transform: scale(1.15) translateY(-3px); opacity: 1; }
-    100% { transform: scale(1) translateY(0); opacity: 1; }
+  @keyframes rt-heart-beat {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
   }
 
-  @keyframes rt-go-pulse {
-    from { border-color: rgba(34,197,94,0.4); box-shadow: 0 0 20px rgba(34,197,94,0.2); }
-    to { border-color: rgba(34,197,94,0.9); box-shadow: 0 0 40px rgba(34,197,94,0.4); }
+  @keyframes rt-pop {
+    0% { transform: scale(1.4); }
+    100% { transform: scale(1); }
   }
 
-  @keyframes rt-shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-6px); }
-    75% { transform: translateX(6px); }
-  }
-
-  @keyframes rt-ring-expand {
-    0% { transform: scale(0.5); opacity: 0.8; }
-    100% { transform: scale(3); opacity: 0; }
-  }
-
-  @keyframes rt-countdown-pop {
-    0% { transform: scale(2.5); opacity: 0; }
-    40% { transform: scale(0.9); opacity: 1; }
+  @keyframes rt-cd-pop {
+    0% { transform: scale(2); opacity: 0; }
+    30% { transform: scale(0.9); opacity: 1; }
     100% { transform: scale(1); opacity: 1; }
   }
 
-  @keyframes rt-ripple-expand {
-    0% { width: 0; height: 0; opacity: 0.8; transform: translate(-50%, -50%); }
-    100% { width: 120px; height: 120px; opacity: 0; transform: translate(-50%, -50%); }
+  @keyframes rt-ring {
+    0% { transform: scale(0.5); opacity: 0.6; }
+    50% { transform: scale(2); opacity: 0.2; }
+    100% { transform: scale(3); opacity: 0; }
   }
 
-  @keyframes rt-fade-in {
+  @keyframes rt-fade {
     from { opacity: 0; }
     to { opacity: 1; }
   }
@@ -1099,7 +1114,7 @@ export const reactionTestModule: MiniGameModule = {
   manifest: {
     id: 'reaction-test',
     title: 'Reaction Test',
-    description: 'Tap when green! 8 rounds, lightning mode after round 5!',
+    description: 'Tap when green! 10 rounds with fake-outs, life system & speed ramp!',
     unlockCost: 20,
     baseReward: 10,
     scoreRewardMultiplier: 1.0,

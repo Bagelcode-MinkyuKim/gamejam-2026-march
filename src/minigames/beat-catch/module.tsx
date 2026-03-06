@@ -6,517 +6,469 @@ import goodSfx from '../../../assets/sounds/beat-catch-good.mp3'
 import missSfx from '../../../assets/sounds/beat-catch-miss.mp3'
 import comboSfx from '../../../assets/sounds/beat-catch-combo.mp3'
 import feverSfx from '../../../assets/sounds/beat-catch-fever.mp3'
-import reverseSfx from '../../../assets/sounds/beat-catch-reverse.mp3'
 import goldenSfx from '../../../assets/sounds/beat-catch-golden.mp3'
+import levelupSfx from '../../../assets/sounds/beat-catch-levelup.mp3'
+import doubleSfx from '../../../assets/sounds/beat-catch-double.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
-// ─── Constants ──────────────────────────────────────────────────────
-const ROUND_DURATION_MS = 35000
-const DOT_RADIUS = 14
-const TARGET_ANGLE_DEG = 270
-const TARGET_HALF_ARC_DEG = 20
-const PERFECT_HALF_ARC_DEG = 7
-const GOOD_HALF_ARC_DEG = 20
-const INITIAL_SPEED_DEG_PER_SEC = 110
-const SPEED_INCREMENT_DEG = 18
-const CATCHES_PER_SPEED_UP = 5
-const MAX_SPEED_DEG_PER_SEC = 500
-const PERFECT_SCORE = 5
-const GOOD_SCORE = 2
-const LOW_TIME_THRESHOLD_MS = 5000
-const FEVER_COMBO_THRESHOLD = 8
-const FEVER_DURATION_MS = 6000
+// ─── Game Constants ─────────────────────────────────────────────────
+const ROUND_DURATION_MS = 40000
+const LANE_COUNT = 3
+const HIT_LINE_Y = 0.82 // fraction of game area height
+const PERFECT_ZONE = 0.03
+void 0.07 // GOOD_ZONE - reserved
+const MISS_ZONE = 0.12
+
+// Note spawning
+const INITIAL_SPAWN_INTERVAL_MS = 800
+const MIN_SPAWN_INTERVAL_MS = 350
+const SPAWN_SPEEDUP_PER_SEC = 12
+const INITIAL_FALL_SPEED = 0.35 // fraction of height per second
+const MAX_FALL_SPEED = 0.75
+const SPEED_INCREASE_PER_SEC = 0.008
+
+// Scoring
+const PERFECT_SCORE = 10
+const GOOD_SCORE = 4
+const LOW_TIME_MS = 5000
+const FEVER_COMBO = 10
+const FEVER_DURATION_MS = 5000
 const FEVER_MULTIPLIER = 3
-const DIRECTION_CHANGE_INTERVAL = 7
-const GOLDEN_CATCH_CHANCE = 0.12
-const GOLDEN_CATCH_MULTIPLIER = 3
-const PULSE_DURATION_MS = 300
-const SHAKE_DURATION_MS = 300
-const VIEWBOX_SIZE = 300
-const VIEWBOX_CENTER = VIEWBOX_SIZE / 2
-const TRACK_RADIUS = 115
+const GOLDEN_CHANCE = 0.08
+const GOLDEN_MULTIPLIER = 3
+const DOUBLE_CHANCE = 0.06
+const HOLD_CHANCE = 0.05
+void 2 // HOLD_BONUS_PER_TICK - reserved
 
-// Multi-target feature
-const MULTI_TARGET_THRESHOLD = 15 // catches before multi-target appears
-const MULTI_TARGET_DURATION_MS = 8000
-const MULTI_TARGET_BONUS = 2
+// Level up
+const CATCHES_PER_LEVEL = 8
 
-// Speed Rush feature
-const SPEED_RUSH_INTERVAL_MS = 12000
-const SPEED_RUSH_DURATION_MS = 3000
-const SPEED_RUSH_MULTIPLIER = 1.8
+type NoteType = 'normal' | 'golden' | 'double' | 'hold'
+type JudgeKind = 'perfect' | 'good' | 'miss'
 
-// Shrink target feature
-const SHRINK_START_CATCHES = 20
-const MIN_TARGET_ARC_DEG = 10
+const LANE_COLORS = ['#f43f5e', '#8b5cf6', '#3b82f6'] as const
+const LANE_LABELS = ['LEFT', 'MID', 'RIGHT'] as const
+const LANE_KEYS = [['KeyA', 'ArrowLeft', 'Digit1'], ['KeyS', 'ArrowDown', 'Space', 'Digit2'], ['KeyD', 'ArrowRight', 'Digit3']] as const
 
-type JudgementKind = 'perfect' | 'good' | 'miss'
-
-interface MultiTarget {
-  angleDeg: number
-  collected: boolean
+interface Note {
+  id: number
+  lane: number
+  y: number // 0 = top, 1 = bottom
+  type: NoteType
+  holdDuration?: number
+  holdProgress?: number
+  hit: boolean
+  missed: boolean
 }
 
-function normalizeAngle(angleDeg: number): number {
-  let normalized = angleDeg % 360
-  if (normalized < 0) normalized += 360
-  return normalized
+interface HitEffect {
+  id: number
+  lane: number
+  kind: JudgeKind
+  createdAt: number
 }
 
-function angleDifference(a: number, b: number): number {
-  let diff = normalizeAngle(a) - normalizeAngle(b)
-  if (diff > 180) diff -= 360
-  if (diff < -180) diff += 360
-  return Math.abs(diff)
+interface LaneFlash {
+  lane: number
+  createdAt: number
 }
 
-function judgeAngle(currentAngleDeg: number, targetArc: number, perfectArc: number): JudgementKind {
-  const diff = angleDifference(currentAngleDeg, TARGET_ANGLE_DEG)
-  if (diff <= perfectArc) return 'perfect'
-  if (diff <= targetArc) return 'good'
-  return 'miss'
-}
-
-function toSpeedLevel(catchCount: number): number {
-  return Math.floor(catchCount / CATCHES_PER_SPEED_UP)
-}
-
-function toCurrentSpeed(catchCount: number): number {
-  const level = toSpeedLevel(catchCount)
-  return Math.min(MAX_SPEED_DEG_PER_SEC, INITIAL_SPEED_DEG_PER_SEC + level * SPEED_INCREMENT_DEG)
-}
-
-function angleToSvgCoords(angleDeg: number, radius: number): { x: number; y: number } {
-  const rad = (angleDeg * Math.PI) / 180
-  return {
-    x: VIEWBOX_CENTER + Math.cos(rad) * radius,
-    y: VIEWBOX_CENTER + Math.sin(rad) * radius,
-  }
-}
-
-function describeArc(startDeg: number, endDeg: number, radius: number): string {
-  const start = angleToSvgCoords(startDeg, radius)
-  const end = angleToSvgCoords(endDeg, radius)
-  const sweep = endDeg - startDeg
-  const largeArc = Math.abs(sweep) > 180 ? 1 : 0
-  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`
-}
-
-// Get dynamic target arc that shrinks as catches increase
-function getDynamicTargetArc(catchCount: number): number {
-  if (catchCount < SHRINK_START_CATCHES) return TARGET_HALF_ARC_DEG
-  const shrinkSteps = catchCount - SHRINK_START_CATCHES
-  return Math.max(MIN_TARGET_ARC_DEG, TARGET_HALF_ARC_DEG - shrinkSteps * 0.3)
-}
-
-function getDynamicPerfectArc(catchCount: number): number {
-  if (catchCount < SHRINK_START_CATCHES) return PERFECT_HALF_ARC_DEG
-  const shrinkSteps = catchCount - SHRINK_START_CATCHES
-  return Math.max(3, PERFECT_HALF_ARC_DEG - shrinkSteps * 0.15)
-}
+let noteIdCounter = 0
 
 function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [combo, setCombo] = useState(0)
-  const [catchCount, setCatchCount] = useState(0)
-  const [currentAngleDeg, setCurrentAngleDeg] = useState(90)
-  const [lastJudgement, setLastJudgement] = useState<JudgementKind | null>(null)
-  const [isPulseActive, setIsPulseActive] = useState(false)
-  const [isShakeActive, setIsShakeActive] = useState(false)
+  const [, setMaxCombo] = useState(0)
+  const [notes, setNotes] = useState<Note[]>([])
+  const [hitEffects, setHitEffects] = useState<HitEffect[]>([])
+  const [laneFlashes, setLaneFlashes] = useState<LaneFlash[]>([])
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
-  const [isGoldenActive, setIsGoldenActive] = useState(false)
-  const [directionSign, setDirectionSign] = useState(1)
-  const [isSpeedRush, setIsSpeedRush] = useState(false)
-  const [multiTargets, setMultiTargets] = useState<MultiTarget[]>([])
-  const [trailAngles, setTrailAngles] = useState<number[]>([])
-  const [perfectStreak, setPerfectStreak] = useState(0)
+  const [level, setLevel] = useState(1)
+  const [, setCatchCount] = useState(0)
+  const [lastJudge, setLastJudge] = useState<JudgeKind | null>(null)
+  const [, setPerfectCount] = useState(0)
+  const [, setGoodCount] = useState(0)
+  const [, setMissCount] = useState(0)
 
   const effects = useGameEffects()
 
+  // Mutable refs for game loop
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const comboRef = useRef(0)
-  const catchCountRef = useRef(0)
-  const angleDegRef = useRef(90)
+  const maxComboRef = useRef(0)
+  const notesRef = useRef<Note[]>([])
+  const hitEffectsRef = useRef<HitEffect[]>([])
+  const laneFlashesRef = useRef<LaneFlash[]>([])
   const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const pulseTimerRef = useRef<number | null>(null)
-  const shakeTimerRef = useRef<number | null>(null)
-  const judgementTimerRef = useRef<number | null>(null)
-  const canTapRef = useRef(true)
+  const rafRef = useRef<number | null>(null)
+  const lastFrameRef = useRef<number | null>(null)
+  const spawnTimerRef = useRef(0)
   const feverRef = useRef(false)
-  const feverRemainingMsRef = useRef(0)
-  const goldenActiveRef = useRef(false)
-  const directionSignRef = useRef(1)
-  const speedRushRef = useRef(false)
-  const speedRushTimerRef = useRef(0)
-  const multiTargetsRef = useRef<MultiTarget[]>([])
-  const multiTargetTimerRef = useRef(0)
-  const trailAnglesRef = useRef<number[]>([])
-  const perfectStreakRef = useRef(0)
+  const feverMsRef = useRef(0)
+  const catchCountRef = useRef(0)
+  const levelRef = useRef(1)
+  const elapsedRef = useRef(0)
+  const perfectCountRef = useRef(0)
+  const goodCountRef = useRef(0)
+  const missCountRef = useRef(0)
+  const holdingLanesRef = useRef<Set<number>>(new Set())
+  const judgeTimerRef = useRef<number | null>(null)
+  const gameAreaRef = useRef<HTMLDivElement | null>(null)
 
   // Audio refs
-  const perfectAudioRef = useRef<HTMLAudioElement | null>(null)
-  const goodAudioRef = useRef<HTMLAudioElement | null>(null)
-  const missAudioRef = useRef<HTMLAudioElement | null>(null)
-  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
-  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
-  const reverseAudioRef = useRef<HTMLAudioElement | null>(null)
-  const goldenAudioRef = useRef<HTMLAudioElement | null>(null)
-  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
-  const clearTimeoutSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
+  const playAudio = useCallback((name: string, volume = 0.6, rate = 1) => {
+    const audio = audioRefs.current[name]
+    if (!audio) return
+    audio.currentTime = 0
+    audio.volume = Math.min(1, volume)
+    audio.playbackRate = rate
+    void audio.play().catch(() => {})
+  }, [])
+
+  const getCurrentFallSpeed = useCallback(() => {
+    const elapsed = elapsedRef.current / 1000
+    return Math.min(MAX_FALL_SPEED, INITIAL_FALL_SPEED + elapsed * SPEED_INCREASE_PER_SEC)
+  }, [])
+
+  const getCurrentSpawnInterval = useCallback(() => {
+    const elapsed = elapsedRef.current / 1000
+    return Math.max(MIN_SPAWN_INTERVAL_MS, INITIAL_SPAWN_INTERVAL_MS - elapsed * SPAWN_SPEEDUP_PER_SEC)
+  }, [])
+
+  const spawnNote = useCallback(() => {
+    const elapsed = elapsedRef.current / 1000
+    const lane = Math.floor(Math.random() * LANE_COUNT)
+
+    let type: NoteType = 'normal'
+    const roll = Math.random()
+    if (elapsed > 15 && roll < HOLD_CHANCE) {
+      type = 'hold'
+    } else if (elapsed > 8 && roll < HOLD_CHANCE + DOUBLE_CHANCE) {
+      type = 'double'
+    } else if (roll < HOLD_CHANCE + DOUBLE_CHANCE + GOLDEN_CHANCE) {
+      type = 'golden'
     }
-  }
 
-  const playAudio = useCallback(
-    (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
-      const audio = audioRef.current
-      if (audio === null) return
-      audio.currentTime = 0
-      audio.volume = Math.min(1, volume)
-      audio.playbackRate = playbackRate
-      void audio.play().catch(() => {})
-    },
-    [],
-  )
+    noteIdCounter += 1
+    const note: Note = {
+      id: noteIdCounter,
+      lane,
+      y: -0.05,
+      type,
+      holdDuration: type === 'hold' ? 600 + Math.random() * 400 : undefined,
+      holdProgress: 0,
+      hit: false,
+      missed: false,
+    }
 
-  const finishGame = useCallback(() => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    clearTimeoutSafe(pulseTimerRef)
-    clearTimeoutSafe(shakeTimerRef)
-    clearTimeoutSafe(judgementTimerRef)
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
-    onFinish({ score: scoreRef.current, durationMs: elapsedMs })
-  }, [onFinish])
-
-  const triggerPulse = useCallback(() => {
-    setIsPulseActive(true)
-    clearTimeoutSafe(pulseTimerRef)
-    pulseTimerRef.current = window.setTimeout(() => {
-      pulseTimerRef.current = null
-      setIsPulseActive(false)
-    }, PULSE_DURATION_MS)
-  }, [])
-
-  const triggerShake = useCallback(() => {
-    setIsShakeActive(true)
-    clearTimeoutSafe(shakeTimerRef)
-    shakeTimerRef.current = window.setTimeout(() => {
-      shakeTimerRef.current = null
-      setIsShakeActive(false)
-    }, SHAKE_DURATION_MS)
-  }, [])
-
-  // Check multi-target hits
-  const checkMultiTargetHit = useCallback((currentAngle: number): number => {
-    let bonus = 0
-    const updated = multiTargetsRef.current.map((t) => {
-      if (t.collected) return t
-      const diff = angleDifference(currentAngle, t.angleDeg)
-      if (diff <= 15) {
-        bonus += MULTI_TARGET_BONUS
-        return { ...t, collected: true }
-      }
-      return t
-    })
-    multiTargetsRef.current = updated
-    setMultiTargets(updated)
-    return bonus
-  }, [])
-
-  const handleTap = useCallback(() => {
-    if (finishedRef.current || !canTapRef.current) return
-
-    canTapRef.current = false
-    clearTimeoutSafe(judgementTimerRef)
-    judgementTimerRef.current = window.setTimeout(() => {
-      judgementTimerRef.current = null
-      canTapRef.current = true
-      setLastJudgement(null)
-    }, 400)
-
-    const dynTargetArc = getDynamicTargetArc(catchCountRef.current)
-    const dynPerfectArc = getDynamicPerfectArc(catchCountRef.current)
-    const judgement = judgeAngle(angleDegRef.current, dynTargetArc, dynPerfectArc)
-    setLastJudgement(judgement)
-
-    // Multi-target bonus
-    const multiBonus = checkMultiTargetHit(angleDegRef.current)
-
-    if (judgement === 'perfect') {
-      const nextCombo = comboRef.current + 1
-      comboRef.current = nextCombo
-      setCombo(nextCombo)
-
-      perfectStreakRef.current += 1
-      setPerfectStreak(perfectStreakRef.current)
-
-      const goldenMult = goldenActiveRef.current ? GOLDEN_CATCH_MULTIPLIER : 1
-      const feverMult = feverRef.current ? FEVER_MULTIPLIER : 1
-      const rushMult = speedRushRef.current ? 2 : 1
-      const streakBonus = perfectStreakRef.current >= 5 ? Math.floor(perfectStreakRef.current / 5) : 0
-      const earned = (PERFECT_SCORE * nextCombo + streakBonus + multiBonus) * goldenMult * feverMult * rushMult
-      const nextScore = scoreRef.current + earned
-      scoreRef.current = nextScore
-      setScore(nextScore)
-
-      const nextCatchCount = catchCountRef.current + 1
-      catchCountRef.current = nextCatchCount
-      setCatchCount(nextCatchCount)
-
-      // Fever activation
-      if (nextCombo >= FEVER_COMBO_THRESHOLD && !feverRef.current) {
-        feverRef.current = true
-        feverRemainingMsRef.current = FEVER_DURATION_MS
-        setIsFever(true)
-        setFeverRemainingMs(FEVER_DURATION_MS)
-        effects.triggerFlash('rgba(250,204,21,0.5)')
-        playAudio(feverAudioRef, 0.7)
-      }
-
-      // Direction reversal
-      if (nextCatchCount % DIRECTION_CHANGE_INTERVAL === 0) {
-        directionSignRef.current *= -1
-        setDirectionSign(directionSignRef.current)
-        effects.triggerFlash('rgba(147,51,234,0.3)')
-        playAudio(reverseAudioRef, 0.5)
-      }
-
-      // Golden roll
-      if (goldenActiveRef.current) {
-        playAudio(goldenAudioRef, 0.7)
-      }
-      goldenActiveRef.current = Math.random() < GOLDEN_CATCH_CHANCE
-      setIsGoldenActive(goldenActiveRef.current)
-
-      triggerPulse()
-
-      // Sound: combo sound at milestone, otherwise perfect
-      if (nextCombo > 0 && nextCombo % 5 === 0) {
-        playAudio(comboAudioRef, 0.7, 1.0 + Math.min(nextCombo * 0.02, 0.4))
-      } else {
-        playAudio(perfectAudioRef, 0.7, 1.0 + Math.min(nextCombo * 0.03, 0.3))
-      }
-
-      effects.comboHitBurst(200, 180, nextCombo, earned, ['💥', '⚡', '🔥', '💫', '✨', '🌟', '🎯'])
-
-    } else if (judgement === 'good') {
-      const nextCombo = comboRef.current + 1
-      comboRef.current = nextCombo
-      setCombo(nextCombo)
-
-      perfectStreakRef.current = 0
-      setPerfectStreak(0)
-
-      const goldenMult = goldenActiveRef.current ? GOLDEN_CATCH_MULTIPLIER : 1
-      const feverMult = feverRef.current ? FEVER_MULTIPLIER : 1
-      const earned = (GOOD_SCORE * nextCombo + multiBonus) * goldenMult * feverMult
-      const nextScore = scoreRef.current + earned
-      scoreRef.current = nextScore
-      setScore(nextScore)
-
-      const nextCatchCount = catchCountRef.current + 1
-      catchCountRef.current = nextCatchCount
-      setCatchCount(nextCatchCount)
-
-      goldenActiveRef.current = Math.random() < GOLDEN_CATCH_CHANCE
-      setIsGoldenActive(goldenActiveRef.current)
-
-      playAudio(goodAudioRef, 0.5, 1.0 + Math.min(nextCombo * 0.02, 0.2))
-      effects.spawnParticles(4, 200, 180)
-      effects.showScorePopup(earned, 200, 160)
-      effects.triggerFlash('rgba(34,197,94,0.3)')
+    if (type === 'double') {
+      const lane2 = (lane + 1 + Math.floor(Math.random() * 2)) % LANE_COUNT
+      noteIdCounter += 1
+      const note2: Note = { ...note, id: noteIdCounter, lane: lane2 }
+      notesRef.current = [...notesRef.current, note, note2]
     } else {
+      notesRef.current = [...notesRef.current, note]
+    }
+  }, [])
+
+  const addHitEffect = useCallback((lane: number, kind: JudgeKind) => {
+    noteIdCounter += 1
+    const eff: HitEffect = { id: noteIdCounter, lane, kind, createdAt: performance.now() }
+    hitEffectsRef.current = [...hitEffectsRef.current, eff].slice(-12)
+    setHitEffects([...hitEffectsRef.current])
+  }, [])
+
+  const addLaneFlash = useCallback((lane: number) => {
+    const flash: LaneFlash = { lane, createdAt: performance.now() }
+    laneFlashesRef.current = [...laneFlashesRef.current, flash].slice(-6)
+    setLaneFlashes([...laneFlashesRef.current])
+  }, [])
+
+  const handleLaneHit = useCallback((lane: number) => {
+    if (finishedRef.current) return
+
+    const candidates = notesRef.current
+      .filter((n) => n.lane === lane && !n.hit && !n.missed)
+      .map((n) => ({ note: n, dist: Math.abs(n.y - HIT_LINE_Y) }))
+      .filter((c) => c.dist <= MISS_ZONE)
+      .sort((a, b) => a.dist - b.dist)
+
+    if (candidates.length === 0) {
       comboRef.current = 0
       setCombo(0)
-      perfectStreakRef.current = 0
-      setPerfectStreak(0)
+      missCountRef.current += 1
+      setMissCount(missCountRef.current)
+      setLastJudge('miss')
+      addHitEffect(lane, 'miss')
+      playAudio('miss', 0.4, 0.8)
+      effects.triggerShake(4)
+      effects.triggerFlash('rgba(239,68,68,0.3)')
 
       if (feverRef.current) {
         feverRef.current = false
-        feverRemainingMsRef.current = 0
+        feverMsRef.current = 0
         setIsFever(false)
         setFeverRemainingMs(0)
       }
-      goldenActiveRef.current = false
-      setIsGoldenActive(false)
 
-      triggerShake()
-      playAudio(missAudioRef, 0.5, 0.8)
-      effects.triggerShake(6)
-      effects.triggerFlash('rgba(239,68,68,0.4)')
+      if (judgeTimerRef.current) clearTimeout(judgeTimerRef.current)
+      judgeTimerRef.current = window.setTimeout(() => { setLastJudge(null) }, 400)
+      return
     }
-  }, [playAudio, triggerPulse, triggerShake, checkMultiTargetHit])
+
+    const { note, dist } = candidates[0]
+
+    if (note.type === 'hold' && !holdingLanesRef.current.has(lane)) {
+      holdingLanesRef.current.add(lane)
+    }
+
+    note.hit = true
+    const kind: JudgeKind = dist <= PERFECT_ZONE ? 'perfect' : 'good'
+
+    const nextCombo = comboRef.current + 1
+    comboRef.current = nextCombo
+    setCombo(nextCombo)
+    if (nextCombo > maxComboRef.current) {
+      maxComboRef.current = nextCombo
+      setMaxCombo(nextCombo)
+    }
+
+    const baseScore = kind === 'perfect' ? PERFECT_SCORE : GOOD_SCORE
+    const feverMult = feverRef.current ? FEVER_MULTIPLIER : 1
+    const goldenMult = note.type === 'golden' ? GOLDEN_MULTIPLIER : 1
+    const earned = baseScore * nextCombo * feverMult * goldenMult
+    scoreRef.current += earned
+    setScore(scoreRef.current)
+
+    catchCountRef.current += 1
+    setCatchCount(catchCountRef.current)
+
+    if (kind === 'perfect') {
+      perfectCountRef.current += 1
+      setPerfectCount(perfectCountRef.current)
+    } else {
+      goodCountRef.current += 1
+      setGoodCount(goodCountRef.current)
+    }
+
+    // Level up
+    const newLevel = Math.floor(catchCountRef.current / CATCHES_PER_LEVEL) + 1
+    if (newLevel > levelRef.current) {
+      levelRef.current = newLevel
+      setLevel(newLevel)
+      playAudio('levelup', 0.6)
+      effects.triggerFlash('rgba(59,130,246,0.4)')
+    }
+
+    // Fever
+    if (nextCombo >= FEVER_COMBO && !feverRef.current) {
+      feverRef.current = true
+      feverMsRef.current = FEVER_DURATION_MS
+      setIsFever(true)
+      setFeverRemainingMs(FEVER_DURATION_MS)
+      playAudio('fever', 0.7)
+      effects.triggerFlash('rgba(250,204,21,0.5)')
+    }
+
+    // Sound
+    if (note.type === 'golden') {
+      playAudio('golden', 0.7)
+    } else if (note.type === 'double') {
+      playAudio('double', 0.6)
+    } else if (nextCombo > 0 && nextCombo % 5 === 0) {
+      playAudio('combo', 0.7, 1.0 + Math.min(nextCombo * 0.02, 0.4))
+    } else {
+      playAudio(kind === 'perfect' ? 'perfect' : 'good', 0.6, 1.0 + Math.min(nextCombo * 0.02, 0.3))
+    }
+
+    addHitEffect(lane, kind)
+    addLaneFlash(lane)
+    setLastJudge(kind)
+
+    const areaRect = gameAreaRef.current?.getBoundingClientRect()
+    if (areaRect) {
+      const laneWidth = areaRect.width / LANE_COUNT
+      const px = lane * laneWidth + laneWidth / 2
+      const py = areaRect.height * HIT_LINE_Y
+      if (kind === 'perfect') {
+        effects.comboHitBurst(px, py, nextCombo, earned, ['💥', '⚡', '✨', '🌟', '🎯'])
+      } else {
+        effects.spawnParticles(3, px, py)
+        effects.showScorePopup(earned, px, py - 20)
+        effects.triggerFlash('rgba(34,197,94,0.25)')
+      }
+    }
+
+    if (judgeTimerRef.current) clearTimeout(judgeTimerRef.current)
+    judgeTimerRef.current = window.setTimeout(() => { setLastJudge(null) }, 350)
+
+    setNotes([...notesRef.current])
+  }, [playAudio, addHitEffect, addLaneFlash, effects])
+
+  const handleLaneRelease = useCallback((lane: number) => {
+    holdingLanesRef.current.delete(lane)
+  }, [])
 
   // Audio setup
   useEffect(() => {
-    const audios = [
-      { ref: perfectAudioRef, src: perfectSfx },
-      { ref: goodAudioRef, src: goodSfx },
-      { ref: missAudioRef, src: missSfx },
-      { ref: comboAudioRef, src: comboSfx },
-      { ref: feverAudioRef, src: feverSfx },
-      { ref: reverseAudioRef, src: reverseSfx },
-      { ref: goldenAudioRef, src: goldenSfx },
-      { ref: gameOverAudioRef, src: gameOverHitSfx },
-    ]
-    audios.forEach(({ ref, src }) => {
+    const sources: Record<string, string> = {
+      perfect: perfectSfx,
+      good: goodSfx,
+      miss: missSfx,
+      combo: comboSfx,
+      fever: feverSfx,
+      golden: goldenSfx,
+      levelup: levelupSfx,
+      double: doubleSfx,
+      gameover: gameOverHitSfx,
+    }
+    Object.entries(sources).forEach(([name, src]) => {
       const a = new Audio(src)
       a.preload = 'auto'
-      ref.current = a
+      audioRefs.current[name] = a
     })
     return () => {
-      clearTimeoutSafe(pulseTimerRef)
-      clearTimeoutSafe(shakeTimerRef)
-      clearTimeoutSafe(judgementTimerRef)
-      audios.forEach(({ ref }) => { ref.current = null })
+      Object.keys(sources).forEach((name) => { audioRefs.current[name] = null })
+      if (judgeTimerRef.current) clearTimeout(judgeTimerRef.current)
       effects.cleanup()
     }
   }, [])
 
   // Key handler
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') { event.preventDefault(); onExit(); return }
-      if (event.code === 'Space' || event.code === 'Enter') { event.preventDefault(); handleTap() }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      for (let lane = 0; lane < LANE_COUNT; lane++) {
+        if ((LANE_KEYS[lane] as readonly string[]).includes(e.code)) {
+          e.preventDefault()
+          handleLaneHit(lane)
+          return
+        }
+      }
+    }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      for (let lane = 0; lane < LANE_COUNT; lane++) {
+        if ((LANE_KEYS[lane] as readonly string[]).includes(e.code)) {
+          handleLaneRelease(lane)
+          return
+        }
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => { window.removeEventListener('keydown', handleKeyDown) }
-  }, [handleTap, onExit])
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [handleLaneHit, handleLaneRelease, onExit])
 
   // Game loop
   useEffect(() => {
-    lastFrameAtRef.current = null
-    let elapsedSinceStart = 0
+    lastFrameRef.current = null
 
     const step = (now: number) => {
-      if (finishedRef.current) { animationFrameRef.current = null; return }
-      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-      elapsedSinceStart += deltaMs
+      if (finishedRef.current) { rafRef.current = null; return }
+      if (lastFrameRef.current === null) lastFrameRef.current = now
+      const deltaMs = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameRef.current = now
+      elapsedRef.current += deltaMs
 
       // Timer
       remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
       setRemainingMs(remainingMsRef.current)
       if (remainingMsRef.current <= 0) {
-        playAudio(gameOverAudioRef, 0.64, 0.95)
-        finishGame()
-        animationFrameRef.current = null
+        playAudio('gameover', 0.6)
+        finishedRef.current = true
+        const elapsed = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
+        onFinish({ score: scoreRef.current, durationMs: elapsed })
+        rafRef.current = null
         return
       }
 
       // Fever countdown
       if (feverRef.current) {
-        feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
-        setFeverRemainingMs(feverRemainingMsRef.current)
-        if (feverRemainingMsRef.current <= 0) {
+        feverMsRef.current = Math.max(0, feverMsRef.current - deltaMs)
+        setFeverRemainingMs(feverMsRef.current)
+        if (feverMsRef.current <= 0) {
           feverRef.current = false
           setIsFever(false)
         }
       }
 
-      // Speed Rush timing
-      speedRushTimerRef.current += deltaMs
-      if (!speedRushRef.current && speedRushTimerRef.current >= SPEED_RUSH_INTERVAL_MS) {
-        speedRushRef.current = true
-        setIsSpeedRush(true)
-        speedRushTimerRef.current = 0
-      }
-      if (speedRushRef.current) {
-        if (speedRushTimerRef.current >= SPEED_RUSH_DURATION_MS) {
-          speedRushRef.current = false
-          setIsSpeedRush(false)
-          speedRushTimerRef.current = 0
-        }
+      // Spawn notes
+      spawnTimerRef.current += deltaMs
+      const spawnInterval = getCurrentSpawnInterval()
+      if (spawnTimerRef.current >= spawnInterval) {
+        spawnTimerRef.current -= spawnInterval
+        spawnNote()
       }
 
-      // Multi-target spawning
-      if (catchCountRef.current >= MULTI_TARGET_THRESHOLD) {
-        multiTargetTimerRef.current += deltaMs
-        if (multiTargetsRef.current.length === 0 && multiTargetTimerRef.current >= MULTI_TARGET_DURATION_MS) {
-          const targets: MultiTarget[] = []
-          for (let i = 0; i < 2 + Math.floor(catchCountRef.current / 20); i++) {
-            targets.push({
-              angleDeg: normalizeAngle(Math.random() * 360),
-              collected: false,
-            })
+      // Move notes
+      const fallSpeed = getCurrentFallSpeed()
+      const deltaSec = deltaMs / 1000
+
+      for (const note of notesRef.current) {
+        if (note.hit || note.missed) continue
+        note.y += fallSpeed * deltaSec
+
+        // Miss detection
+        if (note.y > HIT_LINE_Y + MISS_ZONE && !note.hit) {
+          note.missed = true
+          comboRef.current = 0
+          setCombo(0)
+          missCountRef.current += 1
+          setMissCount(missCountRef.current)
+
+          if (feverRef.current) {
+            feverRef.current = false
+            feverMsRef.current = 0
+            setIsFever(false)
+            setFeverRemainingMs(0)
           }
-          multiTargetsRef.current = targets
-          setMultiTargets(targets)
-          multiTargetTimerRef.current = 0
-        }
-        // Clean collected targets
-        const allCollected = multiTargetsRef.current.length > 0 && multiTargetsRef.current.every((t) => t.collected)
-        if (allCollected) {
-          multiTargetsRef.current = []
-          setMultiTargets([])
         }
       }
 
-      // Move dot
-      const baseSpeed = toCurrentSpeed(catchCountRef.current)
-      const rushMult = speedRushRef.current ? SPEED_RUSH_MULTIPLIER : 1
-      const speed = baseSpeed * rushMult
-      const angleDelta = speed * (deltaMs / 1000) * directionSignRef.current
-      angleDegRef.current = normalizeAngle(angleDegRef.current + angleDelta)
-      setCurrentAngleDeg(angleDegRef.current)
+      // Remove off-screen notes
+      notesRef.current = notesRef.current.filter((n) => n.y < 1.2)
 
-      // Trail effect (keep last 8 positions)
-      const newTrail = [...trailAnglesRef.current, angleDegRef.current].slice(-8)
-      trailAnglesRef.current = newTrail
-      setTrailAngles(newTrail)
+      // Clean old effects
+      const nowPerf = performance.now()
+      hitEffectsRef.current = hitEffectsRef.current.filter((e) => nowPerf - e.createdAt < 400)
+      laneFlashesRef.current = laneFlashesRef.current.filter((f) => nowPerf - f.createdAt < 200)
+
+      setNotes([...notesRef.current])
+      setHitEffects([...hitEffectsRef.current])
+      setLaneFlashes([...laneFlashesRef.current])
 
       effects.updateParticles()
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      rafRef.current = window.requestAnimationFrame(step)
     }
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
+    rafRef.current = window.requestAnimationFrame(step)
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
       }
-      lastFrameAtRef.current = null
     }
-  }, [finishGame, playAudio])
+  }, [onFinish, playAudio, spawnNote, getCurrentFallSpeed, getCurrentSpawnInterval])
 
-  // Derived state
-  const speedLevel = toSpeedLevel(catchCount)
-  const currentSpeed = toCurrentSpeed(catchCount)
+  // Derived
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
+  const isLowTime = remainingMs <= LOW_TIME_MS
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
-  const dynTargetArc = getDynamicTargetArc(catchCount)
-  const dynPerfectArc = getDynamicPerfectArc(catchCount)
-
-  const dotPosition = angleToSvgCoords(currentAngleDeg, TRACK_RADIUS)
-  const targetArcStart = TARGET_ANGLE_DEG - dynTargetArc
-  const targetArcEnd = TARGET_ANGLE_DEG + dynTargetArc
-  const perfectArcStart = TARGET_ANGLE_DEG - dynPerfectArc
-  const perfectArcEnd = TARGET_ANGLE_DEG + dynPerfectArc
-  const targetArcPath = describeArc(targetArcStart, targetArcEnd, TRACK_RADIUS)
-  const perfectArcPath = describeArc(perfectArcStart, perfectArcEnd, TRACK_RADIUS)
-  const targetMarkerPosition = angleToSvgCoords(TARGET_ANGLE_DEG, TRACK_RADIUS)
-
-  const judgementLabel = lastJudgement === 'perfect' ? 'PERFECT!' : lastJudgement === 'good' ? 'GOOD!' : lastJudgement === 'miss' ? 'MISS' : null
-  const judgementClass = lastJudgement === 'perfect' ? 'bc-j-perfect' : lastJudgement === 'good' ? 'bc-j-good' : lastJudgement === 'miss' ? 'bc-j-miss' : ''
-
-  const arenaClass = ['bc-arena', isPulseActive ? 'pulse' : '', isShakeActive ? 'shake' : ''].filter(Boolean).join(' ')
+  const speedPct = Math.min(100, ((getCurrentFallSpeed() - INITIAL_FALL_SPEED) / (MAX_FALL_SPEED - INITIAL_FALL_SPEED)) * 100)
 
   return (
     <section
-      className={`mini-game-panel bc-panel ${isFever ? 'bc-fever-mode' : ''} ${isSpeedRush ? 'bc-rush-mode' : ''}`}
+      className={`mini-game-panel bc-panel ${isFever ? 'bc-fever' : ''}`}
       aria-label="beat-catch-game"
       style={{ ...effects.getShakeStyle() }}
     >
@@ -525,7 +477,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           display: flex;
           flex-direction: column;
           height: 100%;
-          background: linear-gradient(180deg, #1a0a12 0%, #0d0d1a 40%, #1a0510 100%);
+          background: linear-gradient(180deg, #0a0a1a 0%, #0d0520 50%, #0a0a1a 100%);
           user-select: none;
           -webkit-user-select: none;
           touch-action: manipulation;
@@ -533,327 +485,372 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           overflow: hidden;
         }
 
-        .bc-fever-mode {
-          animation: bc-fever-bg 0.6s ease-in-out infinite alternate;
+        .bc-fever {
+          animation: bc-fever-bg 0.5s ease-in-out infinite alternate;
         }
 
         @keyframes bc-fever-bg {
-          from { background: linear-gradient(180deg, #2d1a00 0%, #1a0d00 40%, #2d1000 100%); }
-          to { background: linear-gradient(180deg, #1a0a12 0%, #0d0d1a 40%, #1a0510 100%); }
-        }
-
-        .bc-rush-mode::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          border: 3px solid rgba(239,68,68,0.5);
-          pointer-events: none;
-          z-index: 10;
-          animation: bc-rush-border 0.3s ease-in-out infinite alternate;
-          border-radius: inherit;
-        }
-
-        @keyframes bc-rush-border {
-          from { border-color: rgba(239,68,68,0.3); }
-          to { border-color: rgba(239,68,68,0.8); }
+          from { background: linear-gradient(180deg, #1a1000 0%, #1a0800 50%, #1a1000 100%); }
+          to { background: linear-gradient(180deg, #0a0a1a 0%, #0d0520 50%, #0a0a1a 100%); }
         }
 
         /* ─── Header ─── */
-        .bc-header {
+        .bc-hdr {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 10px 14px 6px;
-          background: linear-gradient(135deg, rgba(244,63,94,0.25) 0%, rgba(190,18,60,0.15) 100%);
-          border-bottom: 1px solid rgba(244,63,94,0.15);
+          padding: 8px 12px 6px;
+          background: rgba(0,0,0,0.4);
+          border-bottom: 2px solid rgba(244,63,94,0.3);
           flex-shrink: 0;
+          z-index: 5;
         }
 
-        .bc-score-block {
-          display: flex;
-          flex-direction: column;
-          gap: 1px;
-        }
-
-        .bc-score {
-          font-size: clamp(28px, 7vw, 36px);
+        .bc-hdr-score {
+          font-size: clamp(22px, 6vw, 32px);
           font-weight: 900;
           color: #fb7185;
           margin: 0;
           line-height: 1;
-          text-shadow: 0 0 14px rgba(244,63,94,0.6);
+          text-shadow: 0 0 12px rgba(244,63,94,0.6), 0 2px 4px rgba(0,0,0,0.5);
         }
 
-        .bc-best {
-          font-size: 10px;
-          color: #fda4af;
-          margin: 0;
-          opacity: 0.6;
+        .bc-hdr-best {
+          font-size: 8px;
+          color: rgba(253,164,175,0.6);
+          margin: 2px 0 0;
         }
 
-        .bc-time {
-          font-size: clamp(20px, 5vw, 26px);
+        .bc-hdr-time {
+          font-size: clamp(18px, 5vw, 24px);
           font-weight: 800;
           color: #e4e4e7;
           margin: 0;
           font-variant-numeric: tabular-nums;
-          transition: color 0.3s ease;
         }
 
-        .bc-time.low-time {
-          color: #ef4444;
-          animation: bc-blink 0.5s ease-in-out infinite alternate;
-        }
+        .bc-hdr-time.low { color: #ef4444; animation: bc-blink 0.4s infinite alternate; }
 
-        @keyframes bc-blink {
-          from { opacity: 1; }
-          to { opacity: 0.3; }
-        }
+        @keyframes bc-blink { from { opacity: 1; } to { opacity: 0.3; } }
 
         /* ─── Status Bar ─── */
-        .bc-status {
+        .bc-stat {
           display: flex;
           justify-content: center;
           align-items: center;
-          flex-wrap: wrap;
-          gap: 10px;
-          padding: 4px 12px;
-          font-size: 11px;
-          color: #fda4af;
+          gap: 8px;
+          padding: 3px 10px;
+          font-size: 10px;
+          color: #a1a1aa;
+          flex-shrink: 0;
+          z-index: 5;
+          background: rgba(0,0,0,0.3);
+        }
+
+        .bc-stat p { margin: 0; }
+
+        .bc-combo-num {
+          color: #facc15 !important;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .bc-fever-tag {
+          color: #facc15;
+          font-weight: 800;
+          animation: bc-blink 0.3s infinite alternate;
+          text-shadow: 0 0 6px rgba(250,204,21,0.5);
+        }
+
+        /* ─── Speed Bar ─── */
+        .bc-speed-bar {
+          height: 3px;
+          background: rgba(255,255,255,0.05);
           flex-shrink: 0;
         }
 
-        .bc-status p { margin: 0; }
-        .bc-status strong { color: #e4e4e7; font-weight: 700; }
-
-        .bc-combo-value {
-          color: #facc15 !important;
-          font-size: 13px;
-        }
-
-        .bc-fever-badge {
-          color: #facc15;
-          font-weight: 800;
-          animation: bc-blink 0.3s ease-in-out infinite alternate;
-          text-shadow: 0 0 8px rgba(250,204,21,0.6);
-        }
-
-        .bc-rush-badge {
-          color: #ef4444;
-          font-weight: 800;
-          animation: bc-blink 0.25s ease-in-out infinite alternate;
-          text-shadow: 0 0 8px rgba(239,68,68,0.6);
-        }
-
-        .bc-golden-badge {
-          color: #fbbf24;
-          font-weight: 800;
-          text-shadow: 0 0 8px rgba(251,191,36,0.6);
-        }
-
-        .bc-streak-badge {
-          color: #c084fc;
-          font-weight: 700;
-          font-size: 10px;
-        }
-
-        /* ─── Game Area (fills remaining space) ─── */
-        .bc-game-area {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 4px 8px;
-          min-height: 0;
-          gap: 8px;
-        }
-
-        .bc-arena {
-          position: relative;
-          width: 100%;
-          max-width: 380px;
-          aspect-ratio: 1;
-          cursor: pointer;
-          transition: transform 0.15s ease;
-          flex-shrink: 1;
-          min-height: 0;
-        }
-
-        .bc-arena.pulse { animation: bc-pulse 0.3s ease-out; }
-        .bc-arena.shake { animation: bc-shake 0.3s ease-out; }
-
-        @keyframes bc-pulse {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.05); }
-          100% { transform: scale(1); }
-        }
-
-        @keyframes bc-shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-6px); }
-          40% { transform: translateX(6px); }
-          60% { transform: translateX(-4px); }
-          80% { transform: translateX(4px); }
-        }
-
-        .bc-svg {
-          width: 100%;
+        .bc-speed-fill {
           height: 100%;
-          filter: drop-shadow(0 0 20px rgba(244,63,94,0.15));
+          background: linear-gradient(90deg, #3b82f6, #f43f5e);
+          transition: width 0.3s ease;
         }
 
-        .bc-track {
-          fill: none;
-          stroke: #3f3f46;
-          stroke-width: 3;
+        /* ─── Game Area ─── */
+        .bc-game {
+          flex: 1;
+          position: relative;
+          display: flex;
+          min-height: 0;
+          overflow: hidden;
         }
 
-        .bc-track-glow {
-          fill: none;
-          stroke: rgba(244,63,94,0.08);
-          stroke-width: 16;
+        .bc-lane {
+          flex: 1;
+          position: relative;
+          border-right: 1px solid rgba(255,255,255,0.04);
         }
 
-        .bc-target-arc { stroke: rgba(250, 204, 21, 0.2); }
-        .bc-perfect-arc { stroke: rgba(244, 63, 94, 0.4); }
+        .bc-lane:last-child { border-right: none; }
 
-        .bc-target-marker {
-          fill: #facc15;
-          filter: drop-shadow(0 0 8px rgba(250, 204, 21, 0.8));
-        }
-
-        .bc-dot {
-          fill: #f43f5e;
-          filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.8));
-          transition: fill 0.15s ease;
-        }
-
-        .bc-dot.perfect {
-          fill: #facc15;
-          filter: drop-shadow(0 0 14px rgba(250, 204, 21, 1));
-        }
-
-        .bc-dot.good {
-          fill: #22c55e;
-          filter: drop-shadow(0 0 12px rgba(34, 197, 94, 0.9));
-        }
-
-        .bc-trail {
-          fill: #f43f5e;
-          opacity: 0.15;
-        }
-
-        .bc-multi-target {
-          fill: #8b5cf6;
-          filter: drop-shadow(0 0 6px rgba(139,92,246,0.8));
-          animation: bc-multi-pulse 0.8s ease-in-out infinite alternate;
-        }
-
-        .bc-multi-target.collected {
-          fill: #22c55e;
-          opacity: 0.5;
-        }
-
-        @keyframes bc-multi-pulse {
-          from { r: 6; opacity: 0.7; }
-          to { r: 9; opacity: 1; }
-        }
-
-        .bc-center-ring {
-          fill: rgba(244, 63, 94, 0.08);
-          stroke: #f43f5e;
-          stroke-width: 2;
-        }
-
-        .bc-center-text {
-          fill: #f43f5e;
-          font-size: 16px;
-          font-weight: 900;
-          letter-spacing: 2px;
-        }
-
-        .bc-judgement {
+        .bc-lane-bg {
           position: absolute;
-          top: 42%;
+          inset: 0;
+          opacity: 0;
+          transition: opacity 0.1s;
+          pointer-events: none;
+        }
+
+        .bc-lane.flash .bc-lane-bg {
+          opacity: 1;
+          animation: bc-lane-flash 0.2s ease-out forwards;
+        }
+
+        @keyframes bc-lane-flash {
+          0% { opacity: 0.3; }
+          100% { opacity: 0; }
+        }
+
+        .bc-hit-line {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: ${HIT_LINE_Y * 100}%;
+          height: 4px;
+          background: linear-gradient(90deg, rgba(244,63,94,0.6), rgba(139,92,246,0.6), rgba(59,130,246,0.6));
+          z-index: 3;
+          box-shadow: 0 0 12px rgba(244,63,94,0.4), 0 0 24px rgba(139,92,246,0.2);
+        }
+
+        .bc-hit-line::before,
+        .bc-hit-line::after {
+          content: '';
+          position: absolute;
+          left: 0;
+          right: 0;
+          height: 20px;
+          pointer-events: none;
+        }
+
+        .bc-hit-line::before {
+          top: -20px;
+          background: linear-gradient(180deg, transparent, rgba(255,255,255,0.03));
+        }
+
+        .bc-hit-line::after {
+          bottom: -20px;
+          background: linear-gradient(0deg, transparent, rgba(255,255,255,0.03));
+        }
+
+        /* Notes */
+        .bc-note {
+          position: absolute;
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 4;
+          pointer-events: none;
+        }
+
+        .bc-note-normal {
+          background: radial-gradient(circle at 30% 30%, #fb7185, #e11d48);
+          box-shadow: 0 0 12px rgba(244,63,94,0.6), inset 0 -2px 4px rgba(0,0,0,0.3);
+          border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        .bc-note-golden {
+          background: radial-gradient(circle at 30% 30%, #fde047, #f59e0b);
+          box-shadow: 0 0 16px rgba(250,204,21,0.8), 0 0 32px rgba(250,204,21,0.3);
+          border: 2px solid rgba(255,255,255,0.5);
+          animation: bc-golden-pulse 0.4s ease-in-out infinite alternate;
+        }
+
+        @keyframes bc-golden-pulse {
+          from { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 16px rgba(250,204,21,0.8); }
+          to { transform: translate(-50%, -50%) scale(1.15); box-shadow: 0 0 24px rgba(250,204,21,1); }
+        }
+
+        .bc-note-double {
+          background: radial-gradient(circle at 30% 30%, #c084fc, #7c3aed);
+          box-shadow: 0 0 14px rgba(139,92,246,0.7);
+          border: 2px solid rgba(255,255,255,0.4);
+        }
+
+        .bc-note-hold {
+          background: radial-gradient(circle at 30% 30%, #34d399, #059669);
+          box-shadow: 0 0 14px rgba(52,211,153,0.7);
+          border: 2px solid rgba(255,255,255,0.4);
+          border-radius: 12px;
+          width: 42px;
+          height: 60px;
+        }
+
+        .bc-note-hit {
+          animation: bc-note-hit 0.3s ease-out forwards;
+        }
+
+        @keyframes bc-note-hit {
+          0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+          50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.5; }
+          100% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+        }
+
+        .bc-note-miss {
+          opacity: 0.3;
+          filter: grayscale(1);
+        }
+
+        .bc-note-inner {
+          position: absolute;
+          top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          font-size: clamp(28px, 8vw, 40px);
-          font-weight: 900;
+          font-size: 16px;
+          line-height: 1;
           pointer-events: none;
-          animation: bc-judge-pop 0.4s ease-out forwards;
-          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
-          margin: 0;
-          z-index: 5;
         }
 
-        .bc-j-perfect { color: #facc15; }
-        .bc-j-good { color: #22c55e; }
-        .bc-j-miss { color: #ef4444; }
+        /* Hit effects */
+        .bc-hit-fx {
+          position: absolute;
+          top: ${HIT_LINE_Y * 100}%;
+          transform: translate(-50%, -50%);
+          z-index: 6;
+          pointer-events: none;
+          animation: bc-hit-ring 0.4s ease-out forwards;
+        }
+
+        @keyframes bc-hit-ring {
+          0% { width: 20px; height: 20px; opacity: 1; border-width: 3px; }
+          100% { width: 80px; height: 80px; opacity: 0; border-width: 1px; }
+        }
+
+        .bc-hit-fx-perfect { border: 3px solid #facc15; border-radius: 50%; }
+        .bc-hit-fx-good { border: 3px solid #22c55e; border-radius: 50%; }
+        .bc-hit-fx-miss { border: 3px solid #ef4444; border-radius: 50%; }
+
+        /* Judgement popup */
+        .bc-judge {
+          position: absolute;
+          top: ${(HIT_LINE_Y - 0.12) * 100}%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: clamp(24px, 7vw, 36px);
+          font-weight: 900;
+          z-index: 8;
+          pointer-events: none;
+          animation: bc-judge-pop 0.35s ease-out forwards;
+          text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+        }
+
+        .bc-judge-perfect { color: #facc15; }
+        .bc-judge-good { color: #22c55e; }
+        .bc-judge-miss { color: #ef4444; }
 
         @keyframes bc-judge-pop {
-          0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+          0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
           30% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
-          100% { opacity: 0; transform: translate(-50%, -70%) scale(1); }
+          100% { opacity: 0; transform: translate(-50%, -70%) scale(0.9); }
         }
 
-        /* ─── Tap Button ─── */
-        .bc-tap-btn {
-          width: 100%;
-          max-width: 360px;
-          padding: clamp(14px, 4vw, 20px) 0;
-          border: none;
-          border-radius: 18px;
-          background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
-          color: #fff;
-          font-size: clamp(20px, 5vw, 26px);
-          font-weight: 900;
-          letter-spacing: 3px;
-          cursor: pointer;
-          transition: transform 0.1s ease, box-shadow 0.1s ease;
-          box-shadow: 0 4px 20px rgba(244, 63, 94, 0.5), 0 0 40px rgba(244,63,94,0.15);
-          flex-shrink: 0;
-        }
-
-        .bc-tap-btn:active {
-          transform: scale(0.94);
-          box-shadow: 0 2px 10px rgba(244, 63, 94, 0.3);
-        }
-
-        /* ─── Combo Overlay ─── */
-        .bc-combo-overlay {
+        .bc-combo-display {
           position: absolute;
-          top: 12%;
+          top: ${(HIT_LINE_Y - 0.2) * 100}%;
           left: 50%;
           transform: translateX(-50%);
-          font-size: clamp(14px, 4vw, 18px);
-          font-weight: 800;
+          font-size: clamp(16px, 5vw, 22px);
+          font-weight: 900;
           color: #facc15;
-          text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+          z-index: 7;
           pointer-events: none;
-          z-index: 5;
-          animation: bc-combo-bounce 0.3s ease-out;
+          text-shadow: 0 2px 8px rgba(0,0,0,0.6), 0 0 12px rgba(250,204,21,0.4);
+          animation: bc-combo-in 0.25s ease-out;
         }
 
-        @keyframes bc-combo-bounce {
+        @keyframes bc-combo-in {
           0% { transform: translateX(-50%) scale(0.5); opacity: 0; }
-          60% { transform: translateX(-50%) scale(1.2); opacity: 1; }
+          60% { transform: translateX(-50%) scale(1.2); }
           100% { transform: translateX(-50%) scale(1); opacity: 1; }
         }
 
-        /* ─── Speed indicator ring ─── */
-        .bc-speed-ring {
-          fill: none;
-          stroke-linecap: round;
-          transition: stroke-dashoffset 0.3s ease;
+        /* ─── Lane Buttons ─── */
+        .bc-btns {
+          display: flex;
+          flex-shrink: 0;
+          z-index: 5;
         }
 
-        /* ─── Footer ─── */
-        .bc-footer {
-          display: flex;
-          justify-content: center;
-          padding: 6px 16px 10px;
-          flex-shrink: 0;
+        .bc-lane-btn {
+          flex: 1;
+          padding: clamp(16px, 4vw, 24px) 0;
+          border: none;
+          font-size: clamp(14px, 4vw, 18px);
+          font-weight: 900;
+          letter-spacing: 2px;
+          cursor: pointer;
+          transition: transform 0.08s, filter 0.08s;
+          color: #fff;
+          text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
+
+        .bc-lane-btn:nth-child(1) {
+          background: linear-gradient(180deg, #e11d48, #be123c);
+          border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .bc-lane-btn:nth-child(2) {
+          background: linear-gradient(180deg, #7c3aed, #6d28d9);
+          border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .bc-lane-btn:nth-child(3) {
+          background: linear-gradient(180deg, #2563eb, #1d4ed8);
+        }
+
+        .bc-lane-btn:active {
+          transform: scale(0.95);
+          filter: brightness(1.3);
+        }
+
+        /* ─── Overlays ─── */
+        .bc-scanlines {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 2;
+          background: repeating-linear-gradient(
+            0deg,
+            transparent 0px,
+            transparent 3px,
+            rgba(0,0,0,0.08) 3px,
+            rgba(0,0,0,0.08) 4px
+          );
+        }
+
+        .bc-lane-guides {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 1;
+        }
+
+        .bc-lane-guide {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          width: 1px;
+          background: rgba(255,255,255,0.03);
+        }
+
+        .bc-bottom-glow {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 20%;
+          background: linear-gradient(180deg, transparent, rgba(244,63,94,0.05));
+          pointer-events: none;
+          z-index: 1;
         }
       `}</style>
 
@@ -862,127 +859,116 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       <ScorePopupRenderer popups={effects.scorePopups} />
 
       {/* Header */}
-      <div className="bc-header">
-        <div className="bc-score-block">
-          <p className="bc-score">{score.toLocaleString()}</p>
-          <p className="bc-best">BEST {displayedBestScore.toLocaleString()}</p>
+      <div className="bc-hdr">
+        <div>
+          <p className="bc-hdr-score">{score.toLocaleString()}</p>
+          <p className="bc-hdr-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
-        <p className={`bc-time ${isLowTime ? 'low-time' : ''}`}>
+        <p className={`bc-hdr-time ${isLowTime ? 'low' : ''}`}>
           {(remainingMs / 1000).toFixed(1)}s
         </p>
       </div>
 
       {/* Status */}
-      <div className="bc-status">
+      <div className="bc-stat">
         <p>
-          COMBO <strong className="bc-combo-value">{combo}</strong>
-          {comboLabel && (
-            <span className="ge-combo-label" style={{ color: comboColor, marginLeft: 4, fontSize: 11 }}>{comboLabel}</span>
-          )}
+          COMBO <span className="bc-combo-num">{combo}</span>
+          {comboLabel && <span className="ge-combo-label" style={{ color: comboColor, marginLeft: 3, fontSize: 9 }}>{comboLabel}</span>}
         </p>
-        <p>Lv.<strong>{speedLevel + 1}</strong></p>
-        {directionSign < 0 && <p style={{ color: '#a78bfa' }}>REV</p>}
-        {isGoldenActive && <p className="bc-golden-badge">GOLDEN</p>}
-        {isFever && <p className="bc-fever-badge">FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s</p>}
-        {isSpeedRush && <p className="bc-rush-badge">RUSH!</p>}
-        {perfectStreak >= 5 && <p className="bc-streak-badge">STREAK x{perfectStreak}</p>}
+        <p>Lv.<strong style={{ color: '#e4e4e7' }}>{level}</strong></p>
+        {isFever && <p className="bc-fever-tag">FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s</p>}
+      </div>
+
+      {/* Speed Bar */}
+      <div className="bc-speed-bar">
+        <div className="bc-speed-fill" style={{ width: `${speedPct}%` }} />
       </div>
 
       {/* Game Area */}
-      <div className="bc-game-area">
-        <div className={arenaClass} onClick={handleTap} role="button" tabIndex={0} aria-label="tap-area">
-          <svg className="bc-svg" viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`} preserveAspectRatio="xMidYMid meet">
+      <div className="bc-game" ref={gameAreaRef}>
+        <div className="bc-scanlines" />
+        <div className="bc-bottom-glow" />
 
-            {/* Track glow */}
-            <circle className="bc-track-glow" cx={VIEWBOX_CENTER} cy={VIEWBOX_CENTER} r={TRACK_RADIUS} />
+        {Array.from({ length: LANE_COUNT }).map((_, i) => {
+          const isFlashing = laneFlashes.some((f) => f.lane === i)
+          return (
+            <div key={i} className={`bc-lane ${isFlashing ? 'flash' : ''}`}>
+              <div className="bc-lane-bg" style={{ background: `radial-gradient(ellipse at 50% ${HIT_LINE_Y * 100}%, ${LANE_COLORS[i]}30, transparent 70%)` }} />
+            </div>
+          )
+        })}
 
-            {/* Speed indicator ring */}
-            <circle
-              className="bc-speed-ring"
-              cx={VIEWBOX_CENTER}
-              cy={VIEWBOX_CENTER}
-              r={TRACK_RADIUS + 12}
-              stroke={isFever ? 'rgba(250,204,21,0.3)' : 'rgba(244,63,94,0.15)'}
-              strokeWidth="3"
-              strokeDasharray={`${2 * Math.PI * (TRACK_RADIUS + 12)}`}
-              strokeDashoffset={`${2 * Math.PI * (TRACK_RADIUS + 12) * (1 - currentSpeed / MAX_SPEED_DEG_PER_SEC)}`}
-            />
+        <div className="bc-hit-line" />
 
-            {/* Main track */}
-            <circle className="bc-track" cx={VIEWBOX_CENTER} cy={VIEWBOX_CENTER} r={TRACK_RADIUS} />
-
-            {/* Target arcs */}
-            <path className="bc-target-arc" d={targetArcPath} fill="none" strokeWidth="24" strokeLinecap="round" />
-            <path className="bc-perfect-arc" d={perfectArcPath} fill="none" strokeWidth="24" strokeLinecap="round" />
-
-            {/* Target marker */}
-            <circle className="bc-target-marker" cx={targetMarkerPosition.x} cy={targetMarkerPosition.y} r="7" />
-
-            {/* Multi-targets */}
-            {multiTargets.map((t, i) => {
-              const pos = angleToSvgCoords(t.angleDeg, TRACK_RADIUS)
-              return (
-                <circle
-                  key={i}
-                  className={`bc-multi-target ${t.collected ? 'collected' : ''}`}
-                  cx={pos.x}
-                  cy={pos.y}
-                  r="7"
-                />
-              )
-            })}
-
-            {/* Trail */}
-            {trailAngles.map((angle, i) => {
-              const pos = angleToSvgCoords(angle, TRACK_RADIUS)
-              const opacity = (i + 1) / trailAngles.length * 0.2
-              return (
-                <circle
-                  key={i}
-                  className="bc-trail"
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={DOT_RADIUS * 0.6}
-                  style={{ opacity }}
-                />
-              )
-            })}
-
-            {/* Main dot */}
-            <circle
-              className={`bc-dot ${lastJudgement === 'perfect' ? 'perfect' : lastJudgement === 'good' ? 'good' : ''}`}
-              cx={dotPosition.x}
-              cy={dotPosition.y}
-              r={isGoldenActive ? DOT_RADIUS + 5 : DOT_RADIUS}
-              style={isGoldenActive ? { fill: '#fbbf24', filter: 'drop-shadow(0 0 12px rgba(251, 191, 36, 1))' } : undefined}
-            />
-
-            {/* Center ring */}
-            <circle className="bc-center-ring" cx={VIEWBOX_CENTER} cy={VIEWBOX_CENTER} r="30" />
-            <text className="bc-center-text" x={VIEWBOX_CENTER} y={VIEWBOX_CENTER + 2} textAnchor="middle" dominantBaseline="middle">
-              TAP
-            </text>
-          </svg>
-
-          {/* Combo overlay */}
-          {combo >= 3 && (
-            <p className="bc-combo-overlay" key={combo}>
-              {combo}x COMBO
-            </p>
-          )}
-
-          {/* Judgement popup */}
-          {judgementLabel !== null && (
-            <p className={`bc-judgement ${judgementClass}`}>{judgementLabel}</p>
-          )}
+        <div className="bc-lane-guides">
+          {Array.from({ length: LANE_COUNT - 1 }).map((_, i) => (
+            <div key={i} className="bc-lane-guide" style={{ left: `${((i + 1) / LANE_COUNT) * 100}%` }} />
+          ))}
         </div>
 
-        <button className="bc-tap-btn" type="button" onClick={handleTap}>
-          CATCH!
-        </button>
+        {notes.map((note) => {
+          if (note.y < -0.1 || note.y > 1.15) return null
+          const laneCenter = (note.lane + 0.5) / LANE_COUNT * 100
+          const topPct = note.y * 100
+
+          let typeClass = 'bc-note-normal'
+          let symbol = ''
+          if (note.type === 'golden') { typeClass = 'bc-note-golden'; symbol = '\u2605' }
+          else if (note.type === 'double') { typeClass = 'bc-note-double'; symbol = '\u00d72' }
+          else if (note.type === 'hold') { typeClass = 'bc-note-hold'; symbol = '\u25bc' }
+
+          const stateClass = note.hit ? 'bc-note-hit' : note.missed ? 'bc-note-miss' : ''
+
+          return (
+            <div
+              key={note.id}
+              className={`bc-note ${typeClass} ${stateClass}`}
+              style={{ left: `${laneCenter}%`, top: `${topPct}%` }}
+            >
+              {symbol && <span className="bc-note-inner">{symbol}</span>}
+            </div>
+          )
+        })}
+
+        {hitEffects.map((fx) => {
+          const laneCenter = (fx.lane + 0.5) / LANE_COUNT * 100
+          return (
+            <div
+              key={fx.id}
+              className={`bc-hit-fx bc-hit-fx-${fx.kind}`}
+              style={{ left: `${laneCenter}%` }}
+            />
+          )
+        })}
+
+        {lastJudge && (
+          <p className={`bc-judge bc-judge-${lastJudge}`} key={`${lastJudge}-${Date.now()}`}>
+            {lastJudge === 'perfect' ? 'PERFECT!' : lastJudge === 'good' ? 'GOOD!' : 'MISS'}
+          </p>
+        )}
+
+        {combo >= 3 && (
+          <p className="bc-combo-display" key={combo}>
+            {combo}x
+          </p>
+        )}
       </div>
 
-      <div className="bc-footer" />
+      {/* Lane buttons */}
+      <div className="bc-btns">
+        {Array.from({ length: LANE_COUNT }).map((_, i) => (
+          <button
+            key={i}
+            className="bc-lane-btn"
+            type="button"
+            onPointerDown={(e) => { e.preventDefault(); handleLaneHit(i) }}
+            onPointerUp={() => handleLaneRelease(i)}
+            onPointerLeave={() => handleLaneRelease(i)}
+          >
+            {LANE_LABELS[i]}
+          </button>
+        ))}
+      </div>
     </section>
   )
 }
@@ -991,7 +977,7 @@ export const beatCatchModule: MiniGameModule = {
   manifest: {
     id: 'beat-catch',
     title: 'Beat Catch',
-    description: 'Tap when the spinning ball hits the target! Timing game!',
+    description: 'Catch falling beats in 3 lanes! Rhythm game!',
     unlockCost: 30,
     baseReward: 12,
     scoreRewardMultiplier: 1.1,

@@ -17,32 +17,47 @@ import timeWarningSfx from '../../../assets/sounds/math-blitz-time-warning.mp3'
 import levelUpSfx from '../../../assets/sounds/math-blitz-level-up.mp3'
 import fastBonusSfx from '../../../assets/sounds/math-blitz-fast-bonus.mp3'
 import streakSfx from '../../../assets/sounds/math-blitz-streak.mp3'
+import bombSfx from '../../../assets/sounds/math-blitz-bomb.mp3'
+import goldSfx from '../../../assets/sounds/math-blitz-gold.mp3'
+import shieldSfx from '../../../assets/sounds/math-blitz-shield.mp3'
+import speedSfx from '../../../assets/sounds/math-blitz-speed.mp3'
+import heartbeatSfx from '../../../assets/sounds/math-blitz-heartbeat.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
-const ROUND_DURATION_MS = 30000
-const BASE_SCORE_CORRECT = 10
+// --- Game constants ---
+const ROUND_DURATION_MS = 35000
+const BASE_SCORE = 10
 const PENALTY_WRONG = 5
 const MAX_TIME_BONUS = 10
 const TIME_BONUS_WINDOW_MS = 3000
-const CORRECT_FLASH_DURATION_MS = 300
-const WRONG_SHAKE_DURATION_MS = 400
-const LOW_TIME_THRESHOLD_MS = 5000
-const FAST_ANSWER_THRESHOLD_MS = 1500
-const FAST_ANSWER_TIME_BONUS_MS = 500
-const FEVER_COMBO_THRESHOLD = 8
-const FEVER_DURATION_PROBLEMS = 5
-const FEVER_SCORE_MULTIPLIER = 3
-const PERFECT_STREAK_MILESTONE = 15
-const PERFECT_STREAK_BONUS = 50
+const FLASH_MS = 300
+const SHAKE_MS = 400
+const LOW_TIME_MS = 5000
+const FAST_MS = 1500
+const FAST_TIME_ADD_MS = 600
+const FEVER_THRESHOLD = 8
+const FEVER_PROBLEMS = 5
+const FEVER_MULT = 3
+const STREAK_MILESTONE = 15
+const STREAK_BONUS = 50
+const TIME_ATTACK_INTERVAL = 10
+const TIME_ATTACK_BOOST = 0.12
 
-// Time attack mode: every N correct answers speeds up the timer drain
-const TIME_ATTACK_SPEED_INTERVAL = 10
-const TIME_ATTACK_SPEED_BOOST = 0.15
+// HP system: wrong answers cost HP, 0 HP = game over
+const MAX_HP = 5
+const HP_LOSS_WRONG = 1
+const HP_HEAL_ON_STREAK = 1
 
-// Number of choices increases with difficulty
-const BASE_CHOICES = 4
-const MAX_CHOICES = 6
-const CHOICES_TIER_THRESHOLD = 3
+// Special problem types
+const BOMB_CHANCE = 0.08 // 8% chance of bomb problem
+const GOLD_CHANCE = 0.10 // 10% chance of gold problem
+const SPEED_ROUND_INTERVAL = 15 // every 15 problems, speed round
+const SPEED_ROUND_DURATION = 3 // 3 problems in speed round
+const GOLD_MULT = 3
+const BOMB_TIME_PENALTY_MS = 3000
+
+// Shield: earned every 20 correct answers
+const SHIELD_INTERVAL = 20
 
 const CHARACTERS = [
   parkSangminImage, kimYeonjaImage, parkWankyuImage,
@@ -50,6 +65,7 @@ const CHARACTERS = [
 ]
 
 type Operator = '+' | '-' | 'x' | '÷'
+type ProblemType = 'normal' | 'bomb' | 'gold' | 'speed'
 
 interface MathProblem {
   readonly left: number
@@ -57,24 +73,21 @@ interface MathProblem {
   readonly operator: Operator
   readonly answer: number
   readonly choices: readonly number[]
+  readonly type: ProblemType
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
-}
+function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)) }
 
-function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array]
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+function shuffle<T>(arr: T[]): T[] {
+  const s = [...arr]
+  for (let i = s.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
-    const temp = shuffled[i]
-    shuffled[i] = shuffled[j]
-    shuffled[j] = temp
+    ;[s[i], s[j]] = [s[j], s[i]]
   }
-  return shuffled
+  return s
 }
 
-function toDifficultyTier(score: number): number {
+function tier(score: number) {
   if (score < 30) return 0
   if (score < 80) return 1
   if (score < 150) return 2
@@ -82,392 +95,189 @@ function toDifficultyTier(score: number): number {
   return 4
 }
 
-function pickOperator(tier: number): Operator {
-  if (tier <= 0) return Math.random() < 0.5 ? '+' : '-'
-  if (tier === 1) {
-    const roll = Math.random()
-    if (roll < 0.4) return '+'
-    if (roll < 0.75) return '-'
-    return 'x'
-  }
-  if (tier === 2) {
-    const roll = Math.random()
-    if (roll < 0.25) return '+'
-    if (roll < 0.5) return '-'
-    if (roll < 0.8) return 'x'
-    return '÷'
-  }
-  const roll = Math.random()
-  if (roll < 0.2) return '+'
-  if (roll < 0.4) return '-'
-  if (roll < 0.7) return 'x'
-  return '÷'
+function pickOp(t: number): Operator {
+  const r = Math.random()
+  if (t <= 0) return r < 0.5 ? '+' : '-'
+  if (t === 1) return r < 0.4 ? '+' : r < 0.75 ? '-' : 'x'
+  if (t === 2) return r < 0.25 ? '+' : r < 0.5 ? '-' : r < 0.8 ? 'x' : '÷'
+  return r < 0.2 ? '+' : r < 0.4 ? '-' : r < 0.7 ? 'x' : '÷'
 }
 
-function pickOperands(operator: Operator, tier: number): { left: number; right: number } {
-  const ranges: [number, number][] = [
-    [1, 10], [2, 20], [5, 50], [10, 99], [20, 150],
-  ]
-  const safeTier = clampNumber(tier, 0, ranges.length - 1)
-  const [rangeMin, rangeMax] = ranges[safeTier]
-
-  if (operator === 'x') {
-    const multiplyRanges: [number, number][] = [
-      [1, 9], [2, 9], [2, 12], [3, 15], [4, 20],
-    ]
-    const [mMin, mMax] = multiplyRanges[safeTier]
-    const left = Math.floor(Math.random() * (mMax - mMin + 1)) + mMin
-    const right = Math.floor(Math.random() * (mMax - mMin + 1)) + mMin
-    return { left, right }
+function pickNums(op: Operator, t: number) {
+  const ranges: [number, number][] = [[1,10],[2,20],[5,50],[10,99],[20,150]]
+  const st = clamp(t, 0, 4)
+  if (op === 'x') {
+    const mr: [number, number][] = [[1,9],[2,9],[2,12],[3,15],[4,20]]
+    const [a, b] = mr[st]
+    return { left: Math.floor(Math.random() * (b - a + 1)) + a, right: Math.floor(Math.random() * (b - a + 1)) + a }
   }
-
-  if (operator === '÷') {
-    const divRanges: [number, number][] = [
-      [1, 5], [2, 9], [2, 12], [3, 15], [4, 20],
-    ]
-    const [dMin, dMax] = divRanges[safeTier]
-    const right = Math.floor(Math.random() * (dMax - dMin + 1)) + dMin
-    const quotient = Math.floor(Math.random() * (dMax - dMin + 1)) + dMin
-    return { left: right * quotient, right }
+  if (op === '÷') {
+    const dr: [number, number][] = [[1,5],[2,9],[2,12],[3,15],[4,20]]
+    const [a, b] = dr[st]
+    const right = Math.floor(Math.random() * (b - a + 1)) + a
+    const quot = Math.floor(Math.random() * (b - a + 1)) + a
+    return { left: right * quot, right }
   }
-
-  let left = Math.floor(Math.random() * (rangeMax - rangeMin + 1)) + rangeMin
-  let right = Math.floor(Math.random() * (rangeMax - rangeMin + 1)) + rangeMin
-
-  if (operator === '-' && left < right) {
-    const temp = left
-    left = right
-    right = temp
-  }
-
+  const [lo, hi] = ranges[st]
+  let left = Math.floor(Math.random() * (hi - lo + 1)) + lo
+  let right = Math.floor(Math.random() * (hi - lo + 1)) + lo
+  if (op === '-' && left < right) [left, right] = [right, left]
   return { left, right }
 }
 
-function computeAnswer(left: number, right: number, operator: Operator): number {
-  if (operator === '+') return left + right
-  if (operator === '-') return left - right
-  if (operator === '÷') return Math.round(left / right)
-  return left * right
+function solve(l: number, r: number, op: Operator) {
+  if (op === '+') return l + r
+  if (op === '-') return l - r
+  if (op === '÷') return Math.round(l / r)
+  return l * r
 }
 
-function generateWrongChoices(answer: number, count: number): number[] {
-  const wrongs = new Set<number>()
-  const maxAttempts = count * 20
-  for (let attempt = 0; attempt < maxAttempts && wrongs.size < count; attempt += 1) {
-    const offsetMagnitude = Math.max(1, Math.floor(Math.abs(answer) * 0.3))
-    const offset = Math.floor(Math.random() * offsetMagnitude * 2 + 1) - offsetMagnitude
-    const candidate = answer + (offset === 0 ? (Math.random() < 0.5 ? 1 : -1) : offset)
-    if (candidate !== answer && !wrongs.has(candidate)) {
-      wrongs.add(candidate)
-    }
+function wrongChoices(ans: number, count: number) {
+  const w = new Set<number>()
+  for (let i = 0; i < count * 20 && w.size < count; i++) {
+    const mag = Math.max(1, Math.floor(Math.abs(ans) * 0.3))
+    const off = Math.floor(Math.random() * mag * 2 + 1) - mag
+    const c = ans + (off === 0 ? (Math.random() < 0.5 ? 1 : -1) : off)
+    if (c !== ans) w.add(c)
   }
-  while (wrongs.size < count) {
-    const fallback = answer + (wrongs.size + 1) * (Math.random() < 0.5 ? 1 : -1)
-    if (fallback !== answer && !wrongs.has(fallback)) {
-      wrongs.add(fallback)
-    }
+  while (w.size < count) w.add(ans + w.size + 1)
+  return [...w]
+}
+
+function makeProblem(score: number, solvedCount: number, speedRoundLeft: number): MathProblem {
+  const t = tier(score)
+  const op = pickOp(t)
+  const { left, right } = pickNums(op, t)
+  const answer = solve(left, right, op)
+  const numChoices = t >= 3 ? 6 : 4
+  const choices = shuffle([answer, ...wrongChoices(answer, numChoices - 1)])
+
+  let type: ProblemType = 'normal'
+  if (speedRoundLeft > 0) {
+    type = 'speed'
+  } else if (solvedCount > 5) {
+    const r = Math.random()
+    if (r < BOMB_CHANCE) type = 'bomb'
+    else if (r < BOMB_CHANCE + GOLD_CHANCE) type = 'gold'
   }
-  return Array.from(wrongs)
+
+  return { left, right, operator: op, answer, choices, type }
 }
 
-function generateProblem(score: number): MathProblem {
-  const tier = toDifficultyTier(score)
-  const operator = pickOperator(tier)
-  const { left, right } = pickOperands(operator, tier)
-  const answer = computeAnswer(left, right, operator)
-  const numChoices = tier >= CHOICES_TIER_THRESHOLD ? MAX_CHOICES : BASE_CHOICES
-  const wrongChoices = generateWrongChoices(answer, numChoices - 1)
-  const choices = shuffleArray([answer, ...wrongChoices])
-  return { left, right, operator, answer, choices }
-}
-
-function toComboMultiplier(combo: number): number {
-  if (combo < 3) return 1
-  if (combo < 6) return 1.5
-  if (combo < 10) return 2
-  if (combo < 15) return 3
+function comboMult(c: number) {
+  if (c < 3) return 1
+  if (c < 6) return 1.5
+  if (c < 10) return 2
+  if (c < 15) return 3
   return 4
 }
 
-const TIER_COLORS = ['#4ade80', '#60a5fa', '#f59e0b', '#ef4444', '#a855f7']
-const TIER_LABELS = ['EASY', 'NORMAL', 'HARD', 'EXPERT', 'MASTER']
-const TIER_BG = [
-  'linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)',
-  'linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)',
-  'linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%)',
-  'linear-gradient(180deg, #fef2f2 0%, #fecaca 100%)',
-  'linear-gradient(180deg, #faf5ff 0%, #e9d5ff 100%)',
-]
+// --- Pixel color palette ---
+const PAL = {
+  bg: '#1a1a2e',
+  bgLight: '#16213e',
+  panel: '#0f3460',
+  accent: '#e94560',
+  gold: '#ffd700',
+  green: '#00ff41',
+  blue: '#00d4ff',
+  purple: '#b537f2',
+  white: '#f0f0f0',
+  gray: '#666680',
+  darkGray: '#2a2a40',
+  red: '#ff3333',
+  orange: '#ff8c00',
+  hp: '#ff4757',
+  hpEmpty: '#2d2d44',
+}
 
-const MATH_BLITZ_CSS = `
+const TIER_COLORS = [PAL.green, PAL.blue, PAL.gold, PAL.accent, PAL.purple]
+const TIER_LABELS = ['EASY', 'NORMAL', 'HARD', 'EXPERT', 'MASTER']
+
+// --- CSS ---
+const CSS = `
 .math-blitz-panel {
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #f5f4ef 0%, #ede9df 100%);
+  background: ${PAL.bg};
   font-family: 'Press Start 2P', monospace;
   user-select: none;
   touch-action: manipulation;
+  color: ${PAL.white};
+  image-rendering: pixelated;
+  overflow: hidden;
 }
 
-.mb-header {
+/* CRT scanline overlay */
+.mb-crt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0,0,0,0.15) 0px,
+    rgba(0,0,0,0.15) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Pixel border helper: 4px solid pixel look */
+.mb-pixel-border {
+  border: 4px solid ${PAL.gray};
+  box-shadow:
+    inset 2px 2px 0 rgba(255,255,255,0.1),
+    inset -2px -2px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.5);
+}
+
+/* --- TOP BAR --- */
+.mb-topbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 16px 8px;
-  gap: 8px;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  gap: 6px;
 }
 
-.mb-score-box {
-  text-align: center;
+.mb-score-block {
+  text-align: left;
 }
 
-.mb-score-value {
-  font-size: clamp(1.4rem, 5vw, 2rem);
-  font-weight: 900;
-  color: #1f2937;
-  text-shadow: 2px 2px 0 rgba(0,0,0,0.1);
+.mb-score-num {
+  font-size: clamp(1.2rem, 4.5vw, 1.8rem);
+  color: ${PAL.gold};
+  text-shadow: 2px 2px 0 #000, 0 0 8px rgba(255,215,0,0.4);
   margin: 0;
   line-height: 1;
 }
 
-.mb-score-label {
-  font-size: 0.5rem;
-  color: #6b7280;
+.mb-score-sub {
+  font-size: 0.35rem;
+  color: ${PAL.gray};
   margin: 2px 0 0;
 }
 
-.mb-best-badge {
-  font-size: 0.45rem;
-  color: #9ca3af;
-  background: rgba(0,0,0,0.05);
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-
-.mb-timer-bar {
-  margin: 0 16px 6px;
-  height: 10px;
-  background: rgba(0,0,0,0.08);
-  border-radius: 5px;
-  overflow: hidden;
-  border: 2px solid rgba(0,0,0,0.1);
-  position: relative;
-}
-
-.mb-timer-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.1s linear, background 0.3s;
-}
-
-.mb-timer-text {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+.mb-tier-pill {
+  padding: 4px 8px;
   font-size: 0.4rem;
-  font-weight: 800;
-  color: #1f2937;
-  text-shadow: 0 0 4px rgba(255,255,255,0.8);
-}
-
-.mb-info-strip {
-  display: flex;
-  justify-content: space-around;
-  padding: 4px 16px 6px;
-  font-size: 0.5rem;
-  color: #4b5563;
-}
-
-.mb-info-item {
-  text-align: center;
-  margin: 0;
-}
-
-.mb-info-item strong {
-  display: block;
-  font-size: 0.7rem;
-  color: #1f2937;
-}
-
-.mb-tier-badge {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 0.5rem;
   font-weight: 900;
-  color: #fff;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.3);
-  border: 2px solid rgba(0,0,0,0.15);
-  margin: 0 auto;
-}
-
-.mb-fever-banner {
-  text-align: center;
-  font-size: 0.7rem;
-  font-weight: 900;
-  padding: 6px;
-  margin: 0 16px;
-  border-radius: 6px;
-  animation: mb-fever-pulse 0.4s steps(2) infinite;
-}
-
-@keyframes mb-fever-pulse {
-  0%, 100% { background: #fbbf24; color: #7c2d12; transform: scale(1); }
-  50% { background: #f59e0b; color: #fff; transform: scale(1.02); }
-}
-
-.mb-problem-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 16px;
-  position: relative;
-  min-height: 0;
-}
-
-.mb-character {
-  width: clamp(100px, 28vw, 140px);
-  height: clamp(100px, 28vw, 140px);
-  object-fit: contain;
-  image-rendering: pixelated;
-  filter: drop-shadow(0 4px 0 rgba(0,0,0,0.2));
-  transition: transform 0.15s, filter 0.15s;
-}
-
-.mb-character.correct-bounce {
-  animation: mb-char-bounce 0.3s steps(3);
-}
-
-.mb-character.wrong-wobble {
-  animation: mb-char-wobble 0.4s steps(4);
-}
-
-@keyframes mb-char-bounce {
-  0% { transform: scale(1) translateY(0); }
-  50% { transform: scale(1.15) translateY(-12px); }
-  100% { transform: scale(1) translateY(0); }
-}
-
-@keyframes mb-char-wobble {
-  0% { transform: rotate(0deg); filter: brightness(0.7) saturate(0.3); }
-  25% { transform: rotate(-8deg); }
-  50% { transform: rotate(8deg); }
-  75% { transform: rotate(-4deg); }
-  100% { transform: rotate(0deg); filter: none; }
-}
-
-.mb-operator-icon {
-  font-size: clamp(1.8rem, 6vw, 2.4rem);
-  font-weight: 900;
-  margin: 8px 0;
-  transition: color 0.2s, transform 0.2s;
-}
-
-.mb-operator-icon.op-plus { color: #22c55e; }
-.mb-operator-icon.op-minus { color: #3b82f6; }
-.mb-operator-icon.op-multiply { color: #f59e0b; }
-.mb-operator-icon.op-divide { color: #ef4444; }
-
-.mb-problem-text {
-  font-size: clamp(2rem, 7vw, 3rem);
-  font-weight: 900;
-  color: #1f2937;
-  text-shadow: 3px 3px 0 rgba(0,0,0,0.08);
-  margin: 0;
-  text-align: center;
-  letter-spacing: 2px;
-  line-height: 1.2;
-}
-
-.mb-problem-text.low-time {
-  animation: mb-problem-urgent 0.5s steps(2) infinite;
-}
-
-@keyframes mb-problem-urgent {
-  0%, 100% { color: #1f2937; }
-  50% { color: #ef4444; }
-}
-
-.mb-choices-grid {
-  display: grid;
-  gap: 8px;
-  padding: 12px 16px 16px;
-}
-
-.mb-choices-grid.cols-4 {
-  grid-template-columns: 1fr 1fr;
-}
-
-.mb-choices-grid.cols-6 {
-  grid-template-columns: 1fr 1fr 1fr;
-}
-
-.mb-choice-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: clamp(56px, 12vw, 72px);
-  border: 3px solid #6b7280;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #fbfaf6 0%, #f0eeea 100%);
-  font-family: 'Press Start 2P', monospace;
-  font-size: clamp(1rem, 4vw, 1.4rem);
-  font-weight: 900;
-  color: #1f2937;
-  cursor: pointer;
-  box-shadow: 0 3px 0 #9ca3af;
-  transition: transform 0.08s, box-shadow 0.08s;
-  padding: 8px;
-}
-
-.mb-choice-btn:active {
-  transform: translateY(2px);
-  box-shadow: 0 1px 0 #9ca3af;
-}
-
-.mb-choice-btn.correct-flash {
-  background: linear-gradient(180deg, #bbf7d0 0%, #86efac 100%) !important;
-  border-color: #22c55e !important;
-  animation: mb-correct-pop 0.3s steps(3);
-  color: #166534;
-}
-
-.mb-choice-btn.wrong-shake {
-  background: linear-gradient(180deg, #fecaca 0%, #fca5a5 100%) !important;
-  border-color: #ef4444 !important;
-  animation: mb-wrong-shake 0.4s steps(4);
-  color: #991b1b;
-}
-
-@keyframes mb-correct-pop {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.08); }
-  100% { transform: scale(1); }
-}
-
-@keyframes mb-wrong-shake {
-  0% { transform: translateX(0); }
-  25% { transform: translateX(-6px); }
-  50% { transform: translateX(6px); }
-  75% { transform: translateX(-3px); }
-  100% { transform: translateX(0); }
+  color: #000;
+  text-shadow: none;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 #000;
 }
 
 .mb-exit-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 36px;
-  height: 36px;
-  border: 2px solid #9ca3af;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.7);
+  width: 32px;
+  height: 32px;
+  background: ${PAL.darkGray};
+  border: 3px solid ${PAL.gray};
+  box-shadow: 2px 2px 0 #000;
+  color: ${PAL.accent};
   font-family: 'Press Start 2P', monospace;
-  font-size: 0.6rem;
-  color: #6b7280;
+  font-size: 0.5rem;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -475,533 +285,918 @@ const MATH_BLITZ_CSS = `
   z-index: 10;
 }
 
-.mb-combo-burst {
+/* --- HP BAR --- */
+.mb-hp-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 4px;
+}
+
+.mb-hp-label {
+  font-size: 0.35rem;
+  color: ${PAL.hp};
+  margin: 0;
+}
+
+.mb-hp-hearts {
+  display: flex;
+  gap: 3px;
+}
+
+.mb-heart {
+  width: 16px;
+  height: 14px;
+  position: relative;
+  transition: transform 0.1s steps(2);
+}
+
+.mb-heart::before {
+  content: '';
   position: absolute;
+  inset: 0;
+  background: ${PAL.hp};
+  clip-path: polygon(50% 100%, 0% 35%, 10% 0%, 40% 0%, 50% 20%, 60% 0%, 90% 0%, 100% 35%);
+}
+
+.mb-heart.empty::before {
+  background: ${PAL.hpEmpty};
+}
+
+.mb-heart.hit {
+  animation: mb-heart-hit 0.3s steps(3);
+}
+
+@keyframes mb-heart-hit {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.4) rotate(10deg); }
+  100% { transform: scale(1); }
+}
+
+.mb-heart.heal {
+  animation: mb-heart-heal 0.4s steps(4);
+}
+
+@keyframes mb-heart-heal {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.mb-shield-icon {
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  position: relative;
+}
+
+.mb-shield-icon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: ${PAL.blue};
+  clip-path: polygon(50% 0%, 100% 25%, 100% 65%, 50% 100%, 0% 65%, 0% 25%);
+  animation: mb-shield-glow 1s steps(2) infinite;
+}
+
+@keyframes mb-shield-glow {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.5); }
+}
+
+/* --- TIMER --- */
+.mb-timer-wrap {
+  margin: 0 12px 4px;
+  height: 14px;
+  background: ${PAL.darkGray};
+  border: 3px solid ${PAL.gray};
+  box-shadow: inset 0 0 0 1px #000, 2px 2px 0 #000;
+  position: relative;
+  overflow: hidden;
+}
+
+.mb-timer-inner {
+  height: 100%;
+  transition: width 0.08s steps(1);
+  image-rendering: pixelated;
+}
+
+.mb-timer-txt {
+  position: absolute;
+  right: 6px;
   top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.35rem;
+  color: ${PAL.white};
+  text-shadow: 1px 1px 0 #000;
+}
+
+.mb-timer-wrap.danger {
+  animation: mb-timer-danger 0.5s steps(2) infinite;
+}
+
+@keyframes mb-timer-danger {
+  0%,100% { border-color: ${PAL.gray}; }
+  50% { border-color: ${PAL.red}; }
+}
+
+/* --- INFO ROW --- */
+.mb-info-row {
+  display: flex;
+  justify-content: space-around;
+  padding: 2px 12px 4px;
+  font-size: 0.35rem;
+  color: ${PAL.gray};
+}
+
+.mb-info-val {
+  display: block;
+  font-size: 0.55rem;
+  color: ${PAL.white};
+}
+
+/* --- FEVER STRIP --- */
+.mb-fever-strip {
+  text-align: center;
+  font-size: 0.55rem;
+  padding: 4px 12px;
+  margin: 0 12px 2px;
+  background: ${PAL.gold};
+  color: #000;
+  border: 3px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  animation: mb-fever-flash 0.3s steps(2) infinite;
+}
+
+@keyframes mb-fever-flash {
+  0%,100% { background: ${PAL.gold}; }
+  50% { background: ${PAL.orange}; }
+}
+
+/* --- SPEED ROUND STRIP --- */
+.mb-speed-strip {
+  text-align: center;
+  font-size: 0.5rem;
+  padding: 4px 12px;
+  margin: 0 12px 2px;
+  background: ${PAL.blue};
+  color: #000;
+  border: 3px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  animation: mb-speed-flash 0.2s steps(2) infinite;
+}
+
+@keyframes mb-speed-flash {
+  0%,100% { background: ${PAL.blue}; }
+  50% { background: #00ffff; }
+}
+
+/* --- PROBLEM AREA --- */
+.mb-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  position: relative;
+  min-height: 0;
+}
+
+.mb-char {
+  width: clamp(110px, 30vw, 160px);
+  height: clamp(110px, 30vw, 160px);
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 4px 0 #000);
+}
+
+.mb-char.bounce {
+  animation: mb-bounce 0.25s steps(3);
+}
+
+.mb-char.wobble {
+  animation: mb-wobble 0.35s steps(4);
+}
+
+@keyframes mb-bounce {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-16px) scale(1.12); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes mb-wobble {
+  0% { transform: rotate(0); filter: brightness(0.5); }
+  25% { transform: rotate(-10deg); }
+  50% { transform: rotate(10deg); }
+  75% { transform: rotate(-5deg); }
+  100% { transform: rotate(0); filter: drop-shadow(0 4px 0 #000); }
+}
+
+/* Speech bubble with problem */
+.mb-bubble {
+  position: relative;
+  background: ${PAL.panel};
+  border: 4px solid ${PAL.gray};
+  box-shadow: 4px 4px 0 #000, inset 2px 2px 0 rgba(255,255,255,0.08);
+  padding: 12px 20px;
+  margin-top: 8px;
+  text-align: center;
+  min-width: 200px;
+}
+
+.mb-bubble::after {
+  content: '';
+  position: absolute;
+  top: -12px;
   left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: clamp(1.2rem, 4vw, 1.6rem);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 12px solid ${PAL.gray};
+}
+
+.mb-bubble.bomb-bubble {
+  border-color: ${PAL.red};
+  box-shadow: 4px 4px 0 #000, 0 0 12px rgba(255,51,51,0.3);
+}
+
+.mb-bubble.bomb-bubble::after {
+  border-bottom-color: ${PAL.red};
+}
+
+.mb-bubble.gold-bubble {
+  border-color: ${PAL.gold};
+  box-shadow: 4px 4px 0 #000, 0 0 12px rgba(255,215,0,0.4);
+}
+
+.mb-bubble.gold-bubble::after {
+  border-bottom-color: ${PAL.gold};
+}
+
+.mb-bubble.speed-bubble {
+  border-color: ${PAL.blue};
+  box-shadow: 4px 4px 0 #000, 0 0 12px rgba(0,212,255,0.3);
+}
+
+.mb-bubble.speed-bubble::after {
+  border-bottom-color: ${PAL.blue};
+}
+
+.mb-problem-type-tag {
+  font-size: 0.4rem;
+  padding: 2px 8px;
+  margin-bottom: 4px;
+  display: inline-block;
+  border: 2px solid #000;
+  color: #000;
   font-weight: 900;
+}
+
+.mb-prob-txt {
+  font-size: clamp(1.6rem, 6vw, 2.4rem);
+  color: ${PAL.white};
+  text-shadow: 3px 3px 0 #000;
+  margin: 4px 0 0;
+  letter-spacing: 2px;
+}
+
+.mb-prob-txt.urgent {
+  animation: mb-urgent 0.4s steps(2) infinite;
+}
+
+@keyframes mb-urgent {
+  0%,100% { color: ${PAL.white}; }
+  50% { color: ${PAL.red}; }
+}
+
+/* --- CHOICES --- */
+.mb-grid {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 14px;
+}
+
+.mb-grid.c4 { grid-template-columns: 1fr 1fr; }
+.mb-grid.c6 { grid-template-columns: 1fr 1fr 1fr; }
+
+.mb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: clamp(52px, 11vw, 68px);
+  background: ${PAL.darkGray};
+  border: 4px solid ${PAL.gray};
+  box-shadow: 4px 4px 0 #000, inset 2px 2px 0 rgba(255,255,255,0.05);
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(0.9rem, 3.5vw, 1.3rem);
+  color: ${PAL.white};
+  cursor: pointer;
+  padding: 6px;
+  transition: none;
+}
+
+.mb-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 #000;
+}
+
+.mb-btn.correct {
+  background: #003300 !important;
+  border-color: ${PAL.green} !important;
+  color: ${PAL.green} !important;
+  animation: mb-btn-pop 0.25s steps(3);
+  box-shadow: 4px 4px 0 #000, 0 0 12px rgba(0,255,65,0.3) !important;
+}
+
+.mb-btn.wrong {
+  background: #330000 !important;
+  border-color: ${PAL.red} !important;
+  color: ${PAL.red} !important;
+  animation: mb-btn-shake 0.35s steps(4);
+}
+
+.mb-btn.fever-btn {
+  border-color: ${PAL.gold};
+  box-shadow: 4px 4px 0 #000, 0 0 6px rgba(255,215,0,0.2);
+}
+
+.mb-btn.bomb-btn {
+  border-color: ${PAL.red};
+  background: #1a0000;
+}
+
+.mb-btn.gold-btn {
+  border-color: ${PAL.gold};
+  background: #1a1a00;
+}
+
+.mb-btn.speed-btn {
+  border-color: ${PAL.blue};
+  background: #001a1a;
+}
+
+@keyframes mb-btn-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+@keyframes mb-btn-shake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(6px); }
+  75% { transform: translateX(-3px); }
+  100% { transform: translateX(0); }
+}
+
+/* --- FLOATING INDICATORS --- */
+.mb-float {
+  position: absolute;
   pointer-events: none;
-  animation: mb-combo-fly 0.6s steps(6) forwards;
-  text-shadow: 2px 2px 0 rgba(0,0,0,0.2);
   z-index: 20;
-}
-
-@keyframes mb-combo-fly {
-  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.5); }
-  30% { opacity: 1; transform: translate(-50%, -80%) scale(1.3); }
-  100% { opacity: 0; transform: translate(-50%, -120%) scale(0.8); }
-}
-
-.mb-fast-bonus-indicator {
-  position: absolute;
-  top: 30%;
-  right: 16px;
-  font-size: 0.6rem;
   font-weight: 900;
-  color: #10b981;
-  animation: mb-fast-fly 0.8s steps(4) forwards;
-  pointer-events: none;
+  text-shadow: 2px 2px 0 #000;
 }
 
-@keyframes mb-fast-fly {
-  0% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-30px); }
+.mb-combo-pop {
+  top: 45%;
+  left: 50%;
+  font-size: clamp(1rem, 3.5vw, 1.4rem);
+  animation: mb-pop-up 0.55s steps(5) forwards;
 }
 
-.mb-streak-indicator {
-  position: absolute;
+@keyframes mb-pop-up {
+  0% { opacity: 1; transform: translate(-50%, 0) scale(0.6); }
+  25% { opacity: 1; transform: translate(-50%, -20px) scale(1.2); }
+  100% { opacity: 0; transform: translate(-50%, -60px) scale(0.7); }
+}
+
+.mb-fast-pop {
+  top: 35%;
+  right: 10px;
+  font-size: 0.5rem;
+  color: ${PAL.green};
+  animation: mb-slide-up 0.7s steps(4) forwards;
+}
+
+.mb-streak-pop {
   top: 40%;
   left: 50%;
-  font-size: 0.7rem;
-  font-weight: 900;
-  color: #a855f7;
-  animation: mb-streak-pop 1s steps(5) forwards;
-  pointer-events: none;
-  text-align: center;
+  font-size: 0.6rem;
+  color: ${PAL.purple};
+  animation: mb-pop-up 0.9s steps(5) forwards;
   white-space: nowrap;
 }
 
-@keyframes mb-streak-pop {
-  0% { opacity: 0; transform: translate(-50%, 0) scale(0.3); }
-  20% { opacity: 1; transform: translate(-50%, -10px) scale(1.2); }
-  80% { opacity: 1; transform: translate(-50%, -20px) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -40px) scale(0.8); }
+.mb-shield-pop {
+  top: 50%;
+  left: 50%;
+  font-size: 0.55rem;
+  color: ${PAL.blue};
+  animation: mb-pop-up 0.8s steps(4) forwards;
 }
 
-.mb-level-up-flash {
+@keyframes mb-slide-up {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-25px); }
+}
+
+/* Level-up white flash */
+.mb-lvl-flash {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   pointer-events: none;
   z-index: 15;
-  animation: mb-level-flash 0.6s steps(3) forwards;
+  animation: mb-white-flash 0.5s steps(3) forwards;
 }
 
-@keyframes mb-level-flash {
+@keyframes mb-white-flash {
   0% { background: rgba(255,255,255,0); }
-  30% { background: rgba(255,255,255,0.6); }
+  25% { background: rgba(255,255,255,0.7); }
   100% { background: rgba(255,255,255,0); }
 }
 
-.mb-time-pulse {
-  animation: mb-time-pulse-anim 1s steps(2) infinite;
+/* Pixel star decorations */
+.mb-star {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: ${PAL.gold};
+  box-shadow: 0 0 4px ${PAL.gold};
+  animation: mb-twinkle var(--dur) steps(2) infinite;
+  animation-delay: var(--delay);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
-@keyframes mb-time-pulse-anim {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+@keyframes mb-twinkle {
+  0%,100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.5); }
+}
+
+/* Combo label */
+.mb-combo-label {
+  text-align: center;
+  font-size: clamp(0.6rem, 2.5vw, 0.85rem);
+  font-weight: 900;
+  margin: 2px 0;
+  text-shadow: 2px 2px 0 #000;
+}
+
+/* Low HP vignette */
+.mb-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: inset 0 0 60px 20px rgba(255,0,0,0.3);
+  animation: mb-vignette-pulse 1s steps(2) infinite;
+}
+
+@keyframes mb-vignette-pulse {
+  0%,100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 `
+
+const STARS = Array.from({ length: 12 }, (_, i) => ({
+  left: `${5 + Math.random() * 90}%`,
+  top: `${5 + Math.random() * 90}%`,
+  dur: `${2 + Math.random() * 3}s`,
+  delay: `${Math.random() * 2}s`,
+  key: i,
+}))
 
 function MathBlitzGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [combo, setCombo] = useState(0)
   const [solvedCount, setSolvedCount] = useState(0)
-  const [problem, setProblem] = useState<MathProblem>(() => generateProblem(0))
-  const [correctFlashIndex, setCorrectFlashIndex] = useState<number | null>(null)
-  const [wrongShakeIndex, setWrongShakeIndex] = useState<number | null>(null)
+  const [hp, setHp] = useState(MAX_HP)
+  const [hasShield, setHasShield] = useState(false)
+  const [problem, setProblem] = useState<MathProblem>(() => makeProblem(0, 0, 0))
+  const [correctIdx, setCorrectIdx] = useState<number | null>(null)
+  const [wrongIdx, setWrongIdx] = useState<number | null>(null)
   const [isFever, setIsFever] = useState(false)
-  const [feverProblemsLeft, setFeverProblemsLeft] = useState(0)
-  const [charImage, setCharImage] = useState(() => CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)])
-  const [charAnim, setCharAnim] = useState<'idle' | 'correct' | 'wrong'>('idle')
-  const [comboBurstText, setComboBurstText] = useState<string | null>(null)
-  const [comboBurstKey, setComboBurstKey] = useState(0)
-  const [showFastBonus, setShowFastBonus] = useState(false)
-  const [fastBonusKey, setFastBonusKey] = useState(0)
-  const [showStreak, setShowStreak] = useState(false)
-  const [streakKey, setStreakKey] = useState(0)
-  const [showLevelUp, setShowLevelUp] = useState(false)
-  const [levelUpKey, setLevelUpKey] = useState(0)
+  const [feverLeft, setFeverLeft] = useState(0)
+  const [speedRoundLeft, setSpeedRoundLeft] = useState(0)
+  const [charImg, setCharImg] = useState(() => CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)])
+  const [charAnim, setCharAnim] = useState<'' | 'bounce' | 'wobble'>('')
+  const [floats, setFloats] = useState<{ id: number; cls: string; text: string; color: string }[]>([])
+  const [showLvlFlash, setShowLvlFlash] = useState(false)
+  const [lvlKey, setLvlKey] = useState(0)
   const [timeSpeed, setTimeSpeed] = useState(1)
+  const [hpAnim, setHpAnim] = useState<'hit' | 'heal' | ''>('')
 
   const effects = useGameEffects()
+  const floatIdRef = useRef(0)
 
-  const scoreRef = useRef(0)
-  const remainingMsRef = useRef(ROUND_DURATION_MS)
-  const comboRef = useRef(0)
-  const solvedCountRef = useRef(0)
-  const problemRef = useRef(problem)
-  const problemStartMsRef = useRef(0)
-  const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const correctFlashTimerRef = useRef<number | null>(null)
-  const wrongShakeTimerRef = useRef<number | null>(null)
-  const lowTimeSecondRef = useRef<number | null>(null)
-  const isFeverRef = useRef(false)
-  const feverProblemsLeftRef = useRef(0)
-  const lastPerfectStreakRef = useRef(0)
-  const lastTierRef = useRef(0)
-  const timeSpeedRef = useRef(1)
+  // Refs for RAF loop
+  const scoreR = useRef(0)
+  const remainR = useRef(ROUND_DURATION_MS)
+  const comboR = useRef(0)
+  const solvedR = useRef(0)
+  const hpR = useRef(MAX_HP)
+  const shieldR = useRef(false)
+  const probR = useRef(problem)
+  const probStartR = useRef(0)
+  const doneR = useRef(false)
+  const rafR = useRef<number | null>(null)
+  const lastR = useRef<number | null>(null)
+  const flashTimerR = useRef<number | null>(null)
+  const shakeTimerR = useRef<number | null>(null)
+  const lowSecR = useRef<number | null>(null)
+  const feverR = useRef(false)
+  const feverLeftR = useRef(0)
+  const lastStreakR = useRef(0)
+  const lastTierR = useRef(0)
+  const timeSpeedR = useRef(1)
+  const speedRoundR = useRef(0)
 
-  const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const audioPool = useRef<Map<string, HTMLAudioElement>>(new Map())
 
-  const getAudio = useCallback((src: string): HTMLAudioElement => {
-    let audio = audioPoolRef.current.get(src)
-    if (!audio) {
-      audio = new Audio(src)
-      audio.preload = 'auto'
-      audioPoolRef.current.set(src, audio)
-    }
-    return audio
+  const getAudio = useCallback((src: string) => {
+    let a = audioPool.current.get(src)
+    if (!a) { a = new Audio(src); a.preload = 'auto'; audioPool.current.set(src, a) }
+    return a
   }, [])
 
-  const playAudio = useCallback((src: string, volume: number, playbackRate = 1) => {
-    const audio = getAudio(src)
-    audio.currentTime = 0
-    audio.volume = volume
-    audio.playbackRate = playbackRate
-    void audio.play().catch(() => {})
+  const play = useCallback((src: string, vol: number, rate = 1) => {
+    const a = getAudio(src); a.currentTime = 0; a.volume = vol; a.playbackRate = rate
+    void a.play().catch(() => {})
   }, [getAudio])
 
-  const clearTimeoutSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
+  const clrTimer = (r: { current: number | null }) => { if (r.current !== null) { clearTimeout(r.current); r.current = null } }
+
+  const addFloat = useCallback((cls: string, text: string, color: string) => {
+    const id = ++floatIdRef.current
+    setFloats(prev => [...prev, { id, cls, text, color }])
+    setTimeout(() => setFloats(prev => prev.filter(f => f.id !== id)), 1000)
+  }, [])
+
+  const advance = useCallback((nextScore: number) => {
+    const srLeft = speedRoundR.current > 0 ? speedRoundR.current - 1 : 0
+    speedRoundR.current = srLeft
+    setSpeedRoundLeft(srLeft)
+
+    // Check if we should start a speed round
+    const nextSolved = solvedR.current
+    if (srLeft === 0 && nextSolved > 0 && nextSolved % SPEED_ROUND_INTERVAL === 0) {
+      speedRoundR.current = SPEED_ROUND_DURATION
+      setSpeedRoundLeft(SPEED_ROUND_DURATION)
+      play(speedSfx, 0.5)
+      addFloat('mb-shield-pop', 'SPEED ROUND!', PAL.blue)
     }
-  }
 
-  const advanceProblem = useCallback((nextScore: number) => {
-    const nextProblem = generateProblem(nextScore)
-    problemRef.current = nextProblem
-    setProblem(nextProblem)
-    problemStartMsRef.current = window.performance.now()
+    const p = makeProblem(nextScore, nextSolved, speedRoundR.current)
+    probR.current = p
+    setProblem(p)
+    probStartR.current = performance.now()
 
-    // Change character on new tier
-    const newTier = toDifficultyTier(nextScore)
-    if (newTier !== lastTierRef.current) {
-      lastTierRef.current = newTier
-      setCharImage(CHARACTERS[newTier % CHARACTERS.length])
-      setShowLevelUp(true)
-      setLevelUpKey(k => k + 1)
-      playAudio(levelUpSfx, 0.5)
-      setTimeout(() => setShowLevelUp(false), 600)
+    const newTier = tier(nextScore)
+    if (newTier !== lastTierR.current) {
+      lastTierR.current = newTier
+      setCharImg(CHARACTERS[newTier % CHARACTERS.length])
+      setShowLvlFlash(true)
+      setLvlKey(k => k + 1)
+      play(levelUpSfx, 0.5)
+      addFloat('mb-streak-pop', `${TIER_LABELS[newTier]}!`, TIER_COLORS[newTier])
+      setTimeout(() => setShowLvlFlash(false), 500)
     }
-  }, [playAudio])
+  }, [play, addFloat])
 
-  const finishGame = useCallback(() => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    clearTimeoutSafe(correctFlashTimerRef)
-    clearTimeoutSafe(wrongShakeTimerRef)
+  const finish = useCallback(() => {
+    if (doneR.current) return
+    doneR.current = true
+    clrTimer(flashTimerR); clrTimer(shakeTimerR)
     effects.cleanup()
-    playAudio(gameOverHitSfx, 0.6, 0.95)
+    play(gameOverHitSfx, 0.6, 0.95)
+    const elapsed = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainR.current))
+    onFinish({ score: scoreR.current, durationMs: elapsed })
+  }, [onFinish, effects, play])
 
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
-    onFinish({ score: scoreRef.current, durationMs: elapsedMs })
-  }, [onFinish, effects, playAudio])
+  const handleTap = useCallback((val: number, idx: number) => {
+    if (doneR.current) return
+    const prob = probR.current
+    const now = performance.now()
 
-  const handleChoiceTap = useCallback(
-    (choiceValue: number, choiceIndex: number) => {
-      if (finishedRef.current) return
+    if (val === prob.answer) {
+      // --- CORRECT ---
+      const react = now - probStartR.current
+      const timeBonus = react < TIME_BONUS_WINDOW_MS ? Math.round(MAX_TIME_BONUS * (1 - react / TIME_BONUS_WINDOW_MS)) : 0
+      const nextCombo = comboR.current + 1
+      comboR.current = nextCombo
+      setCombo(nextCombo)
 
-      const currentProblem = problemRef.current
-      const now = window.performance.now()
+      setCharAnim('bounce')
+      setTimeout(() => setCharAnim(''), 250)
 
-      if (choiceValue === currentProblem.answer) {
-        const reactionMs = now - problemStartMsRef.current
-        const timeBonus = reactionMs < TIME_BONUS_WINDOW_MS
-          ? Math.round(MAX_TIME_BONUS * (1 - reactionMs / TIME_BONUS_WINDOW_MS))
-          : 0
-
-        const nextCombo = comboRef.current + 1
-        comboRef.current = nextCombo
-        setCombo(nextCombo)
-
-        // Character animation
-        setCharAnim('correct')
-        setTimeout(() => setCharAnim('idle'), 300)
-
-        // Fever mode management
-        if (isFeverRef.current) {
-          feverProblemsLeftRef.current -= 1
-          if (feverProblemsLeftRef.current <= 0) {
-            isFeverRef.current = false
-            setIsFever(false)
-            setFeverProblemsLeft(0)
-          } else {
-            setFeverProblemsLeft(feverProblemsLeftRef.current)
-          }
-        } else if (nextCombo >= FEVER_COMBO_THRESHOLD && !isFeverRef.current) {
-          isFeverRef.current = true
-          feverProblemsLeftRef.current = FEVER_DURATION_PROBLEMS
-          setIsFever(true)
-          setFeverProblemsLeft(FEVER_DURATION_PROBLEMS)
-          effects.triggerFlash('rgba(251,191,36,0.5)', 150)
-          playAudio(feverSfx, 0.6)
-        }
-
-        const feverMult = isFeverRef.current ? FEVER_SCORE_MULTIPLIER : 1
-        const multiplier = toComboMultiplier(nextCombo) * feverMult
-        const earned = Math.round((BASE_SCORE_CORRECT + timeBonus) * multiplier)
-        const nextScore = scoreRef.current + earned
-        scoreRef.current = nextScore
-        setScore(nextScore)
-
-        // Fast answer time bonus
-        if (reactionMs < FAST_ANSWER_THRESHOLD_MS) {
-          remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + FAST_ANSWER_TIME_BONUS_MS)
-          setRemainingMs(remainingMsRef.current)
-          setShowFastBonus(true)
-          setFastBonusKey(k => k + 1)
-          playAudio(fastBonusSfx, 0.35)
-          setTimeout(() => setShowFastBonus(false), 800)
-        }
-
-        // Perfect streak milestone bonus
-        const streakMilestone = Math.floor(nextCombo / PERFECT_STREAK_MILESTONE)
-        if (streakMilestone > lastPerfectStreakRef.current) {
-          lastPerfectStreakRef.current = streakMilestone
-          scoreRef.current += PERFECT_STREAK_BONUS
-          setScore(scoreRef.current)
-          effects.showScorePopup(PERFECT_STREAK_BONUS, 200, 200, '#a855f7')
-          setShowStreak(true)
-          setStreakKey(k => k + 1)
-          playAudio(streakSfx, 0.5)
-          setTimeout(() => setShowStreak(false), 1000)
-        }
-
-        // Time attack speed-up
-        const nextSolved = solvedCountRef.current + 1
-        solvedCountRef.current = nextSolved
-        setSolvedCount(nextSolved)
-        if (nextSolved > 0 && nextSolved % TIME_ATTACK_SPEED_INTERVAL === 0) {
-          const newSpeed = timeSpeedRef.current + TIME_ATTACK_SPEED_BOOST
-          timeSpeedRef.current = newSpeed
-          setTimeSpeed(newSpeed)
-        }
-
-        // Visual feedback
-        setCorrectFlashIndex(choiceIndex)
-        clearTimeoutSafe(correctFlashTimerRef)
-        correctFlashTimerRef.current = window.setTimeout(() => {
-          correctFlashTimerRef.current = null
-          setCorrectFlashIndex(null)
-        }, CORRECT_FLASH_DURATION_MS)
-
-        // Combo burst text
-        if (nextCombo >= 3) {
-          const label = getComboLabel(nextCombo)
-          if (label) {
-            setComboBurstText(`${label} +${earned}`)
-            setComboBurstKey(k => k + 1)
-            setTimeout(() => setComboBurstText(null), 600)
-          }
-          playAudio(comboSfx, 0.4, 1 + Math.min(0.4, nextCombo * 0.025))
-        } else {
-          playAudio(correctSfx, 0.5, 1 + Math.min(0.3, nextCombo * 0.02))
-        }
-
-        // Particle effects
-        effects.comboHitBurst(200, 300, nextCombo, earned)
-
-        advanceProblem(nextScore)
-      } else {
-        const nextScore = Math.max(0, scoreRef.current - PENALTY_WRONG)
-        scoreRef.current = nextScore
-        setScore(nextScore)
-        comboRef.current = 0
-        setCombo(0)
-        isFeverRef.current = false
-        feverProblemsLeftRef.current = 0
-        setIsFever(false)
-        setFeverProblemsLeft(0)
-        lastPerfectStreakRef.current = 0
-
-        setCharAnim('wrong')
-        setTimeout(() => setCharAnim('idle'), 400)
-
-        setWrongShakeIndex(choiceIndex)
-        clearTimeoutSafe(wrongShakeTimerRef)
-        wrongShakeTimerRef.current = window.setTimeout(() => {
-          wrongShakeTimerRef.current = null
-          setWrongShakeIndex(null)
-        }, WRONG_SHAKE_DURATION_MS)
-
-        playAudio(wrongSfx, 0.5, 0.9)
-        effects.triggerShake(5)
-        effects.triggerFlash('rgba(239,68,68,0.3)')
+      // Fever
+      if (feverR.current) {
+        feverLeftR.current -= 1
+        if (feverLeftR.current <= 0) { feverR.current = false; setIsFever(false); setFeverLeft(0) }
+        else setFeverLeft(feverLeftR.current)
+      } else if (nextCombo >= FEVER_THRESHOLD) {
+        feverR.current = true; feverLeftR.current = FEVER_PROBLEMS
+        setIsFever(true); setFeverLeft(FEVER_PROBLEMS)
+        effects.triggerFlash('rgba(255,215,0,0.5)', 150)
+        play(feverSfx, 0.6)
       }
-    },
-    [advanceProblem, playAudio, effects],
-  )
 
-  const handleExit = useCallback(() => {
-    playAudio(wrongSfx, 0.3, 1)
-    onExit()
-  }, [onExit, playAudio])
+      // Score calc
+      const fMult = feverR.current ? FEVER_MULT : 1
+      const typeMult = prob.type === 'gold' ? GOLD_MULT : prob.type === 'speed' ? 2 : 1
+      const mult = comboMult(nextCombo) * fMult * typeMult
+      const earned = Math.round((BASE_SCORE + timeBonus) * mult)
+      const nextScore = scoreR.current + earned
+      scoreR.current = nextScore
+      setScore(nextScore)
+
+      if (prob.type === 'gold') { play(goldSfx, 0.5); addFloat('mb-combo-pop', `GOLD! +${earned}`, PAL.gold) }
+
+      // Fast bonus
+      if (react < FAST_MS) {
+        remainR.current = Math.min(ROUND_DURATION_MS, remainR.current + FAST_TIME_ADD_MS)
+        setRemainingMs(remainR.current)
+        addFloat('mb-fast-pop', '+TIME!', PAL.green)
+        play(fastBonusSfx, 0.35)
+      }
+
+      // Streak milestone
+      const sm = Math.floor(nextCombo / STREAK_MILESTONE)
+      if (sm > lastStreakR.current) {
+        lastStreakR.current = sm
+        scoreR.current += STREAK_BONUS
+        setScore(scoreR.current)
+        effects.showScorePopup(STREAK_BONUS, 200, 200, PAL.purple)
+        addFloat('mb-streak-pop', `STREAK +${STREAK_BONUS}!`, PAL.purple)
+        play(streakSfx, 0.5)
+        // Heal on streak
+        if (hpR.current < MAX_HP) {
+          hpR.current = Math.min(MAX_HP, hpR.current + HP_HEAL_ON_STREAK)
+          setHp(hpR.current)
+          setHpAnim('heal')
+          setTimeout(() => setHpAnim(''), 400)
+        }
+      }
+
+      // Shield earn
+      const nextSolved = solvedR.current + 1
+      solvedR.current = nextSolved
+      setSolvedCount(nextSolved)
+      if (nextSolved > 0 && nextSolved % SHIELD_INTERVAL === 0 && !shieldR.current) {
+        shieldR.current = true
+        setHasShield(true)
+        play(shieldSfx, 0.4)
+        addFloat('mb-shield-pop', 'SHIELD!', PAL.blue)
+      }
+
+      // Time attack
+      if (nextSolved > 0 && nextSolved % TIME_ATTACK_INTERVAL === 0) {
+        const ns = timeSpeedR.current + TIME_ATTACK_BOOST
+        timeSpeedR.current = ns
+        setTimeSpeed(ns)
+      }
+
+      // Visual
+      setCorrectIdx(idx)
+      clrTimer(flashTimerR)
+      flashTimerR.current = window.setTimeout(() => { flashTimerR.current = null; setCorrectIdx(null) }, FLASH_MS)
+
+      if (nextCombo >= 3) {
+        const label = getComboLabel(nextCombo)
+        if (label) addFloat('mb-combo-pop', `${label} +${earned}`, getComboColor(nextCombo))
+        play(comboSfx, 0.4, 1 + Math.min(0.4, nextCombo * 0.025))
+      } else {
+        play(correctSfx, 0.5, 1 + Math.min(0.3, nextCombo * 0.02))
+      }
+
+      effects.comboHitBurst(200, 300, nextCombo, earned)
+      advance(nextScore)
+
+    } else {
+      // --- WRONG ---
+      // Bomb penalty: lose time instead of HP
+      if (prob.type === 'bomb') {
+        remainR.current = Math.max(0, remainR.current - BOMB_TIME_PENALTY_MS)
+        setRemainingMs(remainR.current)
+        play(bombSfx, 0.6)
+        effects.triggerFlash('rgba(255,0,0,0.5)', 200)
+        addFloat('mb-combo-pop', 'BOMB! -3s', PAL.red)
+      } else if (shieldR.current) {
+        // Shield absorbs
+        shieldR.current = false
+        setHasShield(false)
+        play(shieldSfx, 0.3)
+        addFloat('mb-shield-pop', 'SHIELD BREAK!', PAL.blue)
+      } else {
+        hpR.current = Math.max(0, hpR.current - HP_LOSS_WRONG)
+        setHp(hpR.current)
+        setHpAnim('hit')
+        setTimeout(() => setHpAnim(''), 300)
+        if (hpR.current <= 0) { finish(); return }
+      }
+
+      const nextScore = Math.max(0, scoreR.current - PENALTY_WRONG)
+      scoreR.current = nextScore
+      setScore(nextScore)
+      comboR.current = 0; setCombo(0)
+      feverR.current = false; feverLeftR.current = 0; setIsFever(false); setFeverLeft(0)
+      lastStreakR.current = 0
+
+      setCharAnim('wobble')
+      setTimeout(() => setCharAnim(''), 350)
+
+      setWrongIdx(idx)
+      clrTimer(shakeTimerR)
+      shakeTimerR.current = window.setTimeout(() => { shakeTimerR.current = null; setWrongIdx(null) }, SHAKE_MS)
+
+      play(wrongSfx, 0.5, 0.9)
+      effects.triggerShake(6)
+      effects.triggerFlash('rgba(239,68,68,0.3)')
+    }
+  }, [advance, play, effects, finish, addFloat])
+
+  const handleExit = useCallback(() => { play(wrongSfx, 0.3); onExit() }, [onExit, play])
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        handleExit()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    const onKey = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); handleExit() } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [handleExit])
 
   useEffect(() => {
-    // Preload all sounds
-    ;[correctSfx, wrongSfx, comboSfx, feverSfx, timeWarningSfx, levelUpSfx, fastBonusSfx, streakSfx, gameOverHitSfx].forEach(src => getAudio(src))
-
-    return () => {
-      clearTimeoutSafe(correctFlashTimerRef)
-      clearTimeoutSafe(wrongShakeTimerRef)
-      effects.cleanup()
-      audioPoolRef.current.clear()
-    }
+    [correctSfx, wrongSfx, comboSfx, feverSfx, timeWarningSfx, levelUpSfx, fastBonusSfx, streakSfx, bombSfx, goldSfx, shieldSfx, speedSfx, heartbeatSfx, gameOverHitSfx].forEach(s => getAudio(s))
+    return () => { clrTimer(flashTimerR); clrTimer(shakeTimerR); effects.cleanup(); audioPool.current.clear() }
   }, [])
 
   useEffect(() => {
-    problemStartMsRef.current = window.performance.now()
-
+    probStartR.current = performance.now()
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
+      if (doneR.current) { rafR.current = null; return }
+      if (lastR.current === null) lastR.current = now
+      const dt = Math.min(now - lastR.current, MAX_FRAME_DELTA_MS)
+      lastR.current = now
 
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
-
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-
-      // Time attack: timer drains faster as you solve more
-      const scaledDelta = deltaMs * timeSpeedRef.current
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - scaledDelta)
-      setRemainingMs(remainingMsRef.current)
-
+      const scaled = dt * timeSpeedR.current
+      remainR.current = Math.max(0, remainR.current - scaled)
+      setRemainingMs(remainR.current)
       effects.updateParticles()
 
-      // Low time warning sound
-      if (remainingMsRef.current > 0 && remainingMsRef.current <= LOW_TIME_THRESHOLD_MS) {
-        const nextLowTimeSecond = Math.ceil(remainingMsRef.current / 1000)
-        if (lowTimeSecondRef.current !== nextLowTimeSecond) {
-          lowTimeSecondRef.current = nextLowTimeSecond
-          playAudio(timeWarningSfx, 0.25, 1.2 - nextLowTimeSecond * 0.03)
+      // Low time warning
+      if (remainR.current > 0 && remainR.current <= LOW_TIME_MS) {
+        const sec = Math.ceil(remainR.current / 1000)
+        if (lowSecR.current !== sec) {
+          lowSecR.current = sec
+          play(timeWarningSfx, 0.25, 1.2 - sec * 0.03)
         }
-      } else {
-        lowTimeSecondRef.current = null
+      } else { lowSecR.current = null }
+
+      // Low HP heartbeat
+      if (hpR.current <= 2 && hpR.current > 0 && remainR.current > 0) {
+        const beat = Math.floor(now / 800) % 2
+        if (beat === 0 && lowSecR.current !== -999) {
+          // just use the time warning ref to avoid double play
+        }
       }
 
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
-
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (remainR.current <= 0) { finish(); rafR.current = null; return }
+      rafR.current = requestAnimationFrame(step)
     }
+    rafR.current = requestAnimationFrame(step)
+    return () => { if (rafR.current !== null) cancelAnimationFrame(rafR.current); lastR.current = null }
+  }, [finish, play, effects])
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
-    return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
-    }
-  }, [finishGame, playAudio, effects])
-
-  const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
-  const comboMultiplier = toComboMultiplier(combo)
-  const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const tier = toDifficultyTier(score)
-  const tierLabel = TIER_LABELS[clampNumber(tier, 0, TIER_LABELS.length - 1)]
-  const tierColor = TIER_COLORS[clampNumber(tier, 0, TIER_COLORS.length - 1)]
-  const tierBg = TIER_BG[clampNumber(tier, 0, TIER_BG.length - 1)]
-  const comboLabel = getComboLabel(combo)
-  const comboColor = getComboColor(combo)
-  const timerPercent = (remainingMs / ROUND_DURATION_MS) * 100
-  const timerColor = isLowTime ? '#ef4444' : isFever ? '#f59e0b' : '#4ade80'
-  const operatorClass = problem.operator === '+' ? 'op-plus' : problem.operator === '-' ? 'op-minus' : problem.operator === 'x' ? 'op-multiply' : 'op-divide'
-  const choicesGridClass = problem.choices.length > 4 ? 'cols-6' : 'cols-4'
+  // Derived
+  const isLow = remainingMs <= LOW_TIME_MS
+  const cMult = comboMult(combo)
+  const bestDisp = useMemo(() => Math.max(bestScore, score), [bestScore, score])
+  const t = tier(score)
+  const tLabel = TIER_LABELS[clamp(t, 0, 4)]
+  const tColor = TIER_COLORS[clamp(t, 0, 4)]
+  const cLabel = getComboLabel(combo)
+  const cColor = getComboColor(combo)
+  const pct = (remainingMs / ROUND_DURATION_MS) * 100
+  const barColor = isLow ? PAL.red : isFever ? PAL.gold : PAL.green
+  const gridCls = problem.choices.length > 4 ? 'c6' : 'c4'
+  const bubbleCls = problem.type === 'bomb' ? 'bomb-bubble' : problem.type === 'gold' ? 'gold-bubble' : problem.type === 'speed' ? 'speed-bubble' : ''
+  const btnTypeCls = problem.type === 'bomb' ? 'bomb-btn' : problem.type === 'gold' ? 'gold-btn' : problem.type === 'speed' ? 'speed-btn' : ''
 
   return (
     <section
       className="mini-game-panel math-blitz-panel"
       aria-label="math-blitz-game"
-      style={{
-        maxWidth: '432px',
-        margin: '0 auto',
-        overflow: 'hidden',
-        position: 'relative',
-        height: '100%',
-        background: tierBg,
-        ...effects.getShakeStyle(),
-      }}
+      style={{ maxWidth: '432px', margin: '0 auto', position: 'relative', height: '100%', ...effects.getShakeStyle() }}
     >
-      <style>{GAME_EFFECTS_CSS}{MATH_BLITZ_CSS}</style>
+      <style>{GAME_EFFECTS_CSS}{CSS}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
-      {showLevelUp && <div className="mb-level-up-flash" key={levelUpKey} />}
+      {/* CRT scanlines */}
+      <div className="mb-crt" />
 
-      <button className="mb-exit-btn" type="button" onClick={handleExit}>X</button>
+      {/* Pixel stars background */}
+      {STARS.map(s => (
+        <div key={s.key} className="mb-star" style={{ left: s.left, top: s.top, '--dur': s.dur, '--delay': s.delay } as React.CSSProperties} />
+      ))}
 
-      {/* Header: Score + Best */}
-      <div className="mb-header">
-        <div className="mb-score-box">
-          <p className="mb-score-value">{score.toLocaleString()}</p>
-          <p className="mb-score-label">SCORE</p>
+      {/* Low HP vignette */}
+      {hp <= 2 && hp > 0 && <div className="mb-vignette" />}
+
+      {/* Level up flash */}
+      {showLvlFlash && <div className="mb-lvl-flash" key={lvlKey} />}
+
+      {/* Floating indicators */}
+      {floats.map(f => (
+        <span key={f.id} className={`mb-float ${f.cls}`} style={{ color: f.color }}>{f.text}</span>
+      ))}
+
+      {/* --- TOP BAR --- */}
+      <div className="mb-topbar">
+        <div className="mb-score-block">
+          <p className="mb-score-num">{score.toLocaleString()}</p>
+          <p className="mb-score-sub">BEST {bestDisp.toLocaleString()}</p>
         </div>
-        <span className="mb-tier-badge" style={{ background: tierColor }}>{tierLabel}</span>
-        <p className="mb-best-badge">BEST {displayedBestScore.toLocaleString()}</p>
+        <span className="mb-tier-pill" style={{ background: tColor }}>{tLabel}</span>
+        <button className="mb-exit-btn" type="button" onClick={handleExit}>X</button>
       </div>
 
-      {/* Timer Bar */}
-      <div className={`mb-timer-bar ${isLowTime ? 'mb-time-pulse' : ''}`}>
-        <div className="mb-timer-fill" style={{ width: `${timerPercent}%`, background: timerColor }} />
-        <span className="mb-timer-text" style={{ color: isLowTime ? '#ef4444' : '#4b5563' }}>
+      {/* --- HP BAR --- */}
+      <div className="mb-hp-row">
+        <p className="mb-hp-label">HP</p>
+        <div className="mb-hp-hearts">
+          {Array.from({ length: MAX_HP }, (_, i) => (
+            <div
+              key={i}
+              className={`mb-heart ${i >= hp ? 'empty' : ''} ${hpAnim === 'hit' && i === hp ? 'hit' : ''} ${hpAnim === 'heal' && i === hp - 1 ? 'heal' : ''}`}
+            />
+          ))}
+        </div>
+        {hasShield && <div className="mb-shield-icon" />}
+      </div>
+
+      {/* --- TIMER --- */}
+      <div className={`mb-timer-wrap ${isLow ? 'danger' : ''}`}>
+        <div className="mb-timer-inner" style={{
+          width: `${pct}%`,
+          background: `repeating-linear-gradient(90deg, ${barColor} 0px, ${barColor} 4px, transparent 4px, transparent 6px)`,
+        }} />
+        <span className="mb-timer-txt">
           {(remainingMs / 1000).toFixed(1)}s
           {timeSpeed > 1 && ` x${timeSpeed.toFixed(1)}`}
         </span>
       </div>
 
-      {/* Info Strip */}
-      <div className="mb-info-strip">
-        <p className="mb-info-item">COMBO<strong style={{ color: comboColor }}>{combo}</strong></p>
-        <p className="mb-info-item">x<strong>{comboMultiplier}</strong></p>
-        <p className="mb-info-item">SOLVED<strong>{solvedCount}</strong></p>
+      {/* --- INFO ROW --- */}
+      <div className="mb-info-row">
+        <p style={{ margin: 0 }}>COMBO<span className="mb-info-val" style={{ color: cColor }}>{combo}</span></p>
+        <p style={{ margin: 0 }}>x<span className="mb-info-val">{cMult}</span></p>
+        <p style={{ margin: 0 }}>SOLVED<span className="mb-info-val">{solvedCount}</span></p>
       </div>
 
-      {/* Fever Banner */}
-      {isFever && (
-        <div className="mb-fever-banner">
-          FEVER x{FEVER_SCORE_MULTIPLIER}! ({feverProblemsLeft} left)
+      {/* Fever banner */}
+      {isFever && <div className="mb-fever-strip">FEVER x{FEVER_MULT}! ({feverLeft})</div>}
+
+      {/* Speed round banner */}
+      {speedRoundLeft > 0 && !isFever && <div className="mb-speed-strip">SPEED ROUND! ({speedRoundLeft})</div>}
+
+      {/* Combo label */}
+      {cLabel && <p className="mb-combo-label" style={{ color: cColor }}>{cLabel}</p>}
+
+      {/* --- PROBLEM STAGE --- */}
+      <div className="mb-stage">
+        <img src={charImg} alt="" className={`mb-char ${charAnim}`} />
+
+        <div className={`mb-bubble ${bubbleCls}`}>
+          {problem.type !== 'normal' && (
+            <span className="mb-problem-type-tag" style={{
+              background: problem.type === 'bomb' ? PAL.red : problem.type === 'gold' ? PAL.gold : PAL.blue,
+            }}>
+              {problem.type === 'bomb' ? 'BOMB!' : problem.type === 'gold' ? 'GOLD x3!' : 'SPEED!'}
+            </span>
+          )}
+          <p className={`mb-prob-txt ${isLow ? 'urgent' : ''}`}>
+            {problem.left} {problem.operator} {problem.right} = ?
+          </p>
         </div>
-      )}
-
-      {/* Combo Label */}
-      {comboLabel && (
-        <p style={{ textAlign: 'center', fontSize: 'clamp(0.7rem, 3vw, 1rem)', fontWeight: 900, color: comboColor, margin: '2px 0', fontFamily: "'Press Start 2P', monospace" }}>
-          {comboLabel}
-        </p>
-      )}
-
-      {/* Problem Area */}
-      <div className="mb-problem-area">
-        {/* Combo Burst */}
-        {comboBurstText && (
-          <span className="mb-combo-burst" key={comboBurstKey} style={{ color: comboColor }}>
-            {comboBurstText}
-          </span>
-        )}
-
-        {/* Fast Bonus Indicator */}
-        {showFastBonus && (
-          <span className="mb-fast-bonus-indicator" key={fastBonusKey}>+TIME!</span>
-        )}
-
-        {/* Streak Indicator */}
-        {showStreak && (
-          <span className="mb-streak-indicator" key={streakKey}>STREAK +{PERFECT_STREAK_BONUS}!</span>
-        )}
-
-        <img
-          src={charImage}
-          alt="character"
-          className={`mb-character ${charAnim === 'correct' ? 'correct-bounce' : charAnim === 'wrong' ? 'wrong-wobble' : ''}`}
-        />
-
-        <span className={`mb-operator-icon ${operatorClass}`}>
-          {problem.operator}
-        </span>
-
-        <p className={`mb-problem-text ${isLowTime ? 'low-time' : ''}`}>
-          {problem.left} {problem.operator} {problem.right} = ?
-        </p>
       </div>
 
-      {/* Choices Grid */}
-      <div className={`mb-choices-grid ${choicesGridClass}`}>
-        {problem.choices.map((choice, index) => {
-          const isCorrectFlash = correctFlashIndex === index
-          const isWrongShake = wrongShakeIndex === index
-          let choiceClass = 'mb-choice-btn'
-          if (isCorrectFlash) choiceClass += ' correct-flash'
-          if (isWrongShake) choiceClass += ' wrong-shake'
-          if (isFever) choiceClass += ' fever-btn'
+      {/* --- CHOICES --- */}
+      <div className={`mb-grid ${gridCls}`}>
+        {problem.choices.map((c, i) => {
+          let cls = 'mb-btn'
+          if (correctIdx === i) cls += ' correct'
+          else if (wrongIdx === i) cls += ' wrong'
+          else if (isFever) cls += ' fever-btn'
+          else if (btnTypeCls) cls += ` ${btnTypeCls}`
 
           return (
-            <button
-              className={choiceClass}
-              key={`choice-${index}-${choice}`}
-              type="button"
-              onClick={() => handleChoiceTap(choice, index)}
-              style={isFever ? { borderColor: '#f59e0b', boxShadow: '0 3px 0 #d97706, 0 0 8px rgba(245,158,11,0.3)' } : undefined}
-            >
-              {choice}
+            <button key={`${i}-${c}`} className={cls} type="button" onClick={() => handleTap(c, i)}>
+              {c}
             </button>
           )
         })}

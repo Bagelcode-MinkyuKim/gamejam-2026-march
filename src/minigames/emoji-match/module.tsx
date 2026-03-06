@@ -3,15 +3,15 @@ import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import characterImg from '../../../assets/images/same-character/kim-yeonja.png'
 
-// Sound imports
-import correctSfx from '../../../assets/sounds/emoji-match-correct.mp3'
-import wrongSfx from '../../../assets/sounds/emoji-match-wrong.mp3'
-import comboSfx from '../../../assets/sounds/emoji-match-combo.mp3'
-import feverSfx from '../../../assets/sounds/emoji-match-fever.mp3'
-import shuffleSfx from '../../../assets/sounds/emoji-match-shuffle.mp3'
-import timeWarnSfx from '../../../assets/sounds/emoji-match-time-warning.mp3'
-import speedBonusSfx from '../../../assets/sounds/emoji-match-speed-bonus.mp3'
-import bombSfx from '../../../assets/sounds/emoji-match-bomb.mp3'
+// 8-bit sound imports
+import correctSfx from '../../../assets/sounds/emoji-match-correct-8bit.mp3'
+import wrongSfx from '../../../assets/sounds/emoji-match-wrong-8bit.mp3'
+import comboSfx from '../../../assets/sounds/emoji-match-combo-8bit.mp3'
+import feverSfx from '../../../assets/sounds/emoji-match-fever-8bit.mp3'
+import shuffleSfx from '../../../assets/sounds/emoji-match-shuffle-8bit.mp3'
+import mysterySfx from '../../../assets/sounds/emoji-match-mystery-8bit.mp3'
+import perfectSfx from '../../../assets/sounds/emoji-match-perfect-8bit.mp3'
+import dangerSfx from '../../../assets/sounds/emoji-match-danger-8bit.mp3'
 import gameOverSfx from '../../../assets/sounds/game-over-hit.mp3'
 
 // ─── Constants ────────────────────────────────────────────
@@ -23,119 +23,131 @@ const SCORE_CORRECT = 5
 const SCORE_WRONG = -2
 const INITIAL_POOL_SIZE = 8
 const POOL_GROWTH_PER_ROUND = 2
-const MAX_POOL_SIZE = 24
-const FEEDBACK_DURATION_MS = 250
-const SHUFFLE_ANIMATION_MS = 180
+const MAX_POOL_SIZE = 20
+const FEEDBACK_DURATION_MS = 220
+const SHUFFLE_ANIMATION_MS = 160
 const LOW_TIME_THRESHOLD_MS = 8000
 
-// Gimmick constants
+// Gimmick
 const COMBO_MULTIPLIER_STEP = 0.25
 const SPEED_BONUS_THRESHOLD_MS = 1500
 const SPEED_BONUS_POINTS = 5
-const TIME_BONUS_PER_CORRECT_MS = 300
+const TIME_BONUS_PER_CORRECT_MS = 350
 const FEVER_COMBO_THRESHOLD = 8
 const FEVER_DURATION_MS = 6000
 const FEVER_MULTIPLIER = 3
 
-// Special emoji constants
-const BOMB_CHANCE = 0.08
-const RAINBOW_CHANCE = 0.06
+// Special items
+const BOMB_CHANCE = 0.07
+const MYSTERY_CHANCE = 0.06
 const FREEZE_CHANCE = 0.05
-const FREEZE_DURATION_MS = 3000
 const BOMB_EMOJI = '\u{1F4A3}'
-const RAINBOW_EMOJI = '\u{1F308}'
+const MYSTERY_EMOJI = '\u{2753}'
 const FREEZE_EMOJI = '\u{2744}\u{FE0F}'
+const FREEZE_DURATION_MS = 3000
 
-const COMBO_MILESTONE_THRESHOLDS = [5, 10, 15, 25, 40] as const
+const COMBO_MILESTONES = [5, 10, 15, 25, 40] as const
 
-const EMOJI_POOL: string[] = [
-  '\u{1F600}', '\u{1F60E}', '\u{1F929}', '\u{1F631}', '\u{1F973}', '\u{1F634}',
-  '\u{1F914}', '\u{1F624}', '\u{1F976}', '\u{1F92F}', '\u{1F608}', '\u{1F47B}',
-  '\u{1F480}', '\u{1F916}', '\u{1F47D}', '\u{1F383}', '\u{1F436}', '\u{1F431}',
-  '\u{1F43C}', '\u{1F98A}', '\u{1F438}', '\u{1F981}', '\u{1F427}', '\u{1F419}',
+// Pixel art item pool — retro game sprites as styled emoji
+const ITEM_POOL = [
+  { emoji: '\u{2764}\u{FE0F}', label: 'HEART', color: '#ef4444' },
+  { emoji: '\u{2B50}', label: 'STAR', color: '#eab308' },
+  { emoji: '\u{1F48E}', label: 'GEM', color: '#3b82f6' },
+  { emoji: '\u{1F451}', label: 'CROWN', color: '#f59e0b' },
+  { emoji: '\u{1F525}', label: 'FIRE', color: '#f97316' },
+  { emoji: '\u{26A1}', label: 'BOLT', color: '#facc15' },
+  { emoji: '\u{1F31F}', label: 'GLOW', color: '#a855f7' },
+  { emoji: '\u{1F480}', label: 'SKULL', color: '#9ca3af' },
+  { emoji: '\u{1F47E}', label: 'ALIEN', color: '#22c55e' },
+  { emoji: '\u{1F916}', label: 'ROBOT', color: '#6366f1' },
+  { emoji: '\u{1F34E}', label: 'APPLE', color: '#dc2626' },
+  { emoji: '\u{1F344}', label: 'SHROOM', color: '#b91c1c' },
+  { emoji: '\u{1F3AE}', label: 'PAD', color: '#7c3aed' },
+  { emoji: '\u{1F3B2}', label: 'DICE', color: '#f472b6' },
+  { emoji: '\u{1F3AF}', label: 'TARGET', color: '#ef4444' },
+  { emoji: '\u{1F52E}', label: 'ORB', color: '#8b5cf6' },
+  { emoji: '\u{1F6E1}\u{FE0F}', label: 'SHIELD', color: '#3b82f6' },
+  { emoji: '\u{2694}\u{FE0F}', label: 'SWORD', color: '#6b7280' },
+  { emoji: '\u{1F48A}', label: 'POTION', color: '#14b8a6' },
+  { emoji: '\u{1F36D}', label: 'CANDY', color: '#ec4899' },
 ]
 
-const PARTICLE_EMOJIS = ['\u{2728}', '\u{1F31F}', '\u{1F4AB}', '\u{26A1}', '\u{1F525}', '\u{1F4A5}', '\u{1F308}', '\u{1F48E}'] as const
-const PARTICLE_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'] as const
+const PIXEL_PARTICLES = ['\u{25A0}', '\u{25AA}', '\u{25AB}', '\u{2588}', '\u{2592}', '\u{2593}'] as const
+const NEON_COLORS = ['#00ff88', '#ff0080', '#00ccff', '#ffcc00', '#ff6600', '#cc00ff', '#00ffcc', '#ff3333'] as const
 
 // ─── Helpers ──────────────────────────────────────────────
 
-function pickRandom<T>(array: readonly T[]): T {
-  return array[Math.floor(Math.random() * array.length)]
+function pick<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
 }
 
-function buildGrid(targetEmoji: string, poolSize: number): string[] {
-  const availablePool = EMOJI_POOL.slice(0, poolSize)
-  const distractors = availablePool.filter((e) => e !== targetEmoji)
-  const targetCount = 1 + Math.floor(Math.random() * 2) // 1-2 targets
-  const targetIndices = new Set<number>()
-  while (targetIndices.size < targetCount) {
-    targetIndices.add(Math.floor(Math.random() * GRID_CELL_COUNT))
+function buildGrid(targetIdx: number, poolSize: number): number[] {
+  const targetCount = 1 + Math.floor(Math.random() * 2)
+  const targetPositions = new Set<number>()
+  while (targetPositions.size < targetCount) {
+    targetPositions.add(Math.floor(Math.random() * GRID_CELL_COUNT))
   }
 
-  const cells: string[] = []
-  for (let i = 0; i < GRID_CELL_COUNT; i += 1) {
-    if (targetIndices.has(i)) {
-      cells.push(targetEmoji)
+  const cells: number[] = []
+  for (let i = 0; i < GRID_CELL_COUNT; i++) {
+    if (targetPositions.has(i)) {
+      cells.push(targetIdx)
     } else {
-      // Small chance for special emojis
       const rand = Math.random()
       if (rand < BOMB_CHANCE) {
-        cells.push(BOMB_EMOJI)
-      } else if (rand < BOMB_CHANCE + RAINBOW_CHANCE) {
-        cells.push(RAINBOW_EMOJI)
-      } else if (rand < BOMB_CHANCE + RAINBOW_CHANCE + FREEZE_CHANCE) {
-        cells.push(FREEZE_EMOJI)
+        cells.push(-1) // bomb
+      } else if (rand < BOMB_CHANCE + MYSTERY_CHANCE) {
+        cells.push(-2) // mystery
+      } else if (rand < BOMB_CHANCE + MYSTERY_CHANCE + FREEZE_CHANCE) {
+        cells.push(-3) // freeze
       } else {
-        cells.push(pickRandom(distractors))
+        let distractor = Math.floor(Math.random() * poolSize)
+        while (distractor === targetIdx) {
+          distractor = Math.floor(Math.random() * poolSize)
+        }
+        cells.push(distractor)
       }
     }
   }
   return cells
 }
 
-function pickNewTarget(currentTarget: string, poolSize: number): string {
-  const pool = EMOJI_POOL.slice(0, poolSize)
-  const candidates = pool.filter((e) => e !== currentTarget)
-  return pickRandom(candidates.length > 0 ? candidates : pool)
+function pickNewTarget(current: number, poolSize: number): number {
+  let next = Math.floor(Math.random() * poolSize)
+  while (next === current && poolSize > 1) {
+    next = Math.floor(Math.random() * poolSize)
+  }
+  return next
 }
 
 function computePoolSize(round: number): number {
   return Math.min(MAX_POOL_SIZE, INITIAL_POOL_SIZE + (round - 1) * POOL_GROWTH_PER_ROUND)
 }
 
-function getComboLabel(combo: number): string {
-  if (combo < 3) return ''
-  if (combo < 5) return 'NICE!'
-  if (combo < 10) return 'GREAT!'
-  if (combo < 15) return 'AMAZING!'
-  if (combo < 25) return 'FANTASTIC!'
-  return 'GODLIKE!'
+function getComboLabel(c: number): string {
+  if (c < 3) return ''
+  if (c < 5) return 'NICE'
+  if (c < 10) return 'GREAT'
+  if (c < 15) return 'AMAZING'
+  if (c < 25) return 'FANTASTIC'
+  return 'GODLIKE'
 }
 
-function getComboColor(combo: number): string {
-  if (combo < 5) return '#22c55e'
-  if (combo < 10) return '#3b82f6'
-  if (combo < 15) return '#f59e0b'
-  if (combo < 25) return '#ef4444'
-  return '#a855f7'
-}
+// ─── Types ────────────────────────────────────────────────
 
-// ─── Particle / Floating types ────────────────────────────
-
-interface Particle {
+interface PixelParticle {
   readonly id: number
   readonly x: number
   readonly y: number
   readonly vx: number
   readonly vy: number
-  readonly emoji: string
+  readonly char: string
+  readonly color: string
   readonly size: number
   readonly createdAt: number
-  readonly color: string
 }
 
-interface FloatingText {
+interface FloatText {
   readonly id: number
   readonly text: string
   readonly x: number
@@ -145,7 +157,18 @@ interface FloatingText {
   readonly createdAt: number
 }
 
-type CellFeedback = { index: number; kind: 'correct' | 'wrong' | 'bomb' | 'rainbow' | 'freeze' }
+type CellFB = { index: number; kind: 'correct' | 'wrong' | 'bomb' | 'mystery' | 'freeze' }
+
+// Mystery block rewards
+type MysteryReward = 'points' | 'time' | 'fever' | 'doubleNext'
+
+function rollMysteryReward(): MysteryReward {
+  const r = Math.random()
+  if (r < 0.35) return 'points'
+  if (r < 0.6) return 'time'
+  if (r < 0.85) return 'fever'
+  return 'doubleNext'
+}
 
 // ─── Game Component ───────────────────────────────────────
 
@@ -155,130 +178,123 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [maxCombo, setMaxCombo] = useState(0)
   const [round, setRound] = useState(1)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
-  const [targetEmoji, setTargetEmoji] = useState(() => pickRandom(EMOJI_POOL.slice(0, INITIAL_POOL_SIZE)))
-  const [grid, setGrid] = useState<string[]>(() => buildGrid(targetEmoji, INITIAL_POOL_SIZE))
-  const [cellFeedback, setCellFeedback] = useState<CellFeedback | null>(null)
+  const [targetIdx, setTargetIdx] = useState(() => Math.floor(Math.random() * INITIAL_POOL_SIZE))
+  const [grid, setGrid] = useState<number[]>(() => buildGrid(targetIdx, INITIAL_POOL_SIZE))
+  const [cellFB, setCellFB] = useState<CellFB | null>(null)
   const [isShuffling, setIsShuffling] = useState(false)
   const [isFever, setIsFever] = useState(false)
   const [feverMs, setFeverMs] = useState(0)
   const [isFrozen, setIsFrozen] = useState(false)
   const [frozenMs, setFrozenMs] = useState(0)
-  const [particles, setParticles] = useState<Particle[]>([])
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([])
+  const [isDoubleNext, setIsDoubleNext] = useState(false)
+  const [particles, setParticles] = useState<PixelParticle[]>([])
+  const [floats, setFloats] = useState<FloatText[]>([])
   const [isShaking, setIsShaking] = useState(false)
   const [shakeIntensity, setShakeIntensity] = useState(0)
-  const [isFlashing, setIsFlashing] = useState(false)
-  const [flashColor, setFlashColor] = useState('rgba(255,255,255,0.6)')
-  const [bgHue, setBgHue] = useState(40)
-  const [milestoneFlash, setMilestoneFlash] = useState<string | null>(null)
-  const [gamePhase, setGamePhase] = useState<'playing' | 'finished'>('playing')
+  const [flashColor, setFlashColor] = useState('')
+  const [bgHue, setBgHue] = useState(220)
+  const [milestone, setMilestone] = useState<string | null>(null)
+  const [phase, setPhase] = useState<'playing' | 'finished'>('playing')
   const [correctCount, setCorrectCount] = useState(0)
-  const [cellScales, setCellScales] = useState<number[]>(Array(GRID_CELL_COUNT).fill(1))
-  const [, setTimeWarningPlayed] = useState(false)
+  const [perfectRounds, setPerfectRounds] = useState(0)
+  const [, setWrongInRound] = useState(false)
+  const [, setDangerPlayed] = useState(false)
   const [isNewRecord, setIsNewRecord] = useState(false)
+  const [crtFlicker, setCrtFlicker] = useState(false)
 
-  // Refs for RAF-safe state
+  // Refs
   const scoreRef = useRef(0)
   const comboRef = useRef(0)
   const maxComboRef = useRef(0)
   const roundRef = useRef(1)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
-  const targetEmojiRef = useRef(targetEmoji)
+  const targetIdxRef = useRef(targetIdx)
   const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const feedbackTimerRef = useRef<number | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const lastFrameRef = useRef<number | null>(null)
+  const fbTimerRef = useRef<number | null>(null)
   const isFeverRef = useRef(false)
   const feverMsRef = useRef(0)
   const isFrozenRef = useRef(false)
   const frozenMsRef = useRef(0)
-  const lastCorrectAtRef = useRef(0)
-  const particleIdRef = useRef(0)
-  const particlesRef = useRef<Particle[]>([])
-  const floatingTextIdRef = useRef(0)
-  const floatingTextsRef = useRef<FloatingText[]>([])
+  const isDoubleNextRef = useRef(false)
+  const lastCorrectRef = useRef(0)
+  const pIdRef = useRef(0)
+  const particlesRef = useRef<PixelParticle[]>([])
+  const ftIdRef = useRef(0)
+  const floatsRef = useRef<FloatText[]>([])
   const shakeTimerRef = useRef<number | null>(null)
   const flashTimerRef = useRef<number | null>(null)
-  const milestoneTimerRef = useRef<number | null>(null)
-  const lastMilestoneRef = useRef(0)
+  const msTimerRef = useRef<number | null>(null)
+  const lastMsRef = useRef(0)
   const correctCountRef = useRef(0)
+  const perfectRoundsRef = useRef(0)
+  const wrongInRoundRef = useRef(false)
   const gridRef = useRef(grid)
   gridRef.current = grid
 
   // Audio refs
-  const correctAudioRef = useRef<HTMLAudioElement | null>(null)
-  const wrongAudioRef = useRef<HTMLAudioElement | null>(null)
-  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
-  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
-  const shuffleAudioRef = useRef<HTMLAudioElement | null>(null)
-  const timeWarnAudioRef = useRef<HTMLAudioElement | null>(null)
-  const speedBonusAudioRef = useRef<HTMLAudioElement | null>(null)
-  const bombAudioRef = useRef<HTMLAudioElement | null>(null)
-  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const correctARef = useRef<HTMLAudioElement | null>(null)
+  const wrongARef = useRef<HTMLAudioElement | null>(null)
+  const comboARef = useRef<HTMLAudioElement | null>(null)
+  const feverARef = useRef<HTMLAudioElement | null>(null)
+  const shuffleARef = useRef<HTMLAudioElement | null>(null)
+  const mysteryARef = useRef<HTMLAudioElement | null>(null)
+  const perfectARef = useRef<HTMLAudioElement | null>(null)
+  const dangerARef = useRef<HTMLAudioElement | null>(null)
+  const gameOverARef = useRef<HTMLAudioElement | null>(null)
 
-  const clearTimeoutSafe = (timerRef: { current: number | null }) => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
+  const clrTimer = (r: { current: number | null }) => {
+    if (r.current !== null) { window.clearTimeout(r.current); r.current = null }
   }
 
-  const playAudio = useCallback(
-    (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
-      const audio = audioRef.current
-      if (audio === null) return
-      audio.currentTime = 0
-      audio.volume = Math.min(1, Math.max(0, volume))
-      audio.playbackRate = playbackRate
-      void audio.play().catch(() => {})
-    },
-    [],
-  )
+  const playA = useCallback((r: { current: HTMLAudioElement | null }, vol: number, rate = 1) => {
+    const a = r.current
+    if (!a) return
+    a.currentTime = 0
+    a.volume = Math.min(1, Math.max(0, vol))
+    a.playbackRate = rate
+    void a.play().catch(() => {})
+  }, [])
 
-  // Particles
-  const spawnParticles = useCallback((count: number, centerX: number, centerY: number, customEmojis?: readonly string[]) => {
+  // Pixel particles
+  const spawnPixels = useCallback((count: number, cx: number, cy: number, colors?: readonly string[]) => {
     const now = performance.now()
-    const emojis = customEmojis ?? PARTICLE_EMOJIS
-    const newParticles: Particle[] = []
+    const cols = colors ?? NEON_COLORS
+    const np: PixelParticle[] = []
     for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.8
-      const speed = 100 + Math.random() * 220
-      particleIdRef.current += 1
-      newParticles.push({
-        id: particleIdRef.current,
-        x: centerX + (Math.random() - 0.5) * 30,
-        y: centerY + (Math.random() - 0.5) * 30,
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.9
+      const speed = 120 + Math.random() * 250
+      pIdRef.current++
+      np.push({
+        id: pIdRef.current,
+        x: cx + (Math.random() - 0.5) * 20,
+        y: cy + (Math.random() - 0.5) * 20,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        emoji: pickRandom(emojis),
-        size: 8 + Math.random() * 12,
+        char: pick(PIXEL_PARTICLES),
+        color: pick(cols),
+        size: 10 + Math.random() * 16,
         createdAt: now,
-        color: pickRandom(PARTICLE_COLORS),
       })
     }
-    const merged = [...particlesRef.current, ...newParticles].slice(-40)
+    const merged = [...particlesRef.current, ...np].slice(-50)
     particlesRef.current = merged
     setParticles(merged)
   }, [])
 
-  // Floating text
-  const spawnFloatingText = useCallback((text: string, x: number, y: number, color: string, size = 20) => {
-    floatingTextIdRef.current += 1
-    const ft: FloatingText = {
-      id: floatingTextIdRef.current,
-      text, x, y, color, size,
-      createdAt: performance.now(),
-    }
-    const merged = [...floatingTextsRef.current, ft].slice(-10)
-    floatingTextsRef.current = merged
-    setFloatingTexts(merged)
+  const spawnFloat = useCallback((text: string, x: number, y: number, color: string, size = 20) => {
+    ftIdRef.current++
+    const f: FloatText = { id: ftIdRef.current, text, x, y, color, size, createdAt: performance.now() }
+    const merged = [...floatsRef.current, f].slice(-12)
+    floatsRef.current = merged
+    setFloats(merged)
   }, [])
 
-  // Effects
-  const triggerShake = useCallback((intensity: number) => {
+  const shake = useCallback((intensity: number) => {
     setIsShaking(true)
     setShakeIntensity(intensity)
-    clearTimeoutSafe(shakeTimerRef)
+    clrTimer(shakeTimerRef)
     shakeTimerRef.current = window.setTimeout(() => {
       shakeTimerRef.current = null
       setIsShaking(false)
@@ -286,45 +302,44 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     }, 120)
   }, [])
 
-  const triggerFlash = useCallback((color = 'rgba(255,255,255,0.6)', durationMs = 80) => {
-    setIsFlashing(true)
+  const flash = useCallback((color: string, dur = 80) => {
     setFlashColor(color)
-    clearTimeoutSafe(flashTimerRef)
+    clrTimer(flashTimerRef)
     flashTimerRef.current = window.setTimeout(() => {
       flashTimerRef.current = null
-      setIsFlashing(false)
-    }, durationMs)
+      setFlashColor('')
+    }, dur)
   }, [])
 
-  const triggerMilestone = useCallback((text: string) => {
-    setMilestoneFlash(text)
-    clearTimeoutSafe(milestoneTimerRef)
-    milestoneTimerRef.current = window.setTimeout(() => {
-      milestoneTimerRef.current = null
-      setMilestoneFlash(null)
-    }, 1200)
+  const showMilestone = useCallback((text: string) => {
+    setMilestone(text)
+    clrTimer(msTimerRef)
+    msTimerRef.current = window.setTimeout(() => { msTimerRef.current = null; setMilestone(null) }, 1200)
   }, [])
 
-  // Cell tap animation
-  const animateCell = useCallback((index: number) => {
-    setCellScales(prev => {
-      const next = [...prev]
-      next[index] = 1.15
-      return next
-    })
-    setTimeout(() => {
-      setCellScales(prev => {
-        const next = [...prev]
-        next[index] = 1
-        return next
-      })
-    }, 150)
+  const triggerCrtFlicker = useCallback(() => {
+    setCrtFlicker(true)
+    setTimeout(() => setCrtFlicker(false), 100)
   }, [])
 
   const advanceRound = useCallback(() => {
+    // Perfect round check
+    if (!wrongInRoundRef.current) {
+      perfectRoundsRef.current++
+      setPerfectRounds(perfectRoundsRef.current)
+      const bonus = 15 + roundRef.current * 2
+      scoreRef.current += bonus
+      setScore(scoreRef.current)
+      playA(perfectARef, 0.5, 1.1)
+      spawnFloat(`PERFECT! +${bonus}`, 160, 120, '#00ff88', 24)
+      spawnPixels(10, 200, 200, ['#00ff88', '#00ffcc', '#88ff00'])
+    }
+
     const nextRound = roundRef.current + 1
     roundRef.current = nextRound
     setRound(nextRound)
+    setWrongInRound(false)
+    wrongInRoundRef.current = false
 
     // Bonus every 5 rounds
     if (nextRound % 5 === 0) {
@@ -333,34 +348,36 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + bonusTime)
       scoreRef.current += bonusScore
       setScore(scoreRef.current)
-      playAudio(comboAudioRef, 0.6, 1.3)
-      triggerMilestone(`ROUND ${nextRound} BONUS!`)
-      spawnFloatingText(`+${bonusScore} +${bonusTime / 1000}s`, 150, 200, '#a855f7', 26)
-      spawnParticles(12, 200, 250, ['\u{1F389}', '\u{1F38A}', '\u{2728}', '\u{1F31F}'])
-      triggerShake(8)
-      triggerFlash('rgba(168,85,247,0.4)', 150)
+      playA(comboARef, 0.6, 1.3)
+      showMilestone(`STAGE ${nextRound}`)
+      spawnFloat(`+${bonusScore} +${bonusTime / 1000}s`, 150, 180, '#ffcc00', 26)
+      spawnPixels(14, 200, 250, ['#ffcc00', '#ff6600', '#ff0080'])
+      shake(10)
+      flash('rgba(255,204,0,0.3)', 150)
+      triggerCrtFlicker()
     }
 
     const nextPoolSize = computePoolSize(nextRound)
-    const nextTarget = pickNewTarget(targetEmojiRef.current, nextPoolSize)
-    targetEmojiRef.current = nextTarget
-    setTargetEmoji(nextTarget)
+    const nextTarget = pickNewTarget(targetIdxRef.current, nextPoolSize)
+    targetIdxRef.current = nextTarget
+    setTargetIdx(nextTarget)
 
     setIsShuffling(true)
-    playAudio(shuffleAudioRef, 0.35, 1.1)
+    playA(shuffleARef, 0.35, 1.1 + Math.random() * 0.2)
     const nextGrid = buildGrid(nextTarget, nextPoolSize)
     setTimeout(() => {
       setGrid(nextGrid)
       setIsShuffling(false)
     }, SHUFFLE_ANIMATION_MS)
-  }, [playAudio, spawnFloatingText, spawnParticles, triggerMilestone, triggerShake, triggerFlash])
+  }, [playA, spawnFloat, spawnPixels, showMilestone, shake, flash, triggerCrtFlicker])
 
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
-    setGamePhase('finished')
-    clearTimeoutSafe(feedbackTimerRef)
-    playAudio(gameOverAudioRef, 0.64, 0.95)
+    setPhase('finished')
+    clrTimer(fbTimerRef)
+    playA(gameOverARef, 0.64, 0.95)
+    triggerCrtFlicker()
 
     if (scoreRef.current > bestScore) {
       setTimeout(() => setIsNewRecord(true), 800)
@@ -368,333 +385,281 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     onFinish({ score: scoreRef.current, durationMs: elapsedMs })
-  }, [onFinish, playAudio, bestScore])
+  }, [onFinish, playA, bestScore, triggerCrtFlicker])
 
-  const handleCellTap = useCallback(
-    (cellIndex: number) => {
-      if (finishedRef.current || isShuffling || gamePhase !== 'playing') return
-      if (cellFeedback !== null && cellFeedback.kind === 'correct') return
+  const handleCellTap = useCallback((cellIndex: number) => {
+    if (finishedRef.current || isShuffling || phase !== 'playing') return
+    if (cellFB !== null && cellFB.kind === 'correct') return
 
-      const tappedEmoji = gridRef.current[cellIndex]
-      animateCell(cellIndex)
+    const cellVal = gridRef.current[cellIndex]
+    const col = cellIndex % GRID_SIZE
+    const row = Math.floor(cellIndex / GRID_SIZE)
+    const px = 16 + col * 92 + 42
+    const py = 260 + row * 92 + 42
 
-      // Calculate cell center for particles
-      const col = cellIndex % GRID_SIZE
-      const row = Math.floor(cellIndex / GRID_SIZE)
-      const cellW = 90 // approximate
-      const cellH = 90
-      const px = 16 + col * (cellW + 8) + cellW / 2
-      const py = 200 + row * (cellH + 8) + cellH / 2
+    // --- Bomb ---
+    if (cellVal === -1) {
+      playA(comboARef, 0.5, 0.8)
+      shake(14)
+      flash('rgba(255,100,0,0.5)', 150)
+      spawnPixels(18, px, py, ['#ff6600', '#ff0000', '#ffcc00', '#ff3333'])
+      const bombScore = 15 * (isFeverRef.current ? FEVER_MULTIPLIER : 1) * (isDoubleNextRef.current ? 2 : 1)
+      if (isDoubleNextRef.current) { isDoubleNextRef.current = false; setIsDoubleNext(false) }
+      scoreRef.current += bombScore
+      setScore(scoreRef.current)
+      spawnFloat(`BOOM +${bombScore}`, px - 30, py - 30, '#ff6600', 24)
+      triggerCrtFlicker()
+      setCellFB({ index: cellIndex, kind: 'bomb' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); advanceRound() }, FEEDBACK_DURATION_MS)
+      return
+    }
 
-      // Special emoji: Bomb
-      if (tappedEmoji === BOMB_EMOJI) {
-        playAudio(bombAudioRef, 0.5)
-        triggerShake(12)
-        triggerFlash('rgba(255,165,0,0.5)', 150)
-        spawnParticles(15, px, py, ['\u{1F4A5}', '\u{1F525}', '\u{26A1}', '\u{1F4AB}'])
-        spawnFloatingText('BOMB! +15', px - 30, py - 40, '#f97316', 24)
+    // --- Mystery ---
+    if (cellVal === -2) {
+      playA(mysteryARef, 0.5)
+      const reward = rollMysteryReward()
+      let rewardText = ''
+      let rewardColor = '#ffcc00'
 
-        const bombScore = 15 * (isFeverRef.current ? FEVER_MULTIPLIER : 1)
-        scoreRef.current += bombScore
-        setScore(scoreRef.current)
-
-        setCellFeedback({ index: cellIndex, kind: 'bomb' })
-        clearTimeoutSafe(feedbackTimerRef)
-        feedbackTimerRef.current = window.setTimeout(() => {
-          feedbackTimerRef.current = null
-          setCellFeedback(null)
-          advanceRound()
-        }, FEEDBACK_DURATION_MS)
-        return
-      }
-
-      // Special emoji: Rainbow (wildcard - always correct)
-      if (tappedEmoji === RAINBOW_EMOJI) {
-        playAudio(speedBonusAudioRef, 0.5, 1.2)
-        triggerFlash('rgba(147,51,234,0.4)', 120)
-        spawnParticles(10, px, py, ['\u{1F308}', '\u{2728}', '\u{1F31F}', '\u{1F4AB}'])
-        spawnFloatingText('RAINBOW! +20', px - 40, py - 40, '#a855f7', 24)
-
-        const rainbowScore = 20 * (isFeverRef.current ? FEVER_MULTIPLIER : 1)
-        scoreRef.current += rainbowScore
-        setScore(scoreRef.current)
-
-        const nextCombo = comboRef.current + 1
-        comboRef.current = nextCombo
-        setCombo(nextCombo)
-        if (nextCombo > maxComboRef.current) { maxComboRef.current = nextCombo; setMaxCombo(nextCombo) }
-
-        setCellFeedback({ index: cellIndex, kind: 'rainbow' })
-        clearTimeoutSafe(feedbackTimerRef)
-        feedbackTimerRef.current = window.setTimeout(() => {
-          feedbackTimerRef.current = null
-          setCellFeedback(null)
-          advanceRound()
-        }, FEEDBACK_DURATION_MS)
-        return
-      }
-
-      // Special emoji: Freeze
-      if (tappedEmoji === FREEZE_EMOJI) {
-        playAudio(comboAudioRef, 0.5, 0.8)
-        triggerFlash('rgba(56,189,248,0.5)', 200)
-        spawnParticles(8, px, py, ['\u{2744}\u{FE0F}', '\u{1F4A0}', '\u{1F9CA}'])
-        spawnFloatingText('FREEZE!', px - 30, py - 40, '#38bdf8', 26)
-
-        isFrozenRef.current = true
-        frozenMsRef.current = FREEZE_DURATION_MS
-        setIsFrozen(true)
-        setFrozenMs(FREEZE_DURATION_MS)
-
-        setCellFeedback({ index: cellIndex, kind: 'freeze' })
-        clearTimeoutSafe(feedbackTimerRef)
-        feedbackTimerRef.current = window.setTimeout(() => {
-          feedbackTimerRef.current = null
-          setCellFeedback(null)
-        }, FEEDBACK_DURATION_MS)
-        return
-      }
-
-      const isCorrect = tappedEmoji === targetEmojiRef.current
-
-      if (isCorrect) {
-        const now = performance.now()
-        const timeSinceLastCorrect = now - lastCorrectAtRef.current
-        lastCorrectAtRef.current = now
-
-        const nextCombo = comboRef.current + 1
-        comboRef.current = nextCombo
-        setCombo(nextCombo)
-        if (nextCombo > maxComboRef.current) { maxComboRef.current = nextCombo; setMaxCombo(nextCombo) }
-
-        correctCountRef.current += 1
-        setCorrectCount(correctCountRef.current)
-
-        // Scoring
-        const comboMult = 1 + nextCombo * COMBO_MULTIPLIER_STEP
-        const feverMult = isFeverRef.current ? FEVER_MULTIPLIER : 1
-        const isSpeedBonus = timeSinceLastCorrect > 0 && timeSinceLastCorrect < SPEED_BONUS_THRESHOLD_MS
-        const speedBonus = isSpeedBonus ? SPEED_BONUS_POINTS : 0
-        const totalPoints = Math.round((SCORE_CORRECT + speedBonus) * comboMult * feverMult)
-        scoreRef.current += totalPoints
-        setScore(scoreRef.current)
-
-        // Time bonus
-        remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_PER_CORRECT_MS)
-
-        // Fever activation
-        if (nextCombo >= FEVER_COMBO_THRESHOLD && !isFeverRef.current) {
+      switch (reward) {
+        case 'points': {
+          const pts = 25 * (isFeverRef.current ? FEVER_MULTIPLIER : 1)
+          scoreRef.current += pts
+          setScore(scoreRef.current)
+          rewardText = `+${pts} PTS`
+          rewardColor = '#00ff88'
+          break
+        }
+        case 'time': {
+          remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + 5000)
+          rewardText = '+5s TIME'
+          rewardColor = '#00ccff'
+          break
+        }
+        case 'fever': {
           isFeverRef.current = true
           feverMsRef.current = FEVER_DURATION_MS
           setIsFever(true)
           setFeverMs(FEVER_DURATION_MS)
-          playAudio(feverAudioRef, 0.6)
-          spawnParticles(16, px, py, ['\u{1F525}', '\u{26A1}', '\u{1F31F}', '\u{1F4A5}'])
-          spawnFloatingText('FEVER x3!', px - 40, py - 60, '#ef4444', 30)
-          triggerShake(12)
+          playA(feverARef, 0.5)
+          rewardText = 'FEVER!'
+          rewardColor = '#ff0080'
+          break
         }
-
-        // Combo milestones
-        for (const threshold of COMBO_MILESTONE_THRESHOLDS) {
-          if (nextCombo === threshold && lastMilestoneRef.current < threshold) {
-            lastMilestoneRef.current = threshold
-            playAudio(comboAudioRef, 0.6, 0.8 + threshold * 0.01)
-            triggerMilestone(`${threshold} COMBO!`)
-            spawnParticles(12, 200, 300, ['\u{1F31F}', '\u{2728}', '\u{1F4AB}'])
-            break
-          }
+        case 'doubleNext': {
+          isDoubleNextRef.current = true
+          setIsDoubleNext(true)
+          rewardText = 'x2 NEXT'
+          rewardColor = '#cc00ff'
+          break
         }
-
-        // Speed bonus feedback
-        if (isSpeedBonus) {
-          playAudio(speedBonusAudioRef, 0.4)
-          spawnFloatingText('FAST!', px + 20, py - 30, '#14b8a6', 18)
-        }
-
-        // Sound
-        const pitch = 1 + Math.min(0.4, nextCombo * 0.03)
-        playAudio(correctAudioRef, 0.5, pitch)
-
-        // Effects
-        const particleCount = Math.min(10, 4 + Math.floor(nextCombo / 3))
-        spawnParticles(particleCount, px, py)
-        spawnFloatingText(`+${totalPoints}`, px, py - 20, isFeverRef.current ? '#ef4444' : '#fbbf24', 22 + Math.min(8, nextCombo))
-        triggerFlash()
-        triggerShake(Math.min(8, 2 + nextCombo * 0.3))
-        setBgHue(prev => (prev + 20 + Math.random() * 15) % 360)
-
-        setCellFeedback({ index: cellIndex, kind: 'correct' })
-        clearTimeoutSafe(feedbackTimerRef)
-        feedbackTimerRef.current = window.setTimeout(() => {
-          feedbackTimerRef.current = null
-          setCellFeedback(null)
-          advanceRound()
-        }, FEEDBACK_DURATION_MS)
-      } else {
-        // Wrong tap
-        comboRef.current = 0
-        setCombo(0)
-        lastMilestoneRef.current = 0
-
-        const penalty = Math.abs(SCORE_WRONG)
-        scoreRef.current = Math.max(0, scoreRef.current + SCORE_WRONG)
-        setScore(scoreRef.current)
-
-        playAudio(wrongAudioRef, 0.45, 0.85)
-        triggerShake(6)
-        triggerFlash('rgba(239,68,68,0.4)')
-        spawnFloatingText(`-${penalty}`, px, py - 20, '#ef4444', 20)
-
-        setCellFeedback({ index: cellIndex, kind: 'wrong' })
-        clearTimeoutSafe(feedbackTimerRef)
-        feedbackTimerRef.current = window.setTimeout(() => {
-          feedbackTimerRef.current = null
-          setCellFeedback(null)
-        }, FEEDBACK_DURATION_MS)
       }
-    },
-    [isShuffling, cellFeedback, gamePhase, playAudio, advanceRound, spawnParticles, spawnFloatingText, triggerShake, triggerFlash, triggerMilestone, animateCell],
-  )
 
-  const handleExit = useCallback(() => {
-    playAudio(wrongAudioRef, 0.3, 1.02)
-    onExit()
-  }, [onExit, playAudio])
+      spawnPixels(12, px, py, ['#ffcc00', '#cc00ff', '#00ff88', '#00ccff'])
+      spawnFloat(`? ${rewardText}`, px - 40, py - 30, rewardColor, 22)
+      shake(6)
+      flash('rgba(204,0,255,0.3)', 120)
+      triggerCrtFlicker()
+
+      setCellFB({ index: cellIndex, kind: 'mystery' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); advanceRound() }, FEEDBACK_DURATION_MS + 100)
+      return
+    }
+
+    // --- Freeze ---
+    if (cellVal === -3) {
+      playA(comboARef, 0.5, 0.7)
+      flash('rgba(0,180,255,0.4)', 200)
+      spawnPixels(10, px, py, ['#00ccff', '#88ddff', '#00ff88'])
+      spawnFloat('FREEZE!', px - 30, py - 30, '#00ccff', 24)
+      isFrozenRef.current = true
+      frozenMsRef.current = FREEZE_DURATION_MS
+      setIsFrozen(true)
+      setFrozenMs(FREEZE_DURATION_MS)
+
+      setCellFB({ index: cellIndex, kind: 'freeze' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null) }, FEEDBACK_DURATION_MS)
+      return
+    }
+
+    // --- Correct ---
+    const isCorrect = cellVal === targetIdxRef.current
+    if (isCorrect) {
+      const now = performance.now()
+      const timeSinceLast = now - lastCorrectRef.current
+      lastCorrectRef.current = now
+
+      const nextCombo = comboRef.current + 1
+      comboRef.current = nextCombo
+      setCombo(nextCombo)
+      if (nextCombo > maxComboRef.current) { maxComboRef.current = nextCombo; setMaxCombo(nextCombo) }
+      correctCountRef.current++
+      setCorrectCount(correctCountRef.current)
+
+      const comboMult = 1 + nextCombo * COMBO_MULTIPLIER_STEP
+      const feverMult = isFeverRef.current ? FEVER_MULTIPLIER : 1
+      const doubleMult = isDoubleNextRef.current ? 2 : 1
+      const isSpeed = timeSinceLast > 0 && timeSinceLast < SPEED_BONUS_THRESHOLD_MS
+      const speedBonus = isSpeed ? SPEED_BONUS_POINTS : 0
+      const totalPts = Math.round((SCORE_CORRECT + speedBonus) * comboMult * feverMult * doubleMult)
+
+      if (isDoubleNextRef.current) { isDoubleNextRef.current = false; setIsDoubleNext(false) }
+
+      scoreRef.current += totalPts
+      setScore(scoreRef.current)
+      remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_PER_CORRECT_MS)
+
+      // Fever
+      if (nextCombo >= FEVER_COMBO_THRESHOLD && !isFeverRef.current) {
+        isFeverRef.current = true
+        feverMsRef.current = FEVER_DURATION_MS
+        setIsFever(true)
+        setFeverMs(FEVER_DURATION_MS)
+        playA(feverARef, 0.6)
+        spawnPixels(20, px, py, ['#ff0080', '#ff3333', '#ff6600', '#ffcc00'])
+        spawnFloat('FEVER x3!', px - 40, py - 50, '#ff0080', 30)
+        shake(14)
+        triggerCrtFlicker()
+      }
+
+      // Combo milestones
+      for (const ms of COMBO_MILESTONES) {
+        if (nextCombo === ms && lastMsRef.current < ms) {
+          lastMsRef.current = ms
+          playA(comboARef, 0.6, 0.8 + ms * 0.01)
+          showMilestone(`${ms} COMBO!`)
+          spawnPixels(14, 200, 300, ['#ffcc00', '#ff0080', '#00ff88'])
+          triggerCrtFlicker()
+          break
+        }
+      }
+
+      if (isSpeed) {
+        spawnFloat('FAST!', px + 20, py - 20, '#00ffcc', 16)
+      }
+
+      const pitch = 1 + Math.min(0.5, nextCombo * 0.04)
+      playA(correctARef, 0.5, pitch)
+
+      const pCount = Math.min(12, 5 + Math.floor(nextCombo / 3))
+      const itemColor = ITEM_POOL[cellVal]?.color ?? '#00ff88'
+      spawnPixels(pCount, px, py, [itemColor, '#00ff88', '#ffcc00', '#00ccff'])
+      spawnFloat(`+${totalPts}`, px, py - 20, isFeverRef.current ? '#ff0080' : '#00ff88', 22 + Math.min(10, nextCombo))
+      flash('rgba(0,255,136,0.3)')
+      shake(Math.min(10, 2 + nextCombo * 0.3))
+      setBgHue(prev => (prev + 15 + Math.random() * 10) % 360)
+
+      setCellFB({ index: cellIndex, kind: 'correct' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); advanceRound() }, FEEDBACK_DURATION_MS)
+    } else {
+      // --- Wrong ---
+      comboRef.current = 0
+      setCombo(0)
+      lastMsRef.current = 0
+      wrongInRoundRef.current = true
+      setWrongInRound(true)
+
+      scoreRef.current = Math.max(0, scoreRef.current + SCORE_WRONG)
+      setScore(scoreRef.current)
+
+      playA(wrongARef, 0.45, 0.85)
+      shake(8)
+      flash('rgba(255,0,0,0.4)')
+      spawnFloat(`-${Math.abs(SCORE_WRONG)}`, px, py - 20, '#ff3333', 18)
+      spawnPixels(4, px, py, ['#ff3333', '#ff0000'])
+      triggerCrtFlicker()
+
+      setCellFB({ index: cellIndex, kind: 'wrong' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null) }, FEEDBACK_DURATION_MS)
+    }
+  }, [isShuffling, cellFB, phase, playA, advanceRound, spawnPixels, spawnFloat, shake, flash, showMilestone, triggerCrtFlicker])
 
   // Key handler
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        handleExit()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleExit])
+    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onExit])
 
   // Audio preload
   useEffect(() => {
-    const audioSources = [
-      { ref: correctAudioRef, src: correctSfx },
-      { ref: wrongAudioRef, src: wrongSfx },
-      { ref: comboAudioRef, src: comboSfx },
-      { ref: feverAudioRef, src: feverSfx },
-      { ref: shuffleAudioRef, src: shuffleSfx },
-      { ref: timeWarnAudioRef, src: timeWarnSfx },
-      { ref: speedBonusAudioRef, src: speedBonusSfx },
-      { ref: bombAudioRef, src: bombSfx },
-      { ref: gameOverAudioRef, src: gameOverSfx },
+    const srcs = [
+      { ref: correctARef, src: correctSfx },
+      { ref: wrongARef, src: wrongSfx },
+      { ref: comboARef, src: comboSfx },
+      { ref: feverARef, src: feverSfx },
+      { ref: shuffleARef, src: shuffleSfx },
+      { ref: mysteryARef, src: mysterySfx },
+      { ref: perfectARef, src: perfectSfx },
+      { ref: dangerARef, src: dangerSfx },
+      { ref: gameOverARef, src: gameOverSfx },
     ]
-    for (const { ref, src } of audioSources) {
-      const audio = new Audio(src)
-      audio.preload = 'auto'
-      ref.current = audio
-    }
+    for (const { ref, src } of srcs) { const a = new Audio(src); a.preload = 'auto'; ref.current = a }
     return () => {
-      clearTimeoutSafe(feedbackTimerRef)
-      clearTimeoutSafe(shakeTimerRef)
-      clearTimeoutSafe(flashTimerRef)
-      clearTimeoutSafe(milestoneTimerRef)
-      for (const { ref } of audioSources) ref.current = null
+      clrTimer(fbTimerRef); clrTimer(shakeTimerRef); clrTimer(flashTimerRef); clrTimer(msTimerRef)
+      for (const { ref } of srcs) ref.current = null
     }
   }, [])
 
   // Main game loop
   useEffect(() => {
-    lastFrameAtRef.current = null
-
+    lastFrameRef.current = null
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
+      if (finishedRef.current) { rafRef.current = null; return }
+      if (lastFrameRef.current === null) lastFrameRef.current = now
+      const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameRef.current = now
 
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
-
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-
-      // Frozen timer
+      // Frozen
       if (isFrozenRef.current) {
-        frozenMsRef.current = Math.max(0, frozenMsRef.current - deltaMs)
+        frozenMsRef.current = Math.max(0, frozenMsRef.current - dt)
         setFrozenMs(frozenMsRef.current)
-        if (frozenMsRef.current <= 0) {
-          isFrozenRef.current = false
-          setIsFrozen(false)
-        }
+        if (frozenMsRef.current <= 0) { isFrozenRef.current = false; setIsFrozen(false) }
       }
 
-      // Only count down if not frozen
       if (!isFrozenRef.current) {
-        remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
+        remainingMsRef.current = Math.max(0, remainingMsRef.current - dt)
       }
       setRemainingMs(remainingMsRef.current)
 
-      // Time warning sound
+      // Danger sound
       if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && remainingMsRef.current > LOW_TIME_THRESHOLD_MS - 100) {
-        setTimeWarningPlayed(prev => {
-          if (!prev) {
-            playAudio(timeWarnAudioRef, 0.4)
-            return true
-          }
-          return prev
-        })
+        setDangerPlayed(prev => { if (!prev) { playA(dangerARef, 0.4); return true }; return prev })
       }
 
-      // Fever timer
+      // Fever
       if (isFeverRef.current) {
-        feverMsRef.current = Math.max(0, feverMsRef.current - deltaMs)
+        feverMsRef.current = Math.max(0, feverMsRef.current - dt)
         setFeverMs(feverMsRef.current)
-        if (feverMsRef.current <= 0) {
-          isFeverRef.current = false
-          setIsFever(false)
-        }
+        if (feverMsRef.current <= 0) { isFeverRef.current = false; setIsFever(false) }
       }
 
-      // Particle cleanup
-      const aliveParticles = particlesRef.current.filter(p => now - p.createdAt < 700)
-      if (aliveParticles.length !== particlesRef.current.length) {
-        particlesRef.current = aliveParticles
-        setParticles(aliveParticles)
-      }
+      // Cleanup particles
+      const ap = particlesRef.current.filter(p => now - p.createdAt < 700)
+      if (ap.length !== particlesRef.current.length) { particlesRef.current = ap; setParticles(ap) }
+      const af = floatsRef.current.filter(f => now - f.createdAt < 1200)
+      if (af.length !== floatsRef.current.length) { floatsRef.current = af; setFloats(af) }
 
-      // Floating text cleanup
-      const aliveTexts = floatingTextsRef.current.filter(ft => now - ft.createdAt < 1200)
-      if (aliveTexts.length !== floatingTextsRef.current.length) {
-        floatingTextsRef.current = aliveTexts
-        setFloatingTexts(aliveTexts)
-      }
-
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
-
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (remainingMsRef.current <= 0) { finishGame(); rafRef.current = null; return }
+      rafRef.current = window.requestAnimationFrame(step)
     }
+    rafRef.current = window.requestAnimationFrame(step)
+    return () => { if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }; lastFrameRef.current = null }
+  }, [finishGame, playA])
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
-
-    return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
-    }
-  }, [finishGame, playAudio])
-
-  // Derived state
-  const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
-  const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS && remainingMs > 0
+  // Derived
+  const displayBest = useMemo(() => Math.max(bestScore, score), [bestScore, score])
+  const isLow = remainingMs <= LOW_TIME_THRESHOLD_MS && remainingMs > 0
   const comboMult = 1 + combo * COMBO_MULTIPLIER_STEP
   const comboLabel = getComboLabel(combo)
-  const timerSeconds = (remainingMs / 1000).toFixed(1)
-  const progressPercent = ((ROUND_DURATION_MS - remainingMs) / ROUND_DURATION_MS) * 100
+  const timerSec = (remainingMs / 1000).toFixed(1)
+  const progress = ((ROUND_DURATION_MS - remainingMs) / ROUND_DURATION_MS) * 100
+  const targetItem = ITEM_POOL[targetIdx]
 
   const shakeStyle = isShaking
     ? { transform: `translate(${(Math.random() - 0.5) * shakeIntensity * 2}px, ${(Math.random() - 0.5) * shakeIntensity * 2}px)` }
@@ -702,250 +667,245 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
   return (
     <section
-      className="mini-game-panel emoji-match-panel"
+      className={`mini-game-panel em-retro ${crtFlicker ? 'crt-flicker' : ''}`}
       aria-label="emoji-match-game"
-      style={{
-        position: 'relative',
-        maxWidth: '432px',
-        width: '100%',
-        height: '100%',
-        margin: '0 auto',
-        overflow: 'hidden',
-        ...shakeStyle,
-      }}
+      style={{ position: 'relative', maxWidth: '432px', width: '100%', height: '100%', margin: '0 auto', overflow: 'hidden', ...shakeStyle }}
     >
       <style>{`
-        .emoji-match-panel {
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        .em-retro {
           display: flex;
           flex-direction: column;
-          background: linear-gradient(180deg, #f5f4ef 0%, #ede9df 50%, #e8e5dc 100%);
+          background: linear-gradient(180deg, #0a0a1a 0%, #0f0f2e 50%, #1a0a2e 100%);
           user-select: none;
           -webkit-user-select: none;
           touch-action: manipulation;
-          font-family: 'Segoe UI', system-ui, sans-serif;
+          font-family: 'Press Start 2P', monospace;
+          image-rendering: pixelated;
+          color: #e0e0e0;
         }
 
-        .em-header {
+        /* CRT scanline overlay */
+        .em-retro::after {
+          content: '';
+          position: absolute;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.12) 2px,
+            rgba(0,0,0,0.12) 4px
+          );
+          pointer-events: none;
+          z-index: 50;
+        }
+
+        .em-retro.crt-flicker::after {
+          background: repeating-linear-gradient(
+            0deg,
+            rgba(255,255,255,0.03),
+            rgba(255,255,255,0.03) 2px,
+            rgba(0,0,0,0.15) 2px,
+            rgba(0,0,0,0.15) 4px
+          );
+        }
+
+        /* Header */
+        .em-hdr {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 10px 14px 8px;
-          background: linear-gradient(180deg, #f59e0b, #d97706);
-          color: white;
+          gap: 8px;
+          padding: 8px 10px 6px;
+          background: linear-gradient(180deg, rgba(0,255,136,0.15), rgba(0,0,0,0));
+          border-bottom: 2px solid #00ff88;
           flex-shrink: 0;
         }
 
         .em-avatar {
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          border: 3px solid #fde68a;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          width: 36px;
+          height: 36px;
+          border-radius: 4px;
+          border: 2px solid #00ff88;
+          image-rendering: pixelated;
+          box-shadow: 0 0 8px rgba(0,255,136,0.4);
         }
 
-        .em-score-area { flex: 1; }
+        .em-sc { flex: 1; }
 
-        .em-score {
+        .em-sc-val {
           margin: 0;
-          font-size: clamp(26px, 7vw, 34px);
-          font-weight: 900;
-          text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          transition: color 0.15s;
+          font-size: clamp(14px, 4vw, 18px);
+          font-weight: 400;
+          color: #00ff88;
+          text-shadow: 0 0 8px rgba(0,255,136,0.6);
         }
 
-        .em-score.fever-score {
-          color: #fef08a;
-          text-shadow: 0 0 12px rgba(254,240,138,0.6);
-        }
+        .em-sc-val.fever { color: #ff0080; text-shadow: 0 0 12px rgba(255,0,128,0.8); }
 
-        .em-best {
+        .em-sc-best {
           margin: 0;
-          font-size: 10px;
-          color: rgba(255,255,255,0.7);
+          font-size: 7px;
+          color: #4a5568;
         }
 
-        .em-timer-area { text-align: right; }
-
-        .em-time {
+        .em-timer {
           margin: 0;
-          font-size: clamp(22px, 6vw, 28px);
-          font-weight: 900;
-          text-shadow: 0 1px 3px rgba(0,0,0,0.3);
-          transition: color 0.15s;
+          font-size: clamp(12px, 3.5vw, 16px);
+          color: #00ccff;
+          text-shadow: 0 0 6px rgba(0,204,255,0.5);
+          text-align: right;
         }
 
-        .em-time.low-time {
-          color: #fef2f2;
-          animation: em-pulse 0.3s infinite alternate;
-        }
+        .em-timer.low { color: #ff3333; animation: em-blink 0.3s infinite alternate; text-shadow: 0 0 10px rgba(255,51,51,0.8); }
+        .em-timer.frozen { color: #00ccff; text-shadow: 0 0 12px rgba(0,204,255,0.8); }
 
-        .em-time.frozen-time {
-          color: #7dd3fc;
-          text-shadow: 0 0 12px rgba(56,189,248,0.6);
-        }
-
-        .em-progress-bar {
-          height: 6px;
-          background: #d4d0c8;
+        /* Progress bar */
+        .em-pbar {
+          height: 4px;
+          background: #1a1a3a;
           flex-shrink: 0;
-          overflow: hidden;
         }
 
-        .em-progress-fill {
+        .em-pfill {
           height: 100%;
-          transition: width 0.1s linear, background 0.3s;
+          transition: width 0.1s linear;
         }
 
-        .em-status-row {
+        /* Status */
+        .em-status {
           display: flex;
           justify-content: center;
           align-items: center;
-          gap: 10px;
-          padding: 4px 14px;
-          min-height: 28px;
+          gap: 8px;
+          padding: 4px 10px;
+          min-height: 24px;
           flex-shrink: 0;
           flex-wrap: wrap;
         }
 
-        .em-combo {
-          font-size: 13px;
+        .em-combo-text {
+          font-size: 8px;
           color: #6b7280;
           margin: 0;
         }
 
-        .em-combo strong {
-          font-size: clamp(18px, 5vw, 24px);
-          color: #d97706;
-        }
+        .em-combo-text strong { font-size: 12px; color: #ffcc00; }
 
-        .em-combo-label {
-          font-size: 16px;
-          font-weight: 900;
+        .em-combo-lbl {
+          font-size: 10px;
+          font-weight: 400;
           margin: 0;
-          animation: em-bounce-in 0.3s ease-out;
+          animation: em-pop 0.3s ease-out;
+          text-shadow: 0 0 8px currentColor;
         }
 
-        .em-fever-banner {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 14px;
-          font-weight: 900;
-          color: #ef4444;
-          animation: em-fever-flash 0.2s ease-in-out infinite alternate;
-          text-shadow: 0 0 10px rgba(239,68,68,0.5);
-        }
-
-        .em-frozen-banner {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 14px;
-          font-weight: 900;
-          color: #38bdf8;
-          animation: em-frozen-glow 0.4s ease-in-out infinite alternate;
-          text-shadow: 0 0 10px rgba(56,189,248,0.5);
-        }
-
-        .em-round-badge {
-          font-size: 11px;
-          font-weight: 700;
-          color: #9ca3af;
+        .em-fever-lbl {
+          font-size: 9px;
+          color: #ff0080;
           margin: 0;
+          animation: em-blink 0.2s infinite alternate;
+          text-shadow: 0 0 10px rgba(255,0,128,0.6);
         }
 
-        .em-fever-gauge {
-          height: 10px;
-          margin: 0 14px 2px;
-          background: #e8e5dc;
-          border-radius: 5px;
-          overflow: hidden;
-          position: relative;
+        .em-frozen-lbl {
+          font-size: 9px;
+          color: #00ccff;
+          margin: 0;
+          animation: em-glow 0.4s infinite alternate;
+          text-shadow: 0 0 10px rgba(0,204,255,0.6);
+        }
+
+        .em-double-lbl {
+          font-size: 8px;
+          color: #cc00ff;
+          margin: 0;
+          animation: em-glow 0.5s infinite alternate;
+        }
+
+        .em-rd { font-size: 7px; color: #4a5568; margin: 0; }
+
+        /* Fever gauge */
+        .em-fgauge {
+          height: 8px;
+          margin: 0 10px 2px;
+          background: #1a1a3a;
+          border: 1px solid #333;
           flex-shrink: 0;
+          position: relative;
+          overflow: hidden;
         }
 
-        .em-fever-gauge-fill {
+        .em-fgauge-fill {
           height: 100%;
-          border-radius: 5px;
           transition: width 0.15s ease-out;
         }
 
-        .em-fever-gauge-label {
+        .em-fgauge-lbl {
           position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
+          inset: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 7px;
-          font-weight: 800;
-          color: #92400e;
+          font-size: 5px;
+          color: #aaa;
           letter-spacing: 1px;
         }
 
-        .em-target-area {
+        /* Target area */
+        .em-target {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 14px;
-          padding: 10px 16px;
-          margin: 4px 14px;
-          background: #fff;
-          border-radius: 16px;
-          border: 3px solid #fbbf24;
-          box-shadow: 0 4px 16px rgba(251,191,36,0.25);
+          gap: 12px;
+          padding: 8px 14px;
+          margin: 4px 10px;
+          background: rgba(0,255,136,0.05);
+          border: 2px solid #00ff88;
+          box-shadow: 0 0 12px rgba(0,255,136,0.2), inset 0 0 20px rgba(0,255,136,0.05);
           flex-shrink: 0;
         }
 
-        .em-target-area.fever-target {
-          border-color: #ef4444;
-          box-shadow: 0 0 20px rgba(239,68,68,0.3);
-          animation: em-fever-border 0.3s ease-in-out infinite alternate;
-        }
+        .em-target.fever-t { border-color: #ff0080; box-shadow: 0 0 16px rgba(255,0,128,0.3); }
+        .em-target.frozen-t { border-color: #00ccff; box-shadow: 0 0 16px rgba(0,204,255,0.3); }
 
-        .em-target-area.frozen-target {
-          border-color: #38bdf8;
-          box-shadow: 0 0 20px rgba(56,189,248,0.3);
-        }
-
-        .em-target-label {
+        .em-target-lbl {
           margin: 0;
-          font-size: clamp(14px, 4vw, 18px);
-          font-weight: 900;
-          color: #92400e;
+          font-size: 10px;
+          color: #00ff88;
           letter-spacing: 3px;
         }
 
-        .em-target-emoji {
+        .em-target-icon {
           margin: 0;
-          font-size: clamp(44px, 12vw, 56px);
-          filter: drop-shadow(0 2px 6px rgba(0,0,0,0.2));
-          animation: em-target-bounce 0.35s ease-out;
+          font-size: clamp(36px, 10vw, 48px);
+          filter: drop-shadow(0 0 8px currentColor);
+          animation: em-pop 0.3s ease-out;
         }
 
-        .em-grid-wrapper {
+        /* Grid */
+        .em-grid-wrap {
           flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 6px 12px;
+          padding: 6px 10px;
           min-height: 0;
         }
 
         .em-grid {
           display: grid;
           grid-template-columns: repeat(${GRID_SIZE}, 1fr);
-          gap: clamp(6px, 2vw, 10px);
+          gap: clamp(5px, 1.5vw, 8px);
           width: 100%;
           max-width: 380px;
-          transition: opacity 0.15s, transform 0.15s;
+          transition: opacity 0.12s, transform 0.12s;
         }
 
         .em-grid.shuffling {
-          opacity: 0.2;
-          transform: scale(0.92) rotate(2deg);
+          opacity: 0.15;
+          transform: scale(0.9);
         }
 
         .em-cell {
@@ -953,211 +913,173 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           align-items: center;
           justify-content: center;
           aspect-ratio: 1;
-          border: 2.5px solid #d4d0c8;
-          border-radius: clamp(12px, 3vw, 18px);
-          background: #fff;
+          border: 2px solid #333;
+          background: #0f0f2e;
           cursor: pointer;
-          transition: transform 0.08s, box-shadow 0.08s, border-color 0.08s, background 0.08s;
-          box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+          transition: all 0.06s;
+          box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
           padding: 0;
           touch-action: manipulation;
           position: relative;
-          overflow: hidden;
         }
 
         .em-cell:active:not(:disabled) {
-          transform: scale(0.88) !important;
+          transform: scale(0.85) !important;
+          box-shadow: inset 0 0 16px rgba(0,255,136,0.3);
         }
 
-        .em-cell:disabled {
-          opacity: 0.5;
-          cursor: default;
-        }
+        .em-cell:disabled { opacity: 0.4; cursor: default; }
 
         .em-cell-correct {
-          background: #dcfce7 !important;
-          border-color: #22c55e !important;
-          box-shadow: 0 0 20px rgba(34,197,94,0.6) !important;
-          transform: scale(1.12);
+          background: rgba(0,255,136,0.15) !important;
+          border-color: #00ff88 !important;
+          box-shadow: 0 0 20px rgba(0,255,136,0.6), inset 0 0 12px rgba(0,255,136,0.2) !important;
         }
 
         .em-cell-wrong {
-          background: #fef2f2 !important;
-          border-color: #ef4444 !important;
-          box-shadow: 0 0 16px rgba(239,68,68,0.4) !important;
+          background: rgba(255,0,0,0.15) !important;
+          border-color: #ff3333 !important;
+          box-shadow: 0 0 16px rgba(255,0,0,0.4) !important;
           animation: em-shake 0.2s ease-out;
         }
 
         .em-cell-bomb {
-          background: #fff7ed !important;
-          border-color: #f97316 !important;
-          box-shadow: 0 0 24px rgba(249,115,22,0.6) !important;
-          animation: em-bomb-burst 0.3s ease-out;
+          background: rgba(255,100,0,0.2) !important;
+          border-color: #ff6600 !important;
+          box-shadow: 0 0 24px rgba(255,100,0,0.6) !important;
+          animation: em-explode 0.3s ease-out;
         }
 
-        .em-cell-rainbow {
-          background: linear-gradient(135deg, #fef3c7, #ddd6fe, #cffafe) !important;
-          border-color: #a855f7 !important;
-          box-shadow: 0 0 24px rgba(168,85,247,0.5) !important;
-          animation: em-rainbow-shimmer 0.3s ease-out;
+        .em-cell-mystery {
+          background: rgba(204,0,255,0.2) !important;
+          border-color: #cc00ff !important;
+          box-shadow: 0 0 24px rgba(204,0,255,0.5) !important;
+          animation: em-pop 0.3s ease-out;
         }
 
         .em-cell-freeze {
-          background: #e0f2fe !important;
-          border-color: #38bdf8 !important;
-          box-shadow: 0 0 24px rgba(56,189,248,0.6) !important;
+          background: rgba(0,204,255,0.15) !important;
+          border-color: #00ccff !important;
+          box-shadow: 0 0 20px rgba(0,204,255,0.5) !important;
         }
 
-        .em-cell-emoji {
-          font-size: clamp(28px, 8vw, 40px);
+        .em-item {
+          font-size: clamp(26px, 7vw, 36px);
           pointer-events: none;
-          filter: drop-shadow(0 1px 3px rgba(0,0,0,0.15));
-          transition: transform 0.08s;
+          filter: drop-shadow(0 0 4px rgba(255,255,255,0.3));
+          image-rendering: auto;
         }
 
-        .em-cell-special {
+        .em-special-dot {
           position: absolute;
-          top: 2px;
-          right: 2px;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          animation: em-special-pulse 0.6s infinite alternate;
+          top: 3px;
+          right: 3px;
+          width: 6px;
+          height: 6px;
+          animation: em-blink 0.5s infinite alternate;
         }
 
-        .em-footer {
-          padding: 6px 12px 10px;
+        /* Footer */
+        .em-foot {
+          padding: 4px 10px 8px;
           text-align: center;
           flex-shrink: 0;
+          border-top: 1px solid #222;
         }
 
-        .em-footer-stats {
+        .em-foot-stats {
           display: flex;
           justify-content: space-around;
-          font-size: 11px;
-          color: #9ca3af;
+          font-size: 7px;
+          color: #4a5568;
           margin-bottom: 4px;
         }
 
-        .em-footer-stats p { margin: 0; }
+        .em-foot-stats p { margin: 0; }
 
-        /* Finished overlay */
-        .em-finished-overlay {
+        /* Overlays */
+        .em-flash-ov {
           position: absolute;
-          top: 0; left: 0; right: 0; bottom: 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          z-index: 30;
-          background: rgba(0, 0, 0, 0.65);
-          animation: em-fade-in 0.3s ease-out;
-          gap: 10px;
+          inset: 0;
+          pointer-events: none;
+          z-index: 15;
+          transition: opacity 0.06s;
         }
 
-        .em-finished-label {
-          font-size: 16px;
-          color: rgba(255,255,255,0.7);
-          margin: 0;
-        }
-
-        .em-finished-score {
-          font-size: clamp(42px, 12vw, 58px);
-          font-weight: 900;
-          color: #fff;
-          text-shadow: 0 4px 20px rgba(0,0,0,0.4);
-          margin: 0;
-          animation: em-countdown-pop 0.6s ease-out;
-        }
-
-        .em-new-record {
-          font-size: clamp(22px, 7vw, 30px);
-          font-weight: 900;
-          color: #fbbf24;
-          text-shadow: 0 0 20px rgba(251,191,36,0.8);
-          animation: em-new-record-enter 0.6s ease-out, em-pulse 0.4s 0.6s ease-in-out infinite alternate;
-          margin: 0;
-          letter-spacing: 3px;
-        }
-
-        /* Milestone overlay */
-        .em-milestone-overlay {
+        .em-ms-ov {
           position: absolute;
-          top: 0; left: 0; right: 0; bottom: 0;
+          inset: 0;
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 25;
           pointer-events: none;
-          animation: em-milestone-bg 1.2s ease-out forwards;
+          animation: em-ms-bg 1.2s ease-out forwards;
         }
 
-        .em-milestone-text {
-          font-size: clamp(32px, 10vw, 48px);
-          font-weight: 900;
-          color: #fff;
-          text-shadow: 0 0 30px rgba(251,191,36,0.8), 0 4px 20px rgba(0,0,0,0.4);
-          animation: em-milestone-pop 0.5s ease-out;
-          letter-spacing: 4px;
+        .em-ms-text {
+          font-size: clamp(18px, 6vw, 28px);
+          color: #ffcc00;
+          text-shadow: 0 0 30px rgba(255,204,0,0.8), 0 0 60px rgba(255,0,128,0.4);
+          animation: em-ms-pop 0.5s ease-out;
+          letter-spacing: 3px;
         }
 
-        /* Flash overlay */
-        .em-flash-overlay {
+        .em-fin-ov {
           position: absolute;
           inset: 0;
-          pointer-events: none;
-          z-index: 15;
-          transition: opacity 0.08s;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          z-index: 30;
+          background: rgba(0,0,0,0.8);
+          animation: em-fade-in 0.3s ease-out;
+          gap: 8px;
         }
 
-        /* Floating text */
-        .em-floating-text {
+        .em-fin-label { font-size: 10px; color: #6b7280; margin: 0; }
+
+        .em-fin-score {
+          font-size: clamp(24px, 8vw, 36px);
+          color: #00ff88;
+          text-shadow: 0 0 20px rgba(0,255,136,0.8);
+          margin: 0;
+          animation: em-pop 0.6s ease-out;
+        }
+
+        .em-fin-record {
+          font-size: clamp(14px, 5vw, 20px);
+          color: #ffcc00;
+          text-shadow: 0 0 20px rgba(255,204,0,0.8);
+          animation: em-pop 0.6s ease-out, em-blink 0.4s 0.6s infinite alternate;
+          margin: 0;
+          letter-spacing: 2px;
+        }
+
+        .em-float {
           position: absolute;
           pointer-events: none;
-          font-weight: 900;
-          text-shadow: 0 2px 6px rgba(0,0,0,0.4);
+          text-shadow: 0 0 8px currentColor;
           z-index: 20;
           animation: em-float-up 1.2s ease-out forwards;
         }
 
-        /* Particle */
-        .em-particle {
+        .em-px {
           position: absolute;
           pointer-events: none;
           z-index: 18;
+          text-shadow: 0 0 6px currentColor;
         }
 
         /* Animations */
-        @keyframes em-pulse {
-          from { transform: scale(1); }
-          to { transform: scale(1.08); }
-        }
+        @keyframes em-blink { from { opacity: 0.6; } to { opacity: 1; } }
+        @keyframes em-glow { from { opacity: 0.7; text-shadow: 0 0 4px currentColor; } to { opacity: 1; text-shadow: 0 0 16px currentColor; } }
 
-        @keyframes em-bounce-in {
-          0% { transform: scale(0.5) translateY(8px); opacity: 0; }
-          60% { transform: scale(1.2) translateY(-2px); opacity: 1; }
-          100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-
-        @keyframes em-fever-flash {
-          from { opacity: 0.7; }
-          to { opacity: 1; }
-        }
-
-        @keyframes em-fever-border {
-          from { border-color: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,0.2); }
-          to { border-color: #f97316; box-shadow: 0 0 24px rgba(239,68,68,0.5); }
-        }
-
-        @keyframes em-frozen-glow {
-          from { opacity: 0.7; text-shadow: 0 0 6px rgba(56,189,248,0.3); }
-          to { opacity: 1; text-shadow: 0 0 16px rgba(56,189,248,0.8); }
-        }
-
-        @keyframes em-target-bounce {
-          0% { transform: scale(0.5); }
-          55% { transform: scale(1.2); }
-          100% { transform: scale(1); }
+        @keyframes em-pop {
+          0% { transform: scale(0.3); opacity: 0; }
+          60% { transform: scale(1.2); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
         }
 
         @keyframes em-shake {
@@ -1168,168 +1090,124 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           80% { transform: translateX(3px); }
         }
 
-        @keyframes em-bomb-burst {
+        @keyframes em-explode {
           0% { transform: scale(1); }
-          30% { transform: scale(1.3); }
-          100% { transform: scale(1.05); }
-        }
-
-        @keyframes em-rainbow-shimmer {
-          0% { transform: scale(1); filter: hue-rotate(0deg); }
-          50% { transform: scale(1.15); filter: hue-rotate(90deg); }
-          100% { transform: scale(1.05); filter: hue-rotate(180deg); }
-        }
-
-        @keyframes em-special-pulse {
-          from { opacity: 0.5; transform: scale(0.8); }
-          to { opacity: 1; transform: scale(1.2); }
+          30% { transform: scale(1.4); }
+          100% { transform: scale(1); }
         }
 
         @keyframes em-float-up {
-          0% { opacity: 1; transform: translateY(0) scale(1.3); }
-          100% { opacity: 0; transform: translateY(-70px) scale(0.6); }
+          0% { opacity: 1; transform: translateY(0) scale(1.2); }
+          100% { opacity: 0; transform: translateY(-65px) scale(0.5); }
         }
 
-        @keyframes em-fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
+        @keyframes em-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-        @keyframes em-countdown-pop {
-          0% { transform: scale(2.5); opacity: 0; }
-          40% { transform: scale(0.85); opacity: 1; }
-          100% { transform: scale(1); opacity: 1; }
-        }
-
-        @keyframes em-new-record-enter {
-          0% { opacity: 0; transform: scale(2.5); }
-          60% { opacity: 1; transform: scale(0.9); }
-          100% { opacity: 1; transform: scale(1); }
-        }
-
-        @keyframes em-milestone-bg {
-          0% { background: rgba(251,191,36,0.3); }
-          30% { background: rgba(251,191,36,0.1); }
+        @keyframes em-ms-bg {
+          0% { background: rgba(255,204,0,0.2); }
+          30% { background: rgba(255,204,0,0.05); }
           100% { background: transparent; }
         }
 
-        @keyframes em-milestone-pop {
-          0% { transform: scale(0) rotate(-10deg); }
+        @keyframes em-ms-pop {
+          0% { transform: scale(0) rotate(-15deg); }
           50% { transform: scale(1.3) rotate(3deg); }
           100% { transform: scale(1) rotate(0deg); }
         }
       `}</style>
 
       {/* Header */}
-      <div className="em-header">
-        <img className="em-avatar" src={characterImg} alt="Character" />
-        <div className="em-score-area">
-          <p className={`em-score ${isFever ? 'fever-score' : ''}`}>{score.toLocaleString()}</p>
-          <p className="em-best">BEST {displayedBestScore.toLocaleString()}</p>
+      <div className="em-hdr">
+        <img className="em-avatar" src={characterImg} alt="avatar" />
+        <div className="em-sc">
+          <p className={`em-sc-val ${isFever ? 'fever' : ''}`}>{score.toLocaleString()}</p>
+          <p className="em-sc-best">BEST {displayBest.toLocaleString()}</p>
         </div>
-        <div className="em-timer-area">
-          <p className={`em-time ${isLowTime ? 'low-time' : ''} ${isFrozen ? 'frozen-time' : ''}`}>
-            {isFrozen ? '\u2744\uFE0F' : ''}{timerSeconds}s
+        <div>
+          <p className={`em-timer ${isLow ? 'low' : ''} ${isFrozen ? 'frozen' : ''}`}>
+            {isFrozen ? '\u2744' : ''}{timerSec}s
           </p>
         </div>
       </div>
 
       {/* Progress */}
-      <div className="em-progress-bar">
-        <div
-          className="em-progress-fill"
-          style={{
-            width: `${progressPercent}%`,
-            background: isFever
-              ? 'linear-gradient(90deg, #ef4444, #f97316, #ef4444)'
-              : isFrozen
-                ? 'linear-gradient(90deg, #38bdf8, #7dd3fc, #38bdf8)'
-                : isLowTime
-                  ? 'linear-gradient(90deg, #ef4444, #f59e0b)'
-                  : `hsl(${bgHue}, 65%, 55%)`,
-          }}
-        />
+      <div className="em-pbar">
+        <div className="em-pfill" style={{
+          width: `${progress}%`,
+          background: isFever ? 'linear-gradient(90deg, #ff0080, #ff6600)' :
+            isFrozen ? '#00ccff' : isLow ? '#ff3333' : `hsl(${bgHue}, 80%, 50%)`,
+        }} />
       </div>
 
       {/* Status row */}
-      <div className="em-status-row">
-        <p className="em-combo">
-          COMBO <strong>{combo}</strong>
-        </p>
-        {comboLabel && (
-          <p className="em-combo-label" key={combo} style={{ color: getComboColor(combo) }}>
-            {comboLabel}
-          </p>
-        )}
-        {comboMult > 1.25 && (
-          <p style={{ margin: 0, fontSize: '13px', fontWeight: 800, color: '#e11d48' }}>x{comboMult.toFixed(1)}</p>
-        )}
-        {isFever && (
-          <span className="em-fever-banner">
-            {'\u{1F525}'} FEVER x{FEVER_MULTIPLIER} ({(feverMs / 1000).toFixed(1)}s)
-          </span>
-        )}
-        {isFrozen && (
-          <span className="em-frozen-banner">
-            {'\u{2744}\u{FE0F}'} FREEZE ({(frozenMs / 1000).toFixed(1)}s)
-          </span>
-        )}
-        <p className="em-round-badge">RD {round}</p>
+      <div className="em-status">
+        <p className="em-combo-text">COMBO <strong>{combo}</strong></p>
+        {comboLabel && <p className="em-combo-lbl" key={combo} style={{ color: combo >= 15 ? '#ff0080' : '#ffcc00' }}>{comboLabel}</p>}
+        {comboMult > 1.25 && <p style={{ margin: 0, fontSize: '8px', color: '#ff0080' }}>x{comboMult.toFixed(1)}</p>}
+        {isFever && <p className="em-fever-lbl">{'\u{1F525}'} FEVER x{FEVER_MULTIPLIER} {(feverMs / 1000).toFixed(1)}s</p>}
+        {isFrozen && <p className="em-frozen-lbl">{'\u2744'} FREEZE {(frozenMs / 1000).toFixed(1)}s</p>}
+        {isDoubleNext && <p className="em-double-lbl">x2 NEXT</p>}
+        <p className="em-rd">RD{round}</p>
       </div>
 
       {/* Fever gauge */}
       {!isFever && combo > 0 && (
-        <div className="em-fever-gauge">
-          <div
-            className="em-fever-gauge-fill"
-            style={{
-              width: `${Math.min(100, (combo / FEVER_COMBO_THRESHOLD) * 100)}%`,
-              background: combo >= FEVER_COMBO_THRESHOLD - 2
-                ? 'linear-gradient(90deg, #f97316, #ef4444)'
-                : 'linear-gradient(90deg, #fbbf24, #f59e0b)',
-            }}
-          />
-          <span className="em-fever-gauge-label">
+        <div className="em-fgauge">
+          <div className="em-fgauge-fill" style={{
+            width: `${Math.min(100, (combo / FEVER_COMBO_THRESHOLD) * 100)}%`,
+            background: combo >= FEVER_COMBO_THRESHOLD - 2
+              ? 'linear-gradient(90deg, #ff0080, #ff3333)'
+              : 'linear-gradient(90deg, #ffcc00, #ff6600)',
+            boxShadow: combo >= FEVER_COMBO_THRESHOLD - 2 ? '0 0 8px rgba(255,0,128,0.5)' : undefined,
+          }} />
+          <span className="em-fgauge-lbl">
             {combo >= FEVER_COMBO_THRESHOLD - 2 ? 'ALMOST!' : `${combo}/${FEVER_COMBO_THRESHOLD}`}
           </span>
         </div>
       )}
 
       {/* Target */}
-      <div className={`em-target-area ${isFever ? 'fever-target' : ''} ${isFrozen ? 'frozen-target' : ''}`}>
-        <p className="em-target-label">FIND</p>
-        <p className="em-target-emoji" key={targetEmoji}>{targetEmoji}</p>
+      <div className={`em-target ${isFever ? 'fever-t' : ''} ${isFrozen ? 'frozen-t' : ''}`}>
+        <p className="em-target-lbl">FIND</p>
+        <p className="em-target-icon" key={targetIdx} style={{ color: targetItem?.color }}>
+          {targetItem?.emoji}
+        </p>
       </div>
 
       {/* Grid */}
-      <div className="em-grid-wrapper">
+      <div className="em-grid-wrap">
         <div className={`em-grid ${isShuffling ? 'shuffling' : ''}`} role="grid">
-          {grid.map((emoji, index) => {
-            const isFeedbackTarget = cellFeedback?.index === index
-            let feedbackClass = ''
-            if (isFeedbackTarget) {
-              switch (cellFeedback.kind) {
-                case 'correct': feedbackClass = 'em-cell-correct'; break
-                case 'wrong': feedbackClass = 'em-cell-wrong'; break
-                case 'bomb': feedbackClass = 'em-cell-bomb'; break
-                case 'rainbow': feedbackClass = 'em-cell-rainbow'; break
-                case 'freeze': feedbackClass = 'em-cell-freeze'; break
+          {grid.map((val, i) => {
+            const isFB = cellFB?.index === i
+            let fbClass = ''
+            if (isFB) {
+              switch (cellFB.kind) {
+                case 'correct': fbClass = 'em-cell-correct'; break
+                case 'wrong': fbClass = 'em-cell-wrong'; break
+                case 'bomb': fbClass = 'em-cell-bomb'; break
+                case 'mystery': fbClass = 'em-cell-mystery'; break
+                case 'freeze': fbClass = 'em-cell-freeze'; break
               }
             }
-            const isSpecial = emoji === BOMB_EMOJI || emoji === RAINBOW_EMOJI || emoji === FREEZE_EMOJI
-            const specialColor = emoji === BOMB_EMOJI ? '#f97316' : emoji === RAINBOW_EMOJI ? '#a855f7' : '#38bdf8'
+
+            let emoji = ''
+            let specialColor = ''
+            if (val === -1) { emoji = BOMB_EMOJI; specialColor = '#ff6600' }
+            else if (val === -2) { emoji = MYSTERY_EMOJI; specialColor = '#cc00ff' }
+            else if (val === -3) { emoji = FREEZE_EMOJI; specialColor = '#00ccff' }
+            else { emoji = ITEM_POOL[val]?.emoji ?? '?' }
+            const isSpecial = val < 0
 
             return (
               <button
-                className={`em-cell ${feedbackClass}`}
-                key={`cell-${index}`}
+                className={`em-cell ${fbClass}`}
+                key={`c-${i}`}
                 type="button"
-                onClick={() => handleCellTap(index)}
-                disabled={finishedRef.current || isShuffling || (cellFeedback !== null && cellFeedback.kind === 'correct')}
-                style={{ transform: `scale(${cellScales[index]})` }}
+                onClick={() => handleCellTap(i)}
+                disabled={finishedRef.current || isShuffling || (cellFB !== null && cellFB.kind === 'correct')}
               >
-                <span className="em-cell-emoji">{emoji}</span>
-                {isSpecial && <span className="em-cell-special" style={{ background: specialColor }} />}
+                <span className="em-item">{emoji}</span>
+                {isSpecial && <span className="em-special-dot" style={{ background: specialColor, boxShadow: `0 0 6px ${specialColor}` }} />}
               </button>
             )
           })}
@@ -1337,77 +1215,59 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       </div>
 
       {/* Footer */}
-      <div className="em-footer">
-        <div className="em-footer-stats">
-          <p>{correctCount} hits</p>
-          <p>max combo {maxCombo}</p>
+      <div className="em-foot">
+        <div className="em-foot-stats">
+          <p>{correctCount} HIT</p>
+          <p>MAX {maxCombo}</p>
+          <p>PERF {perfectRounds}</p>
         </div>
-        <button className="text-button" type="button" onClick={handleExit}>Hub</button>
+        <button className="text-button" type="button" onClick={onExit} style={{ fontFamily: "'Press Start 2P', monospace", fontSize: '8px' }}>
+          HUB
+        </button>
       </div>
 
-      {/* Flash overlay */}
-      {isFlashing && (
-        <div className="em-flash-overlay" style={{ background: flashColor }} />
-      )}
+      {/* Flash */}
+      {flashColor && <div className="em-flash-ov" style={{ background: flashColor }} />}
 
-      {/* Milestone overlay */}
-      {milestoneFlash && (
-        <div className="em-milestone-overlay">
-          <p className="em-milestone-text">{milestoneFlash}</p>
-        </div>
-      )}
+      {/* Milestone */}
+      {milestone && <div className="em-ms-ov"><p className="em-ms-text">{milestone}</p></div>}
 
-      {/* Finished overlay */}
-      {gamePhase === 'finished' && (
-        <div className="em-finished-overlay">
-          <p className="em-finished-label">FINAL SCORE</p>
-          <p className="em-finished-score">{score.toLocaleString()}</p>
-          {isNewRecord && <p className="em-new-record">NEW RECORD!</p>}
-          <p className="em-finished-label">{correctCount} correct / max combo {maxCombo}</p>
+      {/* Finished */}
+      {phase === 'finished' && (
+        <div className="em-fin-ov">
+          <p className="em-fin-label">GAME OVER</p>
+          <p className="em-fin-score">{score.toLocaleString()}</p>
+          {isNewRecord && <p className="em-fin-record">NEW RECORD!</p>}
+          <p className="em-fin-label">{correctCount} HIT / MAX COMBO {maxCombo} / PERFECT {perfectRounds}</p>
         </div>
       )}
 
       {/* Floating texts */}
-      {floatingTexts.map((ft) => {
-        const age = performance.now() - ft.createdAt
-        const progress = Math.min(1, age / 1200)
+      {floats.map(f => {
+        const age = performance.now() - f.createdAt
+        const p = Math.min(1, age / 1200)
         return (
-          <span
-            key={ft.id}
-            className="em-floating-text"
-            style={{
-              left: `${ft.x}px`,
-              top: `${ft.y}px`,
-              color: ft.color,
-              fontSize: `${ft.size}px`,
-              opacity: 1 - progress,
-              transform: `translateY(${-60 * progress}px) scale(${1.3 - progress * 0.5})`,
-            }}
-          >
-            {ft.text}
+          <span key={f.id} className="em-float" style={{
+            left: `${f.x}px`, top: `${f.y}px`, color: f.color, fontSize: `${f.size}px`,
+            opacity: 1 - p, transform: `translateY(${-55 * p}px) scale(${1.2 - p * 0.4})`,
+          }}>
+            {f.text}
           </span>
         )
       })}
 
-      {/* Particles */}
-      {particles.map((p) => {
-        const age = performance.now() - p.createdAt
-        const progress = Math.min(1, age / 700)
-        const x = p.x + p.vx * progress * 0.35
-        const y = p.y + p.vy * progress * 0.35 - 25 * progress
+      {/* Pixel particles */}
+      {particles.map(px => {
+        const age = performance.now() - px.createdAt
+        const p = Math.min(1, age / 700)
+        const x = px.x + px.vx * p * 0.3
+        const y = px.y + px.vy * p * 0.3 - 20 * p
         return (
-          <span
-            key={p.id}
-            className="em-particle"
-            style={{
-              left: `${x}px`,
-              top: `${y}px`,
-              fontSize: `${p.size + 6}px`,
-              opacity: 1 - progress,
-              transform: `scale(${1 - progress * 0.5}) rotate(${progress * 200}deg)`,
-            }}
-          >
-            {p.emoji}
+          <span key={px.id} className="em-px" style={{
+            left: `${x}px`, top: `${y}px`, color: px.color, fontSize: `${px.size}px`,
+            opacity: 1 - p, transform: `scale(${1 - p * 0.5})`,
+          }}>
+            {px.char}
           </span>
         )
       })}
@@ -1418,12 +1278,12 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 export const emojiMatchModule: MiniGameModule = {
   manifest: {
     id: 'emoji-match',
-    title: 'Emoji Match',
-    description: '\uD0C0\uAC9F \uC774\uBAA8\uC9C0\uB97C \uADF8\uB9AC\uB4DC\uC5D0\uC11C \uBE60\uB974\uAC8C \uCC3E\uC544\uB77C! \uD3ED\uD0C4/\uBB34\uC9C0\uAC1C/\uD504\uB9AC\uC988 \uD2B9\uC218 \uC544\uC774\uD15C!',
+    title: 'Pixel Match',
+    description: '\uB808\uD2B8\uB85C \uB3C4\uD2B8 \uC2A4\uD0C0\uC77C! \uD0C0\uAC9F \uC544\uC774\uD15C\uC744 \uCC3E\uC544 \uD0ED\uD558\uB77C!',
     unlockCost: 20,
     baseReward: 10,
     scoreRewardMultiplier: 1.0,
-    accentColor: '#fbbf24',
+    accentColor: '#00ff88',
   },
   Component: EmojiMatchGame,
 }

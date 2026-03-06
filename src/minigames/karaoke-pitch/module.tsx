@@ -11,121 +11,135 @@ import feverSfx from '../../../assets/sounds/karaoke-fever.mp3'
 import comboSfx from '../../../assets/sounds/karaoke-combo.mp3'
 import timeWarningSfx from '../../../assets/sounds/karaoke-time-warning.mp3'
 import gameOverSfx from '../../../assets/sounds/karaoke-game-over.mp3'
+import levelUpSfx from '../../../assets/sounds/karaoke-levelup.mp3'
+import powerUpSfx from '../../../assets/sounds/karaoke-powerup.mp3'
+import starSfx from '../../../assets/sounds/karaoke-star.mp3'
 
 // ─── Game Constants ─────────────────────────────────────────────────
-const ROUND_DURATION_MS = 35000
-const PITCH_BAR_WIDTH = 64
-const TARGET_RADIUS = 20
-const PLAYER_INDICATOR_RADIUS = 16
+const ROUND_DURATION_MS = 40000
+const PITCH_BAR_WIDTH = 72
 
-// Accuracy thresholds
+// Accuracy
 const ACCURACY_PERFECT_THRESHOLD = 0.04
 const ACCURACY_GOOD_THRESHOLD = 0.12
 const ACCURACY_OK_THRESHOLD = 0.25
 
 // Scoring
-const SCORE_PER_SECOND_PERFECT = 150
-const SCORE_PER_SECOND_GOOD = 70
-const SCORE_PER_SECOND_OK = 30
+const SCORE_PER_SECOND_PERFECT = 180
+const SCORE_PER_SECOND_GOOD = 80
+const SCORE_PER_SECOND_OK = 35
 
 // Time
-const LOW_TIME_THRESHOLD_MS = 5000
+const LOW_TIME_THRESHOLD_MS = 7000
 
 // Streak & Fever
 const PERFECT_STREAK_THRESHOLD_MS = 1500
 const FEVER_TRIGGER_STREAKS = 3
 const FEVER_DURATION_MS = 8000
 const FEVER_SCORE_MULTIPLIER = 3
-const STREAK_MILESTONE_BONUS = 80
+const STREAK_MILESTONE_BONUS = 100
 
 // Combo
-const COMBO_DECAY_MS = 600
-const COMBO_BONUS_BASE = 10
+const COMBO_DECAY_MS = 500
+const COMBO_BONUS_BASE = 12
 
-// Difficulty phases
-const PHASE_EASY_MS = 8000
-const PHASE_MEDIUM_MS = 20000
+// Level system
+const LEVEL_THRESHOLDS = [0, 800, 2000, 4000, 7000, 11000, 16000, 22000, 30000]
+const LEVEL_NAMES = ['Lv.1 DEBUT', 'Lv.2 ROOKIE', 'Lv.3 SINGER', 'Lv.4 STAR', 'Lv.5 IDOL', 'Lv.6 LEGEND', 'Lv.7 MASTER', 'Lv.8 GOD', 'Lv.9 MAX']
 
 // Pitch movement
 const SINE_BASE_PERIOD_MS = 3500
-const SINE_MIN_PERIOD_MS = 1200
-const SINE_PERIOD_DECAY_PER_MS = 0.06
+const SINE_MIN_PERIOD_MS = 1000
+const SINE_PERIOD_DECAY_PER_MS = 0.07
 const SINE_SECONDARY_AMPLITUDE = 0.22
 const SINE_SECONDARY_PERIOD_RATIO = 2.73
 
-// Bonus notes
-const BONUS_NOTE_INTERVAL_MS = 4000
-const BONUS_NOTE_DURATION_MS = 2000
-const BONUS_NOTE_SCORE = 200
-const BONUS_NOTE_RADIUS = 0.08
+// Bonus items
+const BONUS_INTERVAL_MS = 3500
+const BONUS_DURATION_MS = 2500
+const BONUS_RADIUS = 0.09
 
-// Visual
-const NOTE_EMOJIS = ['🎵', '🎶', '🎤', '🎼', '🎹', '🎸', '🎺', '🎻'] as const
-const PERFECT_EMOJIS = ['✨', '💫', '⭐', '🌟'] as const
+// Power-ups
+const POWERUP_INTERVAL_MS = 12000
+const POWERUP_DURATION_MS = 3000
+const POWERUP_EFFECT_DURATION_MS = 5000
+
+type PowerUpType = 'double' | 'freeze' | 'magnet'
+const POWERUP_ICONS: Record<PowerUpType, string> = { double: '2x', freeze: '||', magnet: '<>' }
+const POWERUP_COLORS: Record<PowerUpType, string> = { double: '#facc15', freeze: '#38bdf8', magnet: '#a855f7' }
+
+// Retro pixel palette
+const PIXEL_BG_DARK = '#0a0a18'
+const PIXEL_BG_MID = '#12122a'
+const PIXEL_PURPLE = '#9333ea'
+const PIXEL_PINK = '#ec4899'
+const PIXEL_CYAN = '#22d3ee'
+const PIXEL_GREEN = '#22c55e'
+const PIXEL_YELLOW = '#facc15'
+const PIXEL_RED = '#ef4444'
+const PIXEL_WHITE = '#e4e4e7'
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-function clampNumber(value: number, min: number, max: number): number {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-function computeTargetPosition(elapsedMs: number): number {
-  const difficultyFactor = elapsedMs < PHASE_EASY_MS ? 0.7
-    : elapsedMs < PHASE_MEDIUM_MS ? 1.0 : 1.3
+function computeTargetPosition(elapsedMs: number, level: number): number {
+  const difficultyFactor = 0.6 + level * 0.15
   const currentPeriod = Math.max(SINE_MIN_PERIOD_MS, SINE_BASE_PERIOD_MS - elapsedMs * SINE_PERIOD_DECAY_PER_MS)
-  const primaryPhase = (elapsedMs / currentPeriod) * Math.PI * 2
-  const secondaryPhase = (elapsedMs / (currentPeriod * SINE_SECONDARY_PERIOD_RATIO)) * Math.PI * 2
-  const tertiaryPhase = (elapsedMs / (currentPeriod * 0.37)) * Math.PI * 2
-  const primary = Math.sin(primaryPhase)
-  const secondary = Math.sin(secondaryPhase) * SINE_SECONDARY_AMPLITUDE * difficultyFactor
-  const tertiary = Math.sin(tertiaryPhase) * 0.08 * difficultyFactor
-  return clampNumber((primary + secondary + tertiary) * 0.5 + 0.5, 0.02, 0.98)
+  const p1 = (elapsedMs / currentPeriod) * Math.PI * 2
+  const p2 = (elapsedMs / (currentPeriod * SINE_SECONDARY_PERIOD_RATIO)) * Math.PI * 2
+  const p3 = (elapsedMs / (currentPeriod * 0.37)) * Math.PI * 2
+  const val = Math.sin(p1) + Math.sin(p2) * SINE_SECONDARY_AMPLITUDE * difficultyFactor + Math.sin(p3) * 0.1 * difficultyFactor
+  return clamp(val * 0.45 + 0.5, 0.03, 0.97)
 }
 
-function computeAccuracy(targetNormalized: number, playerNormalized: number): number {
-  return Math.abs(targetNormalized - playerNormalized)
-}
-
-function accuracyToLabel(distance: number): string {
-  if (distance <= ACCURACY_PERFECT_THRESHOLD) return 'PERFECT'
-  if (distance <= ACCURACY_GOOD_THRESHOLD) return 'GOOD'
-  if (distance <= ACCURACY_OK_THRESHOLD) return 'OK'
+function accuracyLabel(d: number): string {
+  if (d <= ACCURACY_PERFECT_THRESHOLD) return 'PERFECT!'
+  if (d <= ACCURACY_GOOD_THRESHOLD) return 'GOOD'
+  if (d <= ACCURACY_OK_THRESHOLD) return 'OK'
   return 'MISS'
 }
 
-function accuracyToColor(distance: number): string {
-  if (distance <= ACCURACY_PERFECT_THRESHOLD) return '#22c55e'
-  if (distance <= ACCURACY_GOOD_THRESHOLD) return '#84cc16'
-  if (distance <= ACCURACY_OK_THRESHOLD) return '#facc15'
-  return '#ef4444'
+function accuracyColor(d: number): string {
+  if (d <= ACCURACY_PERFECT_THRESHOLD) return PIXEL_GREEN
+  if (d <= ACCURACY_GOOD_THRESHOLD) return PIXEL_CYAN
+  if (d <= ACCURACY_OK_THRESHOLD) return PIXEL_YELLOW
+  return PIXEL_RED
 }
 
-function accuracyToScoreRate(distance: number): number {
-  if (distance <= ACCURACY_PERFECT_THRESHOLD) return SCORE_PER_SECOND_PERFECT
-  if (distance <= ACCURACY_GOOD_THRESHOLD) return SCORE_PER_SECOND_GOOD
-  if (distance <= ACCURACY_OK_THRESHOLD) return SCORE_PER_SECOND_OK
+function accuracyScoreRate(d: number): number {
+  if (d <= ACCURACY_PERFECT_THRESHOLD) return SCORE_PER_SECOND_PERFECT
+  if (d <= ACCURACY_GOOD_THRESHOLD) return SCORE_PER_SECOND_GOOD
+  if (d <= ACCURACY_OK_THRESHOLD) return SCORE_PER_SECOND_OK
   return 0
 }
 
-function getDifficultyLabel(elapsedMs: number): string {
-  if (elapsedMs < PHASE_EASY_MS) return 'EASY'
-  if (elapsedMs < PHASE_MEDIUM_MS) return 'NORMAL'
-  return 'HARD'
+function getLevel(score: number): number {
+  for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
+    if (score >= LEVEL_THRESHOLDS[i]) return i
+  }
+  return 0
 }
 
-function getDifficultyColor(elapsedMs: number): string {
-  if (elapsedMs < PHASE_EASY_MS) return '#22c55e'
-  if (elapsedMs < PHASE_MEDIUM_MS) return '#facc15'
-  return '#ef4444'
-}
+// ─── Types ──────────────────────────────────────────────────────────
 
-// ─── Bonus Note Type ────────────────────────────────────────────────
-
-interface BonusNote {
+interface BonusItem {
   id: number
   position: number
   spawnedAt: number
   collected: boolean
+  type: 'note' | 'star' | 'heart'
+  score: number
+}
+
+interface PowerUp {
+  id: number
+  position: number
+  spawnedAt: number
+  collected: boolean
+  type: PowerUpType
 }
 
 // ─── Main Component ─────────────────────────────────────────────────
@@ -135,194 +149,179 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [targetPosition, setTargetPosition] = useState(0.5)
   const [playerPosition, setPlayerPosition] = useState(0.5)
-  const [accuracyDistance, setAccuracyDistance] = useState(0.5)
-  const [totalAccuracySum, setTotalAccuracySum] = useState(0)
-  const [totalAccuracySamples, setTotalAccuracySamples] = useState(0)
+  const [accDist, setAccDist] = useState(0.5)
   const [isFever, setIsFever] = useState(false)
   const [feverRemainingMs, setFeverRemainingMs] = useState(0)
   const [perfectStreakCount, setPerfectStreakCount] = useState(0)
   const [combo, setCombo] = useState(0)
-  const [maxCombo, setMaxCombo] = useState(0)
-  const [bonusNotes, setBonusNotes] = useState<BonusNote[]>([])
+  const [bonusItems, setBonusItems] = useState<BonusItem[]>([])
+  const [powerUps, setPowerUps] = useState<PowerUp[]>([])
   const [elapsedDisplay, setElapsedDisplay] = useState(0)
   const [vignette, setVignette] = useState(false)
+  const [level, setLevel] = useState(0)
+  const [levelUpText, setLevelUpText] = useState('')
+  const [activePowerUp, setActivePowerUp] = useState<PowerUpType | null>(null)
+  const [charReaction, setCharReaction] = useState<'idle' | 'happy' | 'sad' | 'fever'>('idle')
+  const [, setScanlineOffset] = useState(0)
 
   const effects = useGameEffects()
 
+  // Refs
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const elapsedMsRef = useRef(0)
-  const playerPositionRef = useRef(0.5)
+  const playerPosRef = useRef(0.5)
   const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameAtRef = useRef<number | null>(null)
-  const totalAccuracySumRef = useRef(0)
-  const totalAccuracySamplesRef = useRef(0)
+  const rafRef = useRef<number | null>(null)
+  const lastFrameRef = useRef<number | null>(null)
   const isDraggingRef = useRef(false)
   const pitchBarRef = useRef<HTMLDivElement | null>(null)
-  const lastFeedbackSoundMsRef = useRef(0)
-  const lastPerfectParticleMsRef = useRef(0)
+
   const feverRef = useRef(false)
-  const feverRemainingMsRef = useRef(0)
+  const feverMsRef = useRef(0)
   const perfectStreakMsRef = useRef(0)
   const perfectStreakCountRef = useRef(0)
-  const lastMilestoneMsRef = useRef(0)
+  const lastMilestoneRef = useRef(0)
   const comboRef = useRef(0)
   const maxComboRef = useRef(0)
-  const lastComboTickMsRef = useRef(0)
-  const bonusNotesRef = useRef<BonusNote[]>([])
-  const bonusNoteIdRef = useRef(0)
-  const lastBonusSpawnMsRef = useRef(0)
-  const lastTimeWarnMsRef = useRef(0)
+  const lastComboTickRef = useRef(0)
+  const levelRef = useRef(0)
+
+  const bonusIdRef = useRef(0)
+  const lastBonusRef = useRef(0)
+  const bonusItemsRef = useRef<BonusItem[]>([])
+  const powerUpIdRef = useRef(0)
+  const lastPowerUpRef = useRef(0)
+  const powerUpsRef = useRef<PowerUp[]>([])
+  const activePowerUpRef = useRef<PowerUpType | null>(null)
+  const powerUpEndRef = useRef(0)
+
+  const lastSoundRef = useRef(0)
+  const lastParticleRef = useRef(0)
+  const lastTimeWarnRef = useRef(0)
+  const lastReactionRef = useRef(0)
 
   // Audio refs
-  const perfectAudioRef = useRef<HTMLAudioElement | null>(null)
-  const goodAudioRef = useRef<HTMLAudioElement | null>(null)
-  const missAudioRef = useRef<HTMLAudioElement | null>(null)
-  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
-  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
-  const timeWarningAudioRef = useRef<HTMLAudioElement | null>(null)
-  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audios = useRef<Record<string, HTMLAudioElement | null>>({})
 
-  const playAudio = useCallback(
-    (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
-      const audio = audioRef.current
-      if (audio === null) return
-      audio.currentTime = 0
-      audio.volume = clampNumber(volume, 0, 1)
-      audio.playbackRate = playbackRate
-      void audio.play().catch(() => {})
-    },
-    [],
-  )
+  const playAudio = useCallback((key: string, volume: number, rate = 1) => {
+    const a = audios.current[key]
+    if (!a) return
+    a.currentTime = 0
+    a.volume = clamp(volume, 0, 1)
+    a.playbackRate = rate
+    void a.play().catch(() => {})
+  }, [])
 
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
-    playAudio(gameOverAudioRef, 0.5)
-
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
+    playAudio('gameover', 0.5)
     onFinish({
       score: scoreRef.current,
-      durationMs: elapsedMs,
+      durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)),
     })
   }, [onFinish, playAudio])
 
-  const updatePlayerFromClientY = useCallback((clientY: number) => {
-    const barElement = pitchBarRef.current
-    if (barElement === null) return
-    const rect = barElement.getBoundingClientRect()
-    const relativeY = clientY - rect.top
-    const normalized = clampNumber(1 - relativeY / rect.height, 0, 1)
-    playerPositionRef.current = normalized
-    setPlayerPosition(normalized)
+  const updatePlayerY = useCallback((clientY: number) => {
+    const bar = pitchBarRef.current
+    if (!bar) return
+    const rect = bar.getBoundingClientRect()
+    const n = clamp(1 - (clientY - rect.top) / rect.height, 0, 1)
+    playerPosRef.current = n
+    setPlayerPosition(n)
   }, [])
 
-  const handlePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      event.preventDefault()
-      isDraggingRef.current = true
-      ;(event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId)
-      updatePlayerFromClientY(event.clientY)
-    },
-    [updatePlayerFromClientY],
-  )
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    isDraggingRef.current = true
+    ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+    updatePlayerY(e.clientY)
+  }, [updatePlayerY])
 
-  const handlePointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!isDraggingRef.current) return
-      event.preventDefault()
-      updatePlayerFromClientY(event.clientY)
-    },
-    [updatePlayerFromClientY],
-  )
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current) return
+    e.preventDefault()
+    updatePlayerY(e.clientY)
+  }, [updatePlayerY])
 
-  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     isDraggingRef.current = false
-    ;(event.currentTarget as HTMLDivElement).releasePointerCapture(event.pointerId)
+    ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
   }, [])
 
-  const handleExit = useCallback(() => {
-    onExit()
-  }, [onExit])
-
-  // Setup audio
+  // Init audio
   useEffect(() => {
-    perfectAudioRef.current = new Audio(perfectSfx)
-    goodAudioRef.current = new Audio(goodSfx)
-    missAudioRef.current = new Audio(missSfx)
-    feverAudioRef.current = new Audio(feverSfx)
-    comboAudioRef.current = new Audio(comboSfx)
-    timeWarningAudioRef.current = new Audio(timeWarningSfx)
-    gameOverAudioRef.current = new Audio(gameOverSfx)
-
-    const allAudios = [
-      perfectAudioRef, goodAudioRef, missAudioRef, feverAudioRef,
-      comboAudioRef, timeWarningAudioRef, gameOverAudioRef,
-    ]
-    allAudios.forEach(ref => { if (ref.current) ref.current.preload = 'auto' })
-
+    const sfxMap: Record<string, string> = {
+      perfect: perfectSfx, good: goodSfx, miss: missSfx,
+      fever: feverSfx, combo: comboSfx, timewarn: timeWarningSfx,
+      gameover: gameOverSfx, levelup: levelUpSfx, powerup: powerUpSfx, star: starSfx,
+    }
+    for (const [k, src] of Object.entries(sfxMap)) {
+      const a = new Audio(src)
+      a.preload = 'auto'
+      audios.current[k] = a
+    }
     return () => {
-      allAudios.forEach(ref => { ref.current = null })
+      for (const k of Object.keys(audios.current)) audios.current[k] = null
       effects.cleanup()
     }
   }, [])
 
-  // Keyboard
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        handleExit()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleExit])
+    const handler = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onExit])
 
-  // Prevent scroll on touch
   useEffect(() => {
-    const handleTouchMove = (event: TouchEvent) => {
-      if (isDraggingRef.current) event.preventDefault()
-    }
-    window.addEventListener('touchmove', handleTouchMove, { passive: false })
-    return () => window.removeEventListener('touchmove', handleTouchMove)
+    const handler = (e: TouchEvent) => { if (isDraggingRef.current) e.preventDefault() }
+    window.addEventListener('touchmove', handler, { passive: false })
+    return () => window.removeEventListener('touchmove', handler)
   }, [])
 
-  // Main game loop
+  // ─── Game Loop ──────────────────────────────────────────────────
   useEffect(() => {
-    lastFrameAtRef.current = null
+    lastFrameRef.current = null
 
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
+      if (finishedRef.current) { rafRef.current = null; return }
+      if (lastFrameRef.current === null) lastFrameRef.current = now
+      const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS)
+      lastFrameRef.current = now
+      elapsedMsRef.current += dt
 
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
-
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
-      lastFrameAtRef.current = now
-      elapsedMsRef.current += deltaMs
-
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - dt)
       setRemainingMs(remainingMsRef.current)
       setElapsedDisplay(elapsedMsRef.current)
+      setScanlineOffset(prev => (prev + dt * 0.03) % 8)
 
-      const currentTarget = computeTargetPosition(elapsedMsRef.current)
-      setTargetPosition(currentTarget)
+      const curLevel = levelRef.current
+      const target = computeTargetPosition(elapsedMsRef.current, curLevel)
+      setTargetPosition(target)
 
-      const distance = computeAccuracy(currentTarget, playerPositionRef.current)
-      setAccuracyDistance(distance)
+      // Magnet power-up: auto-track toward target
+      if (activePowerUpRef.current === 'magnet') {
+        const diff = target - playerPosRef.current
+        playerPosRef.current += diff * 0.12
+        setPlayerPosition(playerPosRef.current)
+      }
 
-      // ─── Combo system ───
-      if (distance <= ACCURACY_GOOD_THRESHOLD) {
-        lastComboTickMsRef.current = elapsedMsRef.current
+      const dist = Math.abs(target - playerPosRef.current)
+      setAccDist(dist)
+
+      // Power-up expiry
+      if (activePowerUpRef.current && elapsedMsRef.current > powerUpEndRef.current) {
+        activePowerUpRef.current = null
+        setActivePowerUp(null)
+      }
+
+      // ─── Combo ───
+      if (dist <= ACCURACY_GOOD_THRESHOLD) {
+        lastComboTickRef.current = elapsedMsRef.current
         comboRef.current += 1
         if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current
-      } else if (elapsedMsRef.current - lastComboTickMsRef.current > COMBO_DECAY_MS) {
+      } else if (elapsedMsRef.current - lastComboTickRef.current > COMBO_DECAY_MS) {
         if (comboRef.current > 0) {
           comboRef.current = 0
           setVignette(true)
@@ -330,43 +329,48 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         }
       }
       setCombo(comboRef.current)
-      setMaxCombo(maxComboRef.current)
 
-      // ─── Fever timer countdown ───
-      if (feverRef.current) {
-        feverRemainingMsRef.current = Math.max(0, feverRemainingMsRef.current - deltaMs)
-        setFeverRemainingMs(feverRemainingMsRef.current)
-        if (feverRemainingMsRef.current <= 0) {
-          feverRef.current = false
-          setIsFever(false)
-        }
+      // Character reaction
+      if (elapsedMsRef.current - lastReactionRef.current > 300) {
+        lastReactionRef.current = elapsedMsRef.current
+        if (feverRef.current) setCharReaction('fever')
+        else if (dist <= ACCURACY_PERFECT_THRESHOLD) setCharReaction('happy')
+        else if (dist > ACCURACY_OK_THRESHOLD) setCharReaction('sad')
+        else setCharReaction('idle')
       }
 
-      // ─── Track perfect streaks ───
-      if (distance <= ACCURACY_PERFECT_THRESHOLD) {
-        perfectStreakMsRef.current += deltaMs
+      // ─── Fever ───
+      if (feverRef.current) {
+        feverMsRef.current = Math.max(0, feverMsRef.current - dt)
+        setFeverRemainingMs(feverMsRef.current)
+        if (feverMsRef.current <= 0) { feverRef.current = false; setIsFever(false) }
+      }
+
+      // ─── Perfect streaks ───
+      if (dist <= ACCURACY_PERFECT_THRESHOLD) {
+        perfectStreakMsRef.current += dt
         if (perfectStreakMsRef.current >= PERFECT_STREAK_THRESHOLD_MS) {
           perfectStreakMsRef.current -= PERFECT_STREAK_THRESHOLD_MS
           perfectStreakCountRef.current += 1
           setPerfectStreakCount(perfectStreakCountRef.current)
 
-          if (elapsedMsRef.current - lastMilestoneMsRef.current > 500) {
-            lastMilestoneMsRef.current = elapsedMsRef.current
-            const bonus = STREAK_MILESTONE_BONUS + comboRef.current * 2
+          if (elapsedMsRef.current - lastMilestoneRef.current > 500) {
+            lastMilestoneRef.current = elapsedMsRef.current
+            const bonus = STREAK_MILESTONE_BONUS + comboRef.current * 3
             scoreRef.current += bonus
-            effects.showScorePopup(bonus, 50, 100)
-            playAudio(comboAudioRef, 0.4, 1.0 + perfectStreakCountRef.current * 0.05)
-            effects.spawnParticles(4, 50, 100, PERFECT_EMOJIS)
+            effects.showScorePopup(bonus, 60, 100)
+            playAudio('combo', 0.4, 1.0 + perfectStreakCountRef.current * 0.06)
+            effects.spawnParticles(5, 60, 100, ['★', '♪', '♫', '✦'])
           }
 
           if (perfectStreakCountRef.current >= FEVER_TRIGGER_STREAKS && !feverRef.current) {
             feverRef.current = true
-            feverRemainingMsRef.current = FEVER_DURATION_MS
+            feverMsRef.current = FEVER_DURATION_MS
             setIsFever(true)
             setFeverRemainingMs(FEVER_DURATION_MS)
-            effects.triggerFlash('rgba(250,204,21,0.6)')
-            effects.triggerShake(8, 300)
-            playAudio(feverAudioRef, 0.6)
+            effects.triggerFlash('rgba(250,204,21,0.7)')
+            effects.triggerShake(10, 400)
+            playAudio('fever', 0.7)
           }
         }
       } else {
@@ -375,150 +379,205 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
       // ─── Scoring ───
       const feverMult = feverRef.current ? FEVER_SCORE_MULTIPLIER : 1
-      const comboMult = 1 + Math.min(comboRef.current * 0.02, 1.0)
-      const scoreRate = accuracyToScoreRate(distance)
-      const scoreGain = scoreRate * (deltaMs / 1000) * feverMult * comboMult
-      const comboBonus = comboRef.current > 5 ? COMBO_BONUS_BASE * (deltaMs / 1000) * (comboRef.current / 10) : 0
-      scoreRef.current += scoreGain + comboBonus
+      const doubleMult = activePowerUpRef.current === 'double' ? 2 : 1
+      const comboMult = 1 + Math.min(comboRef.current * 0.025, 1.5)
+      const rate = accuracyScoreRate(dist)
+      const gain = rate * (dt / 1000) * feverMult * doubleMult * comboMult
+      const cBonus = comboRef.current > 5 ? COMBO_BONUS_BASE * (dt / 1000) * (comboRef.current / 8) : 0
+      scoreRef.current += gain + cBonus
       setScore(Math.floor(scoreRef.current))
 
-      totalAccuracySumRef.current += 1 - distance
-      totalAccuracySamplesRef.current += 1
-      setTotalAccuracySum(totalAccuracySumRef.current)
-      setTotalAccuracySamples(totalAccuracySamplesRef.current)
+      // Level up check
+      const newLevel = getLevel(scoreRef.current)
+      if (newLevel > levelRef.current) {
+        levelRef.current = newLevel
+        setLevel(newLevel)
+        setLevelUpText(LEVEL_NAMES[newLevel])
+        playAudio('levelup', 0.6)
+        effects.triggerFlash('rgba(147,51,234,0.5)')
+        effects.triggerShake(6, 200)
+        effects.spawnParticles(8, 100, 200, ['★', '▲', '◆', '●'])
+        setTimeout(() => setLevelUpText(''), 2000)
+      }
 
-      // ─── Sound feedback ───
-      if (elapsedMsRef.current - lastFeedbackSoundMsRef.current > 500) {
-        if (distance <= ACCURACY_PERFECT_THRESHOLD) {
-          lastFeedbackSoundMsRef.current = elapsedMsRef.current
-          playAudio(perfectAudioRef, 0.25, 0.8 + currentTarget * 0.4)
-        } else if (distance <= ACCURACY_GOOD_THRESHOLD) {
-          lastFeedbackSoundMsRef.current = elapsedMsRef.current
-          playAudio(goodAudioRef, 0.2, 0.9 + currentTarget * 0.3)
-        } else if (distance > ACCURACY_OK_THRESHOLD && elapsedMsRef.current - lastFeedbackSoundMsRef.current > 1200) {
-          lastFeedbackSoundMsRef.current = elapsedMsRef.current
-          playAudio(missAudioRef, 0.15)
+      // ─── Sound ───
+      if (elapsedMsRef.current - lastSoundRef.current > 450) {
+        if (dist <= ACCURACY_PERFECT_THRESHOLD) {
+          lastSoundRef.current = elapsedMsRef.current
+          playAudio('perfect', 0.25, 0.8 + target * 0.4)
+        } else if (dist <= ACCURACY_GOOD_THRESHOLD) {
+          lastSoundRef.current = elapsedMsRef.current
+          playAudio('good', 0.2, 0.9 + target * 0.3)
+        } else if (dist > ACCURACY_OK_THRESHOLD && elapsedMsRef.current - lastSoundRef.current > 1000) {
+          lastSoundRef.current = elapsedMsRef.current
+          playAudio('miss', 0.15)
         }
       }
 
-      // ─── Particle effects ───
-      if (distance <= ACCURACY_PERFECT_THRESHOLD && elapsedMsRef.current - lastPerfectParticleMsRef.current > 600) {
-        lastPerfectParticleMsRef.current = elapsedMsRef.current
-        effects.spawnParticles(3, 40, 200 * (1 - playerPositionRef.current) + 60, NOTE_EMOJIS)
-        effects.triggerFlash('rgba(34,197,94,0.12)')
+      // ─── Particles ───
+      if (dist <= ACCURACY_PERFECT_THRESHOLD && elapsedMsRef.current - lastParticleRef.current > 500) {
+        lastParticleRef.current = elapsedMsRef.current
+        effects.spawnParticles(3, 50, 300 * (1 - playerPosRef.current) + 40, ['♪', '♫', '♬'])
+        effects.triggerFlash('rgba(34,197,94,0.1)')
       }
 
-      // ─── Bonus notes ───
-      if (elapsedMsRef.current - lastBonusSpawnMsRef.current > BONUS_NOTE_INTERVAL_MS && elapsedMsRef.current > 3000) {
-        lastBonusSpawnMsRef.current = elapsedMsRef.current
-        bonusNoteIdRef.current += 1
-        const newNote: BonusNote = {
-          id: bonusNoteIdRef.current,
+      // ─── Bonus items ───
+      if (elapsedMsRef.current - lastBonusRef.current > BONUS_INTERVAL_MS && elapsedMsRef.current > 2000) {
+        lastBonusRef.current = elapsedMsRef.current
+        bonusIdRef.current += 1
+        const types: Array<BonusItem['type']> = ['note', 'note', 'star', 'heart']
+        const type = types[Math.floor(Math.random() * types.length)]
+        const scores = { note: 150, star: 300, heart: 100 }
+        bonusItemsRef.current = [...bonusItemsRef.current, {
+          id: bonusIdRef.current,
           position: 0.1 + Math.random() * 0.8,
           spawnedAt: elapsedMsRef.current,
           collected: false,
-        }
-        bonusNotesRef.current = [...bonusNotesRef.current, newNote]
+          type,
+          score: scores[type],
+        }]
       }
 
-      // Check bonus note collection
-      const updatedNotes = bonusNotesRef.current.map(note => {
-        if (note.collected) return note
-        const noteAge = elapsedMsRef.current - note.spawnedAt
-        if (noteAge > BONUS_NOTE_DURATION_MS) return { ...note, collected: true }
-        if (Math.abs(playerPositionRef.current - note.position) < BONUS_NOTE_RADIUS) {
-          scoreRef.current += BONUS_NOTE_SCORE * feverMult
-          effects.comboHitBurst(50, 200 * (1 - note.position) + 60, 5, BONUS_NOTE_SCORE, NOTE_EMOJIS)
-          playAudio(perfectAudioRef, 0.4, 1.5)
-          return { ...note, collected: true }
+      // Collect bonus items
+      const updatedBonuses = bonusItemsRef.current.map(item => {
+        if (item.collected) return item
+        if (elapsedMsRef.current - item.spawnedAt > BONUS_DURATION_MS) return { ...item, collected: true }
+        if (Math.abs(playerPosRef.current - item.position) < BONUS_RADIUS) {
+          const s = item.score * feverMult * doubleMult
+          scoreRef.current += s
+          effects.comboHitBurst(50, 300 * (1 - item.position) + 40, 5, s, ['★', '♪', '♫'])
+          playAudio('star', 0.4, item.type === 'star' ? 1.3 : 1.0)
+          // Heart gives time bonus
+          if (item.type === 'heart') {
+            remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + 2000)
+            effects.showScorePopup(2, 120, 60)
+          }
+          return { ...item, collected: true }
         }
-        return note
-      }).filter(note => {
-        if (note.collected) return (elapsedMsRef.current - note.spawnedAt) < BONUS_NOTE_DURATION_MS + 500
-        return true
-      })
-      bonusNotesRef.current = updatedNotes
-      setBonusNotes([...updatedNotes])
+        return item
+      }).filter(item => !item.collected || (elapsedMsRef.current - item.spawnedAt) < BONUS_DURATION_MS + 300)
+      bonusItemsRef.current = updatedBonuses
+      setBonusItems([...updatedBonuses])
+
+      // ─── Power-ups ───
+      if (elapsedMsRef.current - lastPowerUpRef.current > POWERUP_INTERVAL_MS && elapsedMsRef.current > 5000) {
+        lastPowerUpRef.current = elapsedMsRef.current
+        powerUpIdRef.current += 1
+        const types: PowerUpType[] = ['double', 'freeze', 'magnet']
+        powerUpsRef.current = [...powerUpsRef.current, {
+          id: powerUpIdRef.current,
+          position: 0.15 + Math.random() * 0.7,
+          spawnedAt: elapsedMsRef.current,
+          collected: false,
+          type: types[Math.floor(Math.random() * types.length)],
+        }]
+      }
+
+      // Collect power-ups
+      const updatedPowerUps = powerUpsRef.current.map(pu => {
+        if (pu.collected) return pu
+        if (elapsedMsRef.current - pu.spawnedAt > POWERUP_DURATION_MS) return { ...pu, collected: true }
+        if (Math.abs(playerPosRef.current - pu.position) < BONUS_RADIUS) {
+          activePowerUpRef.current = pu.type
+          powerUpEndRef.current = elapsedMsRef.current + POWERUP_EFFECT_DURATION_MS
+          setActivePowerUp(pu.type)
+          playAudio('powerup', 0.5, 1.2)
+          effects.triggerFlash(POWERUP_COLORS[pu.type] + '40')
+          effects.triggerShake(4, 150)
+          // Freeze power-up pauses timer
+          if (pu.type === 'freeze') {
+            remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + 3000)
+          }
+          return { ...pu, collected: true }
+        }
+        return pu
+      }).filter(pu => !pu.collected || (elapsedMsRef.current - pu.spawnedAt) < POWERUP_DURATION_MS + 300)
+      powerUpsRef.current = updatedPowerUps
+      setPowerUps([...updatedPowerUps])
 
       // ─── Time warning ───
       if (remainingMsRef.current <= LOW_TIME_THRESHOLD_MS && remainingMsRef.current > 0) {
-        if (elapsedMsRef.current - lastTimeWarnMsRef.current > 1000) {
-          lastTimeWarnMsRef.current = elapsedMsRef.current
-          playAudio(timeWarningAudioRef, 0.3)
-          effects.triggerShake(2, 100)
+        if (elapsedMsRef.current - lastTimeWarnRef.current > 1000) {
+          lastTimeWarnRef.current = elapsedMsRef.current
+          playAudio('timewarn', 0.3)
+          effects.triggerShake(3, 100)
         }
       }
 
       effects.updateParticles()
 
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
-
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (remainingMsRef.current <= 0) { finishGame(); rafRef.current = null; return }
+      rafRef.current = window.requestAnimationFrame(step)
     }
 
-    animationFrameRef.current = window.requestAnimationFrame(step)
-
+    rafRef.current = window.requestAnimationFrame(step)
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      lastFrameAtRef.current = null
+      if (rafRef.current !== null) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null }
+      lastFrameRef.current = null
     }
   }, [finishGame, playAudio, effects])
 
-  const accuracyLabel = accuracyToLabel(accuracyDistance)
-  const accuracyColor = accuracyToColor(accuracyDistance)
-  const overallAccuracyPercent = totalAccuracySamples > 0 ? (totalAccuracySum / totalAccuracySamples) * 100 : 0
-  const displayedBestScore = useMemo(() => Math.max(bestScore, Math.floor(scoreRef.current)), [bestScore, score])
+  // Derived
+  const accLabel = accuracyLabel(accDist)
+  const accColor = accuracyColor(accDist)
+  const bestDisplay = useMemo(() => Math.max(bestScore, Math.floor(scoreRef.current)), [bestScore, score])
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
-  const diffLabel = getDifficultyLabel(elapsedDisplay)
-  const diffColor = getDifficultyColor(elapsedDisplay)
-
-  const targetTopPercent = (1 - targetPosition) * 100
-  const playerTopPercent = (1 - playerPosition) * 100
   const timePercent = (remainingMs / ROUND_DURATION_MS) * 100
-
-  const trailSegments = useMemo(() => {
-    const tPos = (1 - targetPosition) * 100
-    const pPos = (1 - playerPosition) * 100
-    const minPos = Math.min(tPos, pPos)
-    const maxPos = Math.max(tPos, pPos)
-    const height = maxPos - minPos
-    return [{ top: minPos, height: Math.max(height, 0.5), color: accuracyColor }]
-  }, [targetPosition, playerPosition, accuracyColor])
+  const targetTop = (1 - targetPosition) * 100
+  const playerTop = (1 - playerPosition) * 100
+  const levelProgress = level < LEVEL_THRESHOLDS.length - 1
+    ? ((score - LEVEL_THRESHOLDS[level]) / (LEVEL_THRESHOLDS[level + 1] - LEVEL_THRESHOLDS[level])) * 100
+    : 100
 
   return (
     <section className="mini-game-panel kp-panel" aria-label="karaoke-pitch-game" style={{ ...effects.getShakeStyle() }}>
       <style>{GAME_EFFECTS_CSS}{`
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
         .kp-panel {
           display: flex;
           flex-direction: column;
           height: 100%;
-          background: linear-gradient(180deg, #1a0a2e 0%, #0d0d1a 40%, #0f0826 100%);
+          background: ${PIXEL_BG_DARK};
           user-select: none;
           -webkit-user-select: none;
           touch-action: none;
           position: relative;
           overflow: hidden;
+          font-family: 'Press Start 2P', monospace;
+          image-rendering: pixelated;
+        }
+
+        .kp-scanlines {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 20;
+          background: repeating-linear-gradient(
+            0deg,
+            transparent 0px,
+            transparent 3px,
+            rgba(0,0,0,0.08) 3px,
+            rgba(0,0,0,0.08) 4px
+          );
+        }
+
+        .kp-pixel-border {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 19;
+          border: 3px solid ${PIXEL_PURPLE}44;
+          box-shadow: inset 0 0 30px rgba(147,51,234,0.1);
         }
 
         .kp-vignette {
           position: absolute;
           inset: 0;
           pointer-events: none;
-          z-index: 12;
-          box-shadow: inset 0 0 60px rgba(239,68,68,0.5);
-          animation: kp-vignette-fade 0.3s ease-out forwards;
-        }
-
-        @keyframes kp-vignette-fade {
-          from { opacity: 1; }
-          to { opacity: 0; }
+          z-index: 18;
+          box-shadow: inset 0 0 60px rgba(239,68,68,0.6);
+          animation: kp-fade 0.3s ease-out forwards;
         }
 
         .kp-fever-bg {
@@ -526,34 +585,44 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           inset: 0;
           pointer-events: none;
           z-index: 1;
-          background: linear-gradient(180deg, rgba(250,204,21,0.08) 0%, transparent 30%, transparent 70%, rgba(250,204,21,0.08) 100%);
-          animation: kp-fever-pulse 0.8s ease-in-out infinite alternate;
+          background: repeating-linear-gradient(
+            45deg,
+            rgba(250,204,21,0.03) 0px,
+            transparent 4px,
+            transparent 8px,
+            rgba(250,204,21,0.03) 12px
+          );
+          animation: kp-fever-scroll 0.5s linear infinite;
         }
 
-        @keyframes kp-fever-pulse {
-          from { opacity: 0.5; }
-          to { opacity: 1; }
+        @keyframes kp-fever-scroll {
+          from { background-position: 0 0; }
+          to { background-position: 12px 12px; }
+        }
+
+        @keyframes kp-fade {
+          from { opacity: 1; } to { opacity: 0; }
         }
 
         .kp-time-bar {
-          height: 4px;
-          background: #27272a;
+          height: 6px;
+          background: #1a1a2e;
           flex-shrink: 0;
-          position: relative;
           z-index: 2;
+          border-bottom: 2px solid ${PIXEL_PURPLE}33;
         }
 
-        .kp-time-bar-fill {
+        .kp-time-fill {
           height: 100%;
           transition: width 0.1s linear;
-          border-radius: 0 2px 2px 0;
+          image-rendering: pixelated;
         }
 
         .kp-hud {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px 4px;
+          padding: 6px 10px 2px;
           flex-shrink: 0;
           z-index: 2;
         }
@@ -564,30 +633,69 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           gap: 8px;
         }
 
-        .kp-avatar {
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          border: 2px solid #d946ef;
+        .kp-char-box {
+          width: 48px;
+          height: 48px;
+          border: 3px solid ${PIXEL_PURPLE};
+          background: ${PIXEL_BG_MID};
+          image-rendering: pixelated;
+          position: relative;
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+
+        .kp-char-box img {
+          width: 100%;
+          height: 100%;
           object-fit: cover;
-          box-shadow: 0 0 10px rgba(217,70,239,0.5);
+          image-rendering: pixelated;
+        }
+
+        .kp-char-box.happy { border-color: ${PIXEL_GREEN}; }
+        .kp-char-box.sad { border-color: ${PIXEL_RED}; animation: kp-shake-sm 0.15s ease infinite; }
+        .kp-char-box.fever { border-color: ${PIXEL_YELLOW}; animation: kp-glow-box 0.4s ease infinite alternate; }
+
+        @keyframes kp-shake-sm {
+          0%,100% { transform: translateX(0); } 50% { transform: translateX(-2px); }
+        }
+
+        @keyframes kp-glow-box {
+          from { box-shadow: 0 0 4px ${PIXEL_YELLOW}88; }
+          to { box-shadow: 0 0 12px ${PIXEL_YELLOW}cc; }
+        }
+
+        .kp-score-area {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
         }
 
         .kp-score {
-          font-size: 28px;
-          font-weight: 900;
-          color: #e879f9;
+          font-size: 16px;
+          color: ${PIXEL_PINK};
           margin: 0;
-          line-height: 1;
-          text-shadow: 0 0 16px rgba(217,70,239,0.6);
-          font-variant-numeric: tabular-nums;
+          line-height: 1.2;
+          text-shadow: 2px 2px 0 #000, 0 0 8px ${PIXEL_PINK}66;
         }
 
-        .kp-best {
-          font-size: 9px;
-          color: #d8b4fe;
+        .kp-best-score {
+          font-size: 6px;
+          color: ${PIXEL_WHITE}88;
           margin: 0;
-          opacity: 0.6;
+        }
+
+        .kp-level-bar {
+          height: 4px;
+          width: 80px;
+          background: #1a1a2e;
+          border: 1px solid ${PIXEL_PURPLE}44;
+          margin-top: 2px;
+        }
+
+        .kp-level-fill {
+          height: 100%;
+          background: ${PIXEL_PURPLE};
+          transition: width 0.3s;
         }
 
         .kp-hud-right {
@@ -598,240 +706,246 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         }
 
         .kp-time {
-          font-size: 20px;
-          font-weight: 800;
-          color: #e4e4e7;
+          font-size: 14px;
+          color: ${PIXEL_WHITE};
           margin: 0;
-          font-variant-numeric: tabular-nums;
+          text-shadow: 2px 2px 0 #000;
         }
 
-        .kp-time.low-time {
-          color: #ef4444;
-          animation: kp-pulse 0.5s ease-in-out infinite alternate;
+        .kp-time.low { color: ${PIXEL_RED}; animation: kp-blink 0.4s step-end infinite; }
+
+        @keyframes kp-blink {
+          0%,100% { opacity: 1; } 50% { opacity: 0.3; }
         }
 
-        @keyframes kp-pulse {
-          from { opacity: 1; transform: scale(1); }
-          to { opacity: 0.6; transform: scale(1.05); }
-        }
-
-        .kp-status-row {
+        .kp-status {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 10px;
-          padding: 2px 12px 4px;
+          gap: 8px;
+          padding: 2px 8px;
           flex-shrink: 0;
           z-index: 2;
+          min-height: 24px;
         }
 
-        .kp-accuracy-label {
-          font-size: 22px;
-          font-weight: 900;
+        .kp-acc-label {
+          font-size: 14px;
           margin: 0;
-          letter-spacing: 2px;
-          text-shadow: 0 0 14px currentColor;
-          transition: color 0.12s ease;
+          text-shadow: 2px 2px 0 #000, 0 0 10px currentColor;
+          transition: color 0.1s step-end;
         }
 
-        .kp-combo-badge {
-          font-size: 13px;
-          font-weight: 800;
-          padding: 2px 8px;
-          border-radius: 10px;
-          background: rgba(217,70,239,0.2);
-          border: 1px solid rgba(217,70,239,0.4);
-          color: #e879f9;
+        .kp-combo-box {
+          font-size: 8px;
+          padding: 2px 6px;
+          border: 2px solid ${PIXEL_CYAN};
+          color: ${PIXEL_CYAN};
+          background: ${PIXEL_CYAN}15;
+          text-shadow: 1px 1px 0 #000;
         }
 
-        .kp-fever-badge {
-          font-size: 13px;
-          font-weight: 900;
-          padding: 2px 10px;
-          border-radius: 10px;
-          background: rgba(250,204,21,0.2);
-          border: 1px solid rgba(250,204,21,0.5);
-          color: #facc15;
-          animation: kp-pulse 0.3s ease-in-out infinite alternate;
-          text-shadow: 0 0 8px rgba(250,204,21,0.6);
+        .kp-fever-box {
+          font-size: 8px;
+          padding: 2px 6px;
+          border: 2px solid ${PIXEL_YELLOW};
+          color: ${PIXEL_YELLOW};
+          background: ${PIXEL_YELLOW}15;
+          animation: kp-blink 0.3s step-end infinite;
+          text-shadow: 1px 1px 0 #000;
         }
 
-        .kp-diff-badge {
-          font-size: 10px;
-          font-weight: 700;
-          padding: 1px 6px;
-          border-radius: 6px;
-          border: 1px solid;
-          opacity: 0.8;
+        .kp-powerup-active {
+          font-size: 7px;
+          padding: 2px 5px;
+          border: 2px solid;
+          text-shadow: 1px 1px 0 #000;
+        }
+
+        .kp-level-badge {
+          font-size: 6px;
+          padding: 1px 4px;
+          border: 1px solid ${PIXEL_PURPLE};
+          color: ${PIXEL_PURPLE};
+        }
+
+        .kp-levelup-overlay {
+          position: absolute;
+          top: 35%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 25;
+          font-size: 14px;
+          color: ${PIXEL_YELLOW};
+          text-shadow: 3px 3px 0 #000, 0 0 20px ${PIXEL_YELLOW};
+          animation: kp-levelup-anim 2s ease-out forwards;
+          white-space: nowrap;
+          pointer-events: none;
+        }
+
+        @keyframes kp-levelup-anim {
+          0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+          15% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+          30% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+          80% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
         }
 
         .kp-arena {
           display: flex;
           flex-direction: row;
           align-items: stretch;
-          gap: 8px;
+          gap: 6px;
           flex: 1;
-          padding: 4px 10px 6px;
+          padding: 4px 8px 6px;
           min-height: 0;
           overflow: hidden;
           z-index: 2;
         }
 
-        .kp-bar-container {
+        .kp-bar {
           width: ${PITCH_BAR_WIDTH}px;
           flex-shrink: 0;
           position: relative;
           cursor: grab;
-          border-radius: 14px;
-          background: #18181b;
-          border: 2px solid rgba(217,70,239,0.15);
+          background: #0e0e20;
+          border: 3px solid ${PIXEL_PURPLE}44;
           overflow: hidden;
-          box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
         }
 
-        .kp-bar-container:active {
-          cursor: grabbing;
-          border-color: rgba(217,70,239,0.4);
-          box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 16px rgba(217,70,239,0.3);
-        }
-
-        .kp-bar-container.fever-active {
-          border-color: rgba(250,204,21,0.4);
-          box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 16px rgba(250,204,21,0.3);
-        }
+        .kp-bar:active { cursor: grabbing; border-color: ${PIXEL_PURPLE}88; }
+        .kp-bar.fever { border-color: ${PIXEL_YELLOW}66; }
 
         .kp-bar-track {
           position: absolute;
-          inset: 8px 6px;
-          border-radius: 8px;
-          background: linear-gradient(to bottom, #312e81, #1e1b4b, #0f172a, #1e1b4b, #312e81);
+          inset: 4px;
+          background: linear-gradient(to bottom, #1a1040, #0a0a20, #1a1040);
         }
 
-        .kp-trail {
-          position: absolute;
-          left: 0;
-          right: 0;
-          border-radius: 4px;
-          transition: background-color 0.12s ease;
-        }
-
-        .kp-target-zone {
-          position: absolute;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: ${TARGET_RADIUS * 2}px;
-          height: ${TARGET_RADIUS * 2}px;
-          border-radius: 50%;
-          border: 3px solid;
-          transition: top 0.05s linear, border-color 0.12s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .kp-target-zone.fever-target {
-          box-shadow: 0 0 20px rgba(250,204,21,0.6);
-        }
-
-        .kp-target-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          transition: background-color 0.12s ease;
-        }
-
-        .kp-player-indicator {
-          position: absolute;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: ${PLAYER_INDICATOR_RADIUS * 2}px;
-          height: ${PLAYER_INDICATOR_RADIUS * 2}px;
-          border-radius: 50%;
-          border: 2px solid #ffffffcc;
-          transition: background-color 0.12s ease, box-shadow 0.12s ease;
-        }
-
-        .kp-bonus-note {
-          position: absolute;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 24px;
-          animation: kp-bonus-float 0.5s ease-in-out infinite alternate;
-          filter: drop-shadow(0 0 8px rgba(250,204,21,0.8));
-          pointer-events: none;
-          z-index: 3;
-        }
-
-        @keyframes kp-bonus-float {
-          from { transform: translate(-50%, -50%) scale(1); }
-          to { transform: translate(-50%, -50%) scale(1.15); }
-        }
-
-        .kp-scale-marks {
+        .kp-bar-grid {
           position: absolute;
           inset: 0;
           pointer-events: none;
         }
 
-        .kp-scale-mark {
+        .kp-bar-gridline {
           position: absolute;
           left: 0;
           right: 0;
-          height: 1px;
-          background: #ffffff12;
+          height: 2px;
+          background: ${PIXEL_PURPLE}15;
         }
 
-        .kp-waveform {
-          flex: 1;
-          min-width: 0;
-          position: relative;
-          border-radius: 14px;
-          background: #18181b;
-          border: 2px solid rgba(217,70,239,0.15);
-          overflow: hidden;
-          box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
+        .kp-trail {
+          position: absolute;
+          left: 2px;
+          right: 2px;
+          transition: background-color 0.1s step-end;
         }
 
-        .kp-waveform.fever-wave {
-          border-color: rgba(250,204,21,0.3);
+        .kp-target {
+          position: absolute;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 28px;
+          height: 28px;
+          border: 3px solid;
+          transition: top 0.05s linear;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
-        .kp-waveform canvas {
-          width: 100%;
-          height: 100%;
-          display: block;
+        .kp-target.fever { box-shadow: 0 0 12px ${PIXEL_YELLOW}88; }
+
+        .kp-target-inner {
+          width: 10px;
+          height: 10px;
+        }
+
+        .kp-player {
+          position: absolute;
+          left: 50%;
+          transform: translate(-50%, -50%) rotate(45deg);
+          width: 22px;
+          height: 22px;
+          border: 2px solid ${PIXEL_WHITE}cc;
+          transition: background-color 0.1s step-end;
+        }
+
+        .kp-bonus-item {
+          position: absolute;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 8px;
+          color: ${PIXEL_YELLOW};
+          text-shadow: 1px 1px 0 #000;
+          pointer-events: none;
+          z-index: 3;
+          animation: kp-item-float 0.6s step-end infinite alternate;
+          border: 2px solid ${PIXEL_YELLOW}88;
+          padding: 2px 4px;
+          background: ${PIXEL_YELLOW}15;
+        }
+
+        .kp-bonus-item.star { border-color: ${PIXEL_CYAN}; color: ${PIXEL_CYAN}; background: ${PIXEL_CYAN}15; }
+        .kp-bonus-item.heart { border-color: ${PIXEL_PINK}; color: ${PIXEL_PINK}; background: ${PIXEL_PINK}15; }
+
+        @keyframes kp-item-float {
+          from { transform: translate(-50%, -50%) scale(1); }
+          to { transform: translate(-50%, -54%) scale(1.1); }
+        }
+
+        .kp-powerup-item {
+          position: absolute;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 7px;
+          pointer-events: none;
+          z-index: 4;
+          padding: 3px 5px;
+          border: 2px solid;
+          text-shadow: 1px 1px 0 #000;
+          animation: kp-pu-pulse 0.4s step-end infinite alternate;
+        }
+
+        @keyframes kp-pu-pulse {
+          from { transform: translate(-50%, -50%) scale(1); filter: brightness(1); }
+          to { transform: translate(-50%, -55%) scale(1.15); filter: brightness(1.3); }
         }
 
         .kp-glow-ring {
           position: absolute;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: ${TARGET_RADIUS * 3}px;
-          height: ${TARGET_RADIUS * 3}px;
-          border-radius: 50%;
-          border: 2px solid;
-          opacity: 0.3;
+          width: 44px;
+          height: 44px;
+          border: 2px solid ${PIXEL_GREEN}66;
           pointer-events: none;
-          animation: kp-glow-expand 1s ease-out infinite;
+          animation: kp-ring 0.8s step-start infinite;
         }
 
-        @keyframes kp-glow-expand {
-          from { transform: translate(-50%, -50%) scale(0.6); opacity: 0.5; }
-          to { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
+        @keyframes kp-ring {
+          0% { transform: translate(-50%, -50%) scale(0.7); opacity: 0.6; }
+          100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
         }
 
-        .kp-accuracy-bar {
-          height: 3px;
-          background: #27272a;
-          border-radius: 2px;
+        .kp-wave {
+          flex: 1;
+          min-width: 0;
+          position: relative;
+          background: #0e0e20;
+          border: 3px solid ${PIXEL_PURPLE}44;
           overflow: hidden;
-          width: 60px;
         }
 
-        .kp-accuracy-bar-fill {
+        .kp-wave.fever { border-color: ${PIXEL_YELLOW}44; }
+
+        .kp-wave canvas {
+          width: 100%;
           height: 100%;
-          border-radius: 2px;
-          transition: width 0.3s ease, background-color 0.3s ease;
+          display: block;
+          image-rendering: pixelated;
         }
       `}</style>
 
@@ -839,78 +953,68 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
+      <div className="kp-scanlines" />
+      <div className="kp-pixel-border" />
       {vignette && <div className="kp-vignette" />}
       {isFever && <div className="kp-fever-bg" />}
+      {levelUpText && <div className="kp-levelup-overlay">{levelUpText}</div>}
 
       {/* Time bar */}
       <div className="kp-time-bar">
-        <div
-          className="kp-time-bar-fill"
-          style={{
-            width: `${timePercent}%`,
-            background: isLowTime
-              ? 'linear-gradient(90deg, #ef4444, #f97316)'
-              : isFever
-                ? 'linear-gradient(90deg, #facc15, #f59e0b)'
-                : 'linear-gradient(90deg, #d946ef, #a855f7)',
-          }}
-        />
+        <div className="kp-time-fill" style={{
+          width: `${timePercent}%`,
+          background: isLowTime ? PIXEL_RED
+            : isFever ? PIXEL_YELLOW
+            : `linear-gradient(90deg, ${PIXEL_PURPLE}, ${PIXEL_PINK})`,
+        }} />
       </div>
 
       {/* HUD */}
       <div className="kp-hud">
         <div className="kp-hud-left">
-          <img className="kp-avatar" src={characterImage} alt="" />
-          <div>
+          <div className={`kp-char-box ${charReaction}`}>
+            <img src={characterImage} alt="" style={{
+              transform: charReaction === 'happy' ? 'scale(1.1)' : charReaction === 'sad' ? 'scale(0.9) rotate(-5deg)' : charReaction === 'fever' ? 'scale(1.15)' : 'none',
+              transition: 'transform 0.15s step-end',
+            }} />
+          </div>
+          <div className="kp-score-area">
             <p className="kp-score">{Math.floor(score).toLocaleString()}</p>
-            <p className="kp-best">BEST {displayedBestScore.toLocaleString()}</p>
+            <p className="kp-best-score">HI {bestDisplay.toLocaleString()}</p>
+            <div className="kp-level-bar">
+              <div className="kp-level-fill" style={{ width: `${levelProgress}%` }} />
+            </div>
           </div>
         </div>
         <div className="kp-hud-right">
-          <p className={`kp-time ${isLowTime ? 'low-time' : ''}`}>
-            {(remainingMs / 1000).toFixed(1)}s
+          <p className={`kp-time ${isLowTime ? 'low' : ''}`}>
+            {Math.ceil(remainingMs / 1000)}
           </p>
-          <div className="kp-accuracy-bar">
-            <div
-              className="kp-accuracy-bar-fill"
-              style={{
-                width: `${overallAccuracyPercent}%`,
-                backgroundColor: overallAccuracyPercent > 80 ? '#22c55e' : overallAccuracyPercent > 50 ? '#facc15' : '#ef4444',
-              }}
-            />
-          </div>
+          <span className="kp-level-badge">{LEVEL_NAMES[level]}</span>
         </div>
       </div>
 
-      {/* Status row */}
-      <div className="kp-status-row">
-        <p className="kp-accuracy-label" style={{ color: accuracyColor }}>
-          {accuracyLabel}
-        </p>
-        {combo >= 3 && (
-          <span className="kp-combo-badge">
-            {combo}x COMBO
-          </span>
-        )}
+      {/* Status */}
+      <div className="kp-status">
+        <p className="kp-acc-label" style={{ color: accColor }}>{accLabel}</p>
+        {combo >= 3 && <span className="kp-combo-box">{combo}x</span>}
         {perfectStreakCount > 0 && (
-          <span style={{ color: '#22c55e', fontSize: 11, fontWeight: 800, textShadow: '0 0 6px rgba(34,197,94,0.4)' }}>
-            STREAK {perfectStreakCount}
+          <span style={{ fontSize: 7, color: PIXEL_GREEN, textShadow: `1px 1px 0 #000, 0 0 4px ${PIXEL_GREEN}` }}>
+            STREAK{perfectStreakCount}
           </span>
         )}
-        {isFever && (
-          <span className="kp-fever-badge">
-            FEVER x{FEVER_SCORE_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(0)}s
+        {isFever && <span className="kp-fever-box">FEVER x{FEVER_SCORE_MULTIPLIER} {Math.ceil(feverRemainingMs / 1000)}s</span>}
+        {activePowerUp && (
+          <span className="kp-powerup-active" style={{ borderColor: POWERUP_COLORS[activePowerUp], color: POWERUP_COLORS[activePowerUp] }}>
+            {POWERUP_ICONS[activePowerUp]}
           </span>
         )}
-        <span className="kp-diff-badge" style={{ color: diffColor, borderColor: diffColor }}>
-          {diffLabel}
-        </span>
       </div>
 
       {/* Arena */}
       <div className="kp-arena">
         <div
-          className={`kp-bar-container ${isFever ? 'fever-active' : ''}`}
+          className={`kp-bar ${isFever ? 'fever' : ''}`}
           ref={pitchBarRef}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -923,86 +1027,83 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           aria-valuenow={Math.round(playerPosition * 100)}
         >
           <div className="kp-bar-track">
-            {trailSegments.map((seg, i) => (
-              <div
-                key={i}
-                className="kp-trail"
-                style={{
-                  top: `${seg.top}%`,
-                  height: `${seg.height}%`,
-                  backgroundColor: seg.color,
-                  opacity: isFever ? 0.55 : 0.35,
-                }}
-              />
-            ))}
+            {/* Grid */}
+            <div className="kp-bar-grid">
+              {[0, 12.5, 25, 37.5, 50, 62.5, 75, 87.5, 100].map(m => (
+                <div key={m} className="kp-bar-gridline" style={{ top: `${m}%` }} />
+              ))}
+            </div>
 
-            {/* Bonus notes on bar */}
-            {bonusNotes.filter(n => !n.collected).map(note => {
-              const noteAge = elapsedDisplay - note.spawnedAt
-              const opacity = noteAge > BONUS_NOTE_DURATION_MS * 0.7 ? 0.4 : 1
+            {/* Trail */}
+            {(() => {
+              const tP = (1 - targetPosition) * 100
+              const pP = (1 - playerPosition) * 100
+              const mn = Math.min(tP, pP)
+              const h = Math.max(Math.abs(tP - pP), 1)
+              return <div className="kp-trail" style={{ top: `${mn}%`, height: `${h}%`, backgroundColor: accColor, opacity: isFever ? 0.5 : 0.3 }} />
+            })()}
+
+            {/* Bonus items */}
+            {bonusItems.filter(i => !i.collected).map(item => {
+              const age = elapsedDisplay - item.spawnedAt
+              const op = age > BONUS_DURATION_MS * 0.7 ? 0.4 : 1
+              const cls = `kp-bonus-item ${item.type === 'star' ? 'star' : item.type === 'heart' ? 'heart' : ''}`
               return (
-                <div
-                  key={note.id}
-                  className="kp-bonus-note"
-                  style={{
-                    top: `${(1 - note.position) * 100}%`,
-                    opacity,
-                  }}
-                >
-                  🎵
+                <div key={item.id} className={cls} style={{ top: `${(1 - item.position) * 100}%`, opacity: op }}>
+                  {item.type === 'note' ? '♪' : item.type === 'star' ? '★' : '♥'}
                 </div>
               )
             })}
 
-            {/* Glow ring around target */}
-            {accuracyDistance <= ACCURACY_PERFECT_THRESHOLD && (
-              <div
-                className="kp-glow-ring"
-                style={{
-                  top: `${targetTopPercent}%`,
-                  borderColor: '#22c55e',
-                }}
-              />
+            {/* Power-ups */}
+            {powerUps.filter(p => !p.collected).map(pu => {
+              const age = elapsedDisplay - pu.spawnedAt
+              const op = age > POWERUP_DURATION_MS * 0.7 ? 0.4 : 1
+              return (
+                <div key={pu.id} className="kp-powerup-item" style={{
+                  top: `${(1 - pu.position) * 100}%`,
+                  opacity: op,
+                  borderColor: POWERUP_COLORS[pu.type],
+                  color: POWERUP_COLORS[pu.type],
+                  background: POWERUP_COLORS[pu.type] + '20',
+                }}>
+                  {POWERUP_ICONS[pu.type]}
+                </div>
+              )
+            })}
+
+            {/* Glow ring */}
+            {accDist <= ACCURACY_PERFECT_THRESHOLD && (
+              <div className="kp-glow-ring" style={{ top: `${targetTop}%` }} />
             )}
 
-            <div
-              className={`kp-target-zone ${isFever ? 'fever-target' : ''}`}
-              style={{
-                top: `${targetTopPercent}%`,
-                borderColor: isFever ? '#facc15' : accuracyColor,
-              }}
-            >
-              <div
-                className="kp-target-dot"
-                style={{ backgroundColor: isFever ? '#facc15' : accuracyColor }}
-              />
+            {/* Target */}
+            <div className={`kp-target ${isFever ? 'fever' : ''}`} style={{
+              top: `${targetTop}%`,
+              borderColor: isFever ? PIXEL_YELLOW : accColor,
+            }}>
+              <div className="kp-target-inner" style={{ backgroundColor: isFever ? PIXEL_YELLOW : accColor }} />
             </div>
 
-            <div
-              className="kp-player-indicator"
-              style={{
-                top: `${playerTopPercent}%`,
-                backgroundColor: accuracyColor,
-                boxShadow: `0 0 14px ${accuracyColor}88, 0 0 28px ${accuracyColor}44`,
-              }}
-            />
-
-            <div className="kp-scale-marks">
-              {[0, 20, 40, 60, 80, 100].map((mark) => (
-                <div key={mark} className="kp-scale-mark" style={{ top: `${mark}%` }} />
-              ))}
-            </div>
+            {/* Player */}
+            <div className="kp-player" style={{
+              top: `${playerTop}%`,
+              backgroundColor: accColor,
+              boxShadow: `0 0 8px ${accColor}88`,
+            }} />
           </div>
         </div>
 
-        <div className={`kp-waveform ${isFever ? 'fever-wave' : ''}`}>
-          <KaraokePitchWaveform
+        {/* Waveform */}
+        <div className={`kp-wave ${isFever ? 'fever' : ''}`}>
+          <PixelWaveform
             targetPosition={targetPosition}
             playerPosition={playerPosition}
-            accuracyColor={accuracyColor}
+            accColor={accColor}
             elapsedMs={elapsedDisplay}
             isFever={isFever}
             combo={combo}
+            level={level}
           />
         </div>
       </div>
@@ -1010,181 +1111,154 @@ function KaraokePitchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   )
 }
 
-// ─── Waveform Canvas ────────────────────────────────────────────────
+// ─── Pixel Waveform Canvas ──────────────────────────────────────────
 
-function KaraokePitchWaveform({
-  targetPosition,
-  playerPosition,
-  accuracyColor,
-  elapsedMs,
-  isFever,
-  combo,
+function PixelWaveform({
+  targetPosition, playerPosition, accColor, elapsedMs, isFever, combo, level,
 }: {
-  targetPosition: number
-  playerPosition: number
-  accuracyColor: string
-  elapsedMs: number
-  isFever: boolean
-  combo: number
+  targetPosition: number; playerPosition: number; accColor: string
+  elapsedMs: number; isFever: boolean; combo: number; level: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const historyRef = useRef<{ target: number; player: number; color: string }[]>([])
-  const MAX_HISTORY = 250
+  const MAX_HIST = 200
 
   useEffect(() => {
-    historyRef.current.push({
-      target: targetPosition,
-      player: playerPosition,
-      color: accuracyColor,
-    })
-    if (historyRef.current.length > MAX_HISTORY) {
-      historyRef.current.shift()
-    }
+    historyRef.current.push({ target: targetPosition, player: playerPosition, color: accColor })
+    if (historyRef.current.length > MAX_HIST) historyRef.current.shift()
 
     const canvas = canvasRef.current
-    if (canvas === null) return
-
+    if (!canvas) return
     const rect = canvas.getBoundingClientRect()
     const dpr = window.devicePixelRatio || 1
-    const width = Math.floor(rect.width * dpr)
-    const height = Math.floor(rect.height * dpr)
-
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width
-      canvas.height = height
-    }
+    const W = Math.floor(rect.width * dpr)
+    const H = Math.floor(rect.height * dpr)
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H }
 
     const ctx = canvas.getContext('2d')
-    if (ctx === null) return
+    if (!ctx) return
+    ctx.imageSmoothingEnabled = false
 
-    ctx.clearRect(0, 0, width, height)
-
-    const history = historyRef.current
-    const len = history.length
+    ctx.clearRect(0, 0, W, H)
+    const hist = historyRef.current
+    const len = hist.length
     if (len < 2) return
 
-    const padding = 10 * dpr
-    const drawWidth = width - padding * 2
-    const drawHeight = height - padding * 2
+    const pad = 8 * dpr
+    const dW = W - pad * 2
+    const dH = H - pad * 2
 
-    // Grid lines
-    ctx.strokeStyle = '#ffffff08'
+    // Pixel grid
+    const gridStep = Math.floor(dH / 8)
+    ctx.fillStyle = PIXEL_PURPLE + '12'
+    for (let i = 0; i <= 8; i++) {
+      const y = Math.floor(pad + i * gridStep)
+      ctx.fillRect(pad, y, dW, 1 * dpr)
+    }
+
+    // Vertical grid
+    const vStep = Math.floor(dW / 10)
+    for (let i = 0; i <= 10; i++) {
+      const x = Math.floor(pad + i * vStep)
+      ctx.fillRect(x, pad, 1 * dpr, dH)
+    }
+
+    // Draw pixel-stepped lines
+    const PIXEL_SIZE = Math.max(2, Math.floor(3 * dpr))
+
+    // Target line - pixel stepped
+    const targetColor = isFever ? PIXEL_YELLOW : PIXEL_PURPLE
+    ctx.fillStyle = targetColor + '55'
+    for (let i = 0; i < len - 1; i++) {
+      const x = Math.floor(pad + (i / (MAX_HIST - 1)) * dW)
+      const y = Math.floor(pad + (1 - hist[i].target) * dH)
+      ctx.fillRect(x, y - PIXEL_SIZE / 2, PIXEL_SIZE, PIXEL_SIZE)
+    }
+
+    // Target line bright
+    ctx.fillStyle = targetColor + '88'
+    for (let i = Math.max(0, len - 80); i < len; i++) {
+      const x = Math.floor(pad + (i / (MAX_HIST - 1)) * dW)
+      const y = Math.floor(pad + (1 - hist[i].target) * dH)
+      ctx.fillRect(x, y - PIXEL_SIZE / 2, PIXEL_SIZE, PIXEL_SIZE)
+    }
+
+    // Player line - pixel stepped
+    ctx.fillStyle = PIXEL_WHITE + '44'
+    for (let i = 0; i < len - 1; i++) {
+      const x = Math.floor(pad + (i / (MAX_HIST - 1)) * dW)
+      const y = Math.floor(pad + (1 - hist[i].player) * dH)
+      ctx.fillRect(x, y - PIXEL_SIZE / 2, PIXEL_SIZE, PIXEL_SIZE)
+    }
+
+    // Player line bright (recent)
+    for (let i = Math.max(0, len - 80); i < len; i++) {
+      const alpha = ((i - (len - 80)) / 80)
+      ctx.fillStyle = hist[i].color + Math.floor(alpha * 200 + 55).toString(16).padStart(2, '0')
+      const x = Math.floor(pad + (i / (MAX_HIST - 1)) * dW)
+      const y = Math.floor(pad + (1 - hist[i].player) * dH)
+      ctx.fillRect(x, y - PIXEL_SIZE / 2, PIXEL_SIZE, PIXEL_SIZE)
+    }
+
+    // Current dots
+    const last = hist[len - 1]
+    const lx = Math.floor(pad + ((len - 1) / (MAX_HIST - 1)) * dW)
+    const tY = Math.floor(pad + (1 - last.target) * dH)
+    const pY = Math.floor(pad + (1 - last.player) * dH)
+
+    // Target diamond
+    const DS = Math.floor(6 * dpr)
+    ctx.fillStyle = targetColor
+    ctx.beginPath()
+    ctx.moveTo(lx, tY - DS)
+    ctx.lineTo(lx + DS, tY)
+    ctx.lineTo(lx, tY + DS)
+    ctx.lineTo(lx - DS, tY)
+    ctx.closePath()
+    ctx.fill()
+
+    // Player square
+    const PS = Math.floor(5 * dpr)
+    ctx.fillStyle = last.color
+    ctx.fillRect(lx - PS, pY - PS, PS * 2, PS * 2)
+    ctx.strokeStyle = PIXEL_WHITE
     ctx.lineWidth = 1 * dpr
-    for (let i = 0; i <= 4; i++) {
-      const y = padding + (i / 4) * drawHeight
-      ctx.beginPath()
-      ctx.moveTo(padding, y)
-      ctx.lineTo(padding + drawWidth, y)
-      ctx.stroke()
+    ctx.strokeRect(lx - PS, pY - PS, PS * 2, PS * 2)
+
+    // Distance line (dashed pixel)
+    ctx.fillStyle = last.color + '66'
+    const minY = Math.min(tY, pY)
+    const maxY = Math.max(tY, pY)
+    for (let y = minY; y < maxY; y += 4 * dpr) {
+      ctx.fillRect(lx - dpr, y, 2 * dpr, 2 * dpr)
     }
 
-    // Target line (glow)
-    ctx.lineWidth = 3 * dpr
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-
-    // Target glow
-    ctx.strokeStyle = isFever ? '#facc1540' : '#d946ef30'
-    ctx.lineWidth = 6 * dpr
-    ctx.beginPath()
-    for (let i = 0; i < len; i++) {
-      const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
-      const y = padding + (1 - history[i].target) * drawHeight
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-
-    // Target line
-    ctx.strokeStyle = isFever ? '#facc1588' : '#d946ef66'
-    ctx.lineWidth = 2.5 * dpr
-    ctx.beginPath()
-    for (let i = 0; i < len; i++) {
-      const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
-      const y = padding + (1 - history[i].target) * drawHeight
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-
-    // Player line glow
-    ctx.strokeStyle = accuracyColor + '30'
-    ctx.lineWidth = 6 * dpr
-    ctx.beginPath()
-    for (let i = 0; i < len; i++) {
-      const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
-      const y = padding + (1 - history[i].player) * drawHeight
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-
-    // Player line
-    ctx.strokeStyle = '#ffffffaa'
-    ctx.lineWidth = 2.5 * dpr
-    ctx.beginPath()
-    for (let i = 0; i < len; i++) {
-      const x = padding + (i / (MAX_HISTORY - 1)) * drawWidth
-      const y = padding + (1 - history[i].player) * drawHeight
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-
-    // Current position dots
-    const lastEntry = history[len - 1]
-    const lastX = padding + ((len - 1) / (MAX_HISTORY - 1)) * drawWidth
-    const lastTargetY = padding + (1 - lastEntry.target) * drawHeight
-    const lastPlayerY = padding + (1 - lastEntry.player) * drawHeight
-
-    // Target dot glow
-    const targetGlowSize = isFever ? 12 : 8
-    const gradient = ctx.createRadialGradient(lastX, lastTargetY, 0, lastX, lastTargetY, targetGlowSize * dpr)
-    gradient.addColorStop(0, isFever ? '#facc15' : '#d946ef')
-    gradient.addColorStop(1, 'transparent')
-    ctx.fillStyle = gradient
-    ctx.beginPath()
-    ctx.arc(lastX, lastTargetY, targetGlowSize * dpr, 0, Math.PI * 2)
-    ctx.fill()
-
-    ctx.fillStyle = isFever ? '#facc15' : '#d946ef'
-    ctx.beginPath()
-    ctx.arc(lastX, lastTargetY, 4 * dpr, 0, Math.PI * 2)
-    ctx.fill()
-
-    // Player dot glow
-    const playerGlowSize = combo > 10 ? 14 : 10
-    const pGradient = ctx.createRadialGradient(lastX, lastPlayerY, 0, lastX, lastPlayerY, playerGlowSize * dpr)
-    pGradient.addColorStop(0, lastEntry.color)
-    pGradient.addColorStop(1, 'transparent')
-    ctx.fillStyle = pGradient
-    ctx.beginPath()
-    ctx.arc(lastX, lastPlayerY, playerGlowSize * dpr, 0, Math.PI * 2)
-    ctx.fill()
-
-    ctx.fillStyle = lastEntry.color
-    ctx.beginPath()
-    ctx.arc(lastX, lastPlayerY, 5 * dpr, 0, Math.PI * 2)
-    ctx.fill()
-
-    // Distance line
-    ctx.strokeStyle = lastEntry.color + '44'
-    ctx.lineWidth = 1 * dpr
-    ctx.setLineDash([4 * dpr, 4 * dpr])
-    ctx.beginPath()
-    ctx.moveTo(lastX, lastTargetY)
-    ctx.lineTo(lastX, lastPlayerY)
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    // Combo display in waveform
+    // Combo text
     if (combo >= 5) {
-      ctx.fillStyle = '#ffffff'
-      ctx.font = `bold ${16 * dpr}px sans-serif`
+      ctx.fillStyle = PIXEL_CYAN
+      ctx.font = `${Math.floor(12 * dpr)}px 'Press Start 2P', monospace`
       ctx.textAlign = 'center'
-      ctx.fillText(`${combo}x`, width / 2, padding + 20 * dpr)
+      ctx.fillText(`${combo}x`, W / 2, pad + Math.floor(16 * dpr))
     }
-  }, [targetPosition, playerPosition, accuracyColor, elapsedMs, isFever, combo])
+
+    // Level indicator
+    ctx.fillStyle = PIXEL_PURPLE + '88'
+    ctx.font = `${Math.floor(8 * dpr)}px 'Press Start 2P', monospace`
+    ctx.textAlign = 'right'
+    ctx.fillText(`Lv.${level + 1}`, W - pad, H - pad)
+
+    // Accuracy meter at bottom
+    const meterW = Math.floor(dW * 0.6)
+    const meterH = Math.floor(4 * dpr)
+    const meterX = Math.floor(W / 2 - meterW / 2)
+    const meterY = H - pad - meterH - Math.floor(2 * dpr)
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(meterX, meterY, meterW, meterH)
+    const accPercent = Math.max(0, 1 - (Math.abs(targetPosition - playerPosition) / 0.5))
+    ctx.fillStyle = last.color
+    ctx.fillRect(meterX, meterY, Math.floor(meterW * accPercent), meterH)
+
+  }, [targetPosition, playerPosition, accColor, elapsedMs, isFever, combo, level])
 
   return <canvas ref={canvasRef} />
 }
@@ -1195,7 +1269,7 @@ export const karaokePitchModule: MiniGameModule = {
   manifest: {
     id: 'karaoke-pitch',
     title: 'Karaoke Pitch',
-    description: 'Match the pitch! Track targets for combos & fever!',
+    description: 'Retro pitch tracking! Collect items & power-ups!',
     unlockCost: 40,
     baseReward: 14,
     scoreRewardMultiplier: 1.15,

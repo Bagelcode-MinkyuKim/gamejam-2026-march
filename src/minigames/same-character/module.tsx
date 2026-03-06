@@ -114,7 +114,7 @@ function nextIncomingQueue(currentQueue: CharacterToken[]): CharacterToken[] {
   return [...currentQueue.slice(1), randomCharacter()]
 }
 
-function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
+function SameCharacterGame({ onFinish, onExit: _onExit }: MiniGameSessionProps) {
   const [selectedLane, setSelectedLane] = useState(1)
   const [laneStacks, setLaneStacks] = useState<CharacterToken[][]>(() => createInitialStacks())
   const [incomingQueue, setIncomingQueue] = useState<CharacterToken[]>(() => createIncomingQueue())
@@ -501,16 +501,6 @@ function SameCharacterGame({ onFinish, onExit }: MiniGameSessionProps) {
     playSfx('okUnlock', 0.62 + presetIndex * 0.08, 1 + presetIndex * 0.04)
   }
 
-  const handleExit = () => {
-    playSfx('exit', 0.88, 1.05)
-    if (gameplayBgmRef.current) {
-      gameplayBgmRef.current.pause()
-    }
-    if (feverBgmRef.current) {
-      feverBgmRef.current.pause()
-    }
-    onExit()
-  }
 
   const turnFillPercent = (turnRemainingMs / TURN_DURATION_MS) * 100
   const feverFillPercent = feverRemainingMs > 0 ? (feverRemainingMs / FEVER_DURATION_MS) * 100 : 0

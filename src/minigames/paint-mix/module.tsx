@@ -7,6 +7,9 @@ import splashSfx from '../../../assets/sounds/paint-mix-splash.mp3'
 import perfectSfx from '../../../assets/sounds/paint-mix-perfect.mp3'
 import slideSfx from '../../../assets/sounds/paint-mix-slide.mp3'
 import missSfx from '../../../assets/sounds/paint-mix-miss.mp3'
+import comboSfx from '../../../assets/sounds/paint-mix-combo.mp3'
+import levelupSfx from '../../../assets/sounds/paint-mix-levelup.mp3'
+import feverSfx from '../../../assets/sounds/paint-mix-fever.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
 const ROUND_DURATION_MS = 120000
@@ -23,7 +26,7 @@ const FEVER_MULTIPLIER = 2
 const PERFECT_THRESHOLD = 90
 const PERFECT_BONUS = 15
 
-// --- New feature constants ---
+// --- Feature constants ---
 const GOLDEN_COLOR_CHANCE = 0.12
 const GOLDEN_MULTIPLIER = 3
 const HINT_COOLDOWN_MS = 15000
@@ -31,6 +34,26 @@ const TIME_BONUS_PER_PERFECT_MS = 2000
 const DIFFICULTY_SCALE_INTERVAL = 5
 const RAINBOW_ROUND_INTERVAL = 8
 const RAINBOW_BONUS = 30
+
+// --- Pixel canvas constants ---
+const CANVAS_COLS = 8
+const CANVAS_ROWS = 8
+
+// --- Rank thresholds ---
+const RANKS = [
+  { min: 0, label: 'Apprentice', emoji: '\u{1F3A8}' },
+  { min: 5, label: 'Mixer', emoji: '\u{1F58C}\u{FE0F}' },
+  { min: 15, label: 'Artist', emoji: '\u{1F5BC}\u{FE0F}' },
+  { min: 30, label: 'Master', emoji: '\u{1F451}' },
+  { min: 50, label: 'Legend', emoji: '\u{2B50}' },
+] as const
+
+function getRank(perfectCount: number): (typeof RANKS)[number] {
+  for (let i = RANKS.length - 1; i >= 0; i--) {
+    if (perfectCount >= RANKS[i].min) return RANKS[i]
+  }
+  return RANKS[0]
+}
 
 interface TargetColor {
   readonly name: string
@@ -77,18 +100,31 @@ function scoreFromDistance(dist: number): number {
   return Math.max(0, Math.round(100 - (dist / MAX_COLOR_DISTANCE) * 100))
 }
 
-function getAccuracyLabel(accuracy: number): { text: string; color: string } {
-  if (accuracy >= 95) return { text: 'PERFECT!', color: '#16a34a' }
-  if (accuracy >= 80) return { text: 'Excellent!', color: '#22c55e' }
-  if (accuracy >= 60) return { text: 'Good', color: '#ca8a04' }
-  if (accuracy >= 40) return { text: 'Close...', color: '#f97316' }
-  return { text: 'Keep trying', color: '#dc2626' }
+function getAccuracyLabel(accuracy: number): { text: string; color: string; pixelColor: string } {
+  if (accuracy >= 95) return { text: 'PERFECT!', color: '#22c55e', pixelColor: '#4ade80' }
+  if (accuracy >= 80) return { text: 'Excellent!', color: '#22c55e', pixelColor: '#86efac' }
+  if (accuracy >= 60) return { text: 'Good', color: '#eab308', pixelColor: '#fde047' }
+  if (accuracy >= 40) return { text: 'Close...', color: '#f97316', pixelColor: '#fb923c' }
+  return { text: 'Miss', color: '#ef4444', pixelColor: '#f87171' }
 }
 
 function getChannelHint(current: number, target: number): string {
   const diff = target - current
   if (Math.abs(diff) < 15) return '\u{2705}'
-  return diff > 0 ? '\u{2B06}\u{FE0F}' : '\u{2B07}\u{FE0F}'
+  return diff > 0 ? '\u{25B2}' : '\u{25BC}'
+}
+
+/** Generate a pixel canvas pattern where some cells are filled with color */
+function generatePixelCanvas(_r: number, _g: number, _b: number, fillRatio: number): boolean[][] {
+  const grid: boolean[][] = []
+  for (let row = 0; row < CANVAS_ROWS; row++) {
+    const rowData: boolean[] = []
+    for (let col = 0; col < CANVAS_COLS; col++) {
+      rowData.push(Math.random() < fillRatio)
+    }
+    grid.push(rowData)
+  }
+  return grid
 }
 
 function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
@@ -113,6 +149,10 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const [showHints, setShowHints] = useState(false)
   const [screenFlashColor, setScreenFlashColor] = useState('')
   const [lastAccuracyLabel, setLastAccuracyLabel] = useState('')
+  const [pixelCanvas, setPixelCanvas] = useState<boolean[][]>(() => generatePixelCanvas(128, 128, 128, 0))
+  const [pixelFillAnimation, setPixelFillAnimation] = useState(false)
+  const [showRankUp, setShowRankUp] = useState(false)
+  const [currentRankLabel, setCurrentRankLabel] = useState('')
 
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
@@ -130,12 +170,26 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const bonusTextTimerRef = useRef<number | null>(null)
   const hintCooldownTimerRef = useRef<number | null>(null)
   const screenFlashTimerRef = useRef<number | null>(null)
+  const pixelAnimTimerRef = useRef<number | null>(null)
+  const rankUpTimerRef = useRef<number | null>(null)
+  const perfectCountRef = useRef(0)
+  const prevRankRef = useRef<(typeof RANKS)[number]>(RANKS[0])
 
   const splashAudioRef = useRef<HTMLAudioElement | null>(null)
   const perfectAudioRef = useRef<HTMLAudioElement | null>(null)
   const slideAudioRef = useRef<HTMLAudioElement | null>(null)
   const missAudioRef = useRef<HTMLAudioElement | null>(null)
+  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
+  const levelupAudioRef = useRef<HTMLAudioElement | null>(null)
+  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
   const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  const clearTimeoutSafe = (timerRef: { current: number | null }) => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
 
   const playAudio = useCallback(
     (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
@@ -151,33 +205,34 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
   const triggerScreenFlash = useCallback((color: string, durationMs = 300) => {
     setScreenFlashColor(color)
-    if (screenFlashTimerRef.current !== null) window.clearTimeout(screenFlashTimerRef.current)
+    clearTimeoutSafe(screenFlashTimerRef)
     screenFlashTimerRef.current = window.setTimeout(() => {
       screenFlashTimerRef.current = null
       setScreenFlashColor('')
     }, durationMs)
   }, [])
 
+  const triggerPixelFill = useCallback((accuracy: number) => {
+    const fillRatio = accuracy / 100
+    setPixelCanvas(generatePixelCanvas(0, 0, 0, fillRatio))
+    setPixelFillAnimation(true)
+    clearTimeoutSafe(pixelAnimTimerRef)
+    pixelAnimTimerRef.current = window.setTimeout(() => {
+      pixelAnimTimerRef.current = null
+      setPixelFillAnimation(false)
+    }, 600)
+  }, [])
+
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
 
-    if (lastSubmitTimerRef.current !== null) {
-      window.clearTimeout(lastSubmitTimerRef.current)
-      lastSubmitTimerRef.current = null
-    }
-    if (bonusTextTimerRef.current !== null) {
-      window.clearTimeout(bonusTextTimerRef.current)
-      bonusTextTimerRef.current = null
-    }
-    if (hintCooldownTimerRef.current !== null) {
-      window.clearTimeout(hintCooldownTimerRef.current)
-      hintCooldownTimerRef.current = null
-    }
-    if (screenFlashTimerRef.current !== null) {
-      window.clearTimeout(screenFlashTimerRef.current)
-      screenFlashTimerRef.current = null
-    }
+    clearTimeoutSafe(lastSubmitTimerRef)
+    clearTimeoutSafe(bonusTextTimerRef)
+    clearTimeoutSafe(hintCooldownTimerRef)
+    clearTimeoutSafe(screenFlashTimerRef)
+    clearTimeoutSafe(pixelAnimTimerRef)
+    clearTimeoutSafe(rankUpTimerRef)
 
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     onFinish({ score: scoreRef.current, durationMs: elapsedMs })
@@ -187,13 +242,14 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     if (!hintAvailable) return
     setShowHints(true)
     setHintAvailable(false)
-    if (hintCooldownTimerRef.current !== null) window.clearTimeout(hintCooldownTimerRef.current)
+    playAudio(slideAudioRef, 0.3, 1.5)
+    clearTimeoutSafe(hintCooldownTimerRef)
     hintCooldownTimerRef.current = window.setTimeout(() => {
       hintCooldownTimerRef.current = null
       setHintAvailable(true)
       setShowHints(false)
     }, HINT_COOLDOWN_MS)
-  }, [hintAvailable])
+  }, [hintAvailable, playAudio])
 
   const handleSubmit = useCallback(() => {
     if (finishedRef.current) return
@@ -211,6 +267,9 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     const accLabel = getAccuracyLabel(basePoints)
     setLastAccuracyLabel(accLabel.text)
 
+    // Pixel fill animation based on accuracy
+    triggerPixelFill(basePoints)
+
     // Combo system
     const isComboKept = timeSinceLastSubmit < COMBO_KEEP_WINDOW_MS && basePoints >= 50
     if (isComboKept) {
@@ -221,6 +280,11 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       comboRef.current = 1
     }
     setCombo(comboRef.current)
+
+    // Combo sound
+    if (comboRef.current >= 2) {
+      playAudio(comboAudioRef, 0.5, 1 + comboRef.current * 0.08)
+    }
 
     // Fever activation
     if (basePoints >= 70) {
@@ -233,7 +297,8 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       feverMsRef.current = FEVER_DURATION_MS
       setIsFever(true)
       setFeverMs(FEVER_DURATION_MS)
-      triggerScreenFlash('rgba(225,29,72,0.5)')
+      playAudio(feverAudioRef, 0.7, 1)
+      triggerScreenFlash('rgba(239,68,68,0.5)', 500)
     }
 
     const comboMult = 1 + comboRef.current * COMBO_MULTIPLIER_STEP
@@ -247,10 +312,24 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     let perfBonus = 0
     if (basePoints >= PERFECT_THRESHOLD) {
       perfBonus = PERFECT_BONUS
-      setPerfectCount((p) => p + 1)
-      // Time bonus for perfects
+      perfectCountRef.current += 1
+      setPerfectCount(perfectCountRef.current)
       remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_PER_PERFECT_MS)
       setRemainingMs(remainingMsRef.current)
+
+      // Check rank up
+      const newRank = getRank(perfectCountRef.current)
+      if (newRank !== prevRankRef.current) {
+        prevRankRef.current = newRank
+        setCurrentRankLabel(`${newRank.emoji} ${newRank.label}`)
+        setShowRankUp(true)
+        playAudio(levelupAudioRef, 0.7, 1)
+        clearTimeoutSafe(rankUpTimerRef)
+        rankUpTimerRef.current = window.setTimeout(() => {
+          rankUpTimerRef.current = null
+          setShowRankUp(false)
+        }, 2000)
+      }
     }
 
     // Rainbow round bonus
@@ -280,16 +359,14 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     if (perfBonus > 0) parts.push(`+${TIME_BONUS_PER_PERFECT_MS / 1000}s`)
     if (parts.length > 0) {
       setBonusText(parts.join(' '))
-      if (bonusTextTimerRef.current !== null) window.clearTimeout(bonusTextTimerRef.current)
+      clearTimeoutSafe(bonusTextTimerRef)
       bonusTextTimerRef.current = window.setTimeout(() => {
         bonusTextTimerRef.current = null
         setBonusText('')
       }, 1200)
     }
 
-    if (lastSubmitTimerRef.current !== null) {
-      window.clearTimeout(lastSubmitTimerRef.current)
-    }
+    clearTimeoutSafe(lastSubmitTimerRef)
     lastSubmitTimerRef.current = window.setTimeout(() => {
       lastSubmitTimerRef.current = null
       setLastSubmitFade(true)
@@ -299,20 +376,20 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     if (basePoints >= 90) {
       playAudio(perfectAudioRef, 0.7, 1 + basePoints * 0.001)
       effects.triggerFlash('rgba(34,197,94,0.5)')
-      effects.spawnParticles(8, 200, 300)
+      effects.spawnParticles(10, 200, 300)
       triggerScreenFlash('rgba(34,197,94,0.3)')
     } else if (basePoints >= 70) {
       playAudio(splashAudioRef, 0.6, 1)
       effects.triggerFlash()
-      effects.spawnParticles(5, 200, 250)
+      effects.spawnParticles(6, 200, 250)
     } else if (basePoints >= 50) {
       playAudio(splashAudioRef, 0.5, 0.9)
       effects.spawnParticles(3, 200, 200)
     } else {
       playAudio(missAudioRef, 0.5, 1)
-      effects.triggerShake(4)
+      effects.triggerShake(6)
       effects.triggerFlash('rgba(239,68,68,0.4)')
-      triggerScreenFlash('rgba(239,68,68,0.2)')
+      triggerScreenFlash('rgba(239,68,68,0.25)')
     }
 
     // Next color
@@ -324,12 +401,9 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     colorStartAtRef.current = performance.now()
     setShowHints(false)
 
-    // Golden round check
     setIsGoldenRound(Math.random() < GOLDEN_COLOR_CHANCE)
-
-    // Rainbow round check
     setIsRainbowRound(nextMatched > 0 && nextMatched % RAINBOW_ROUND_INTERVAL === 0)
-  }, [targetIndex, sliderR, sliderG, sliderB, playAudio, isGoldenRound, isRainbowRound, triggerScreenFlash])
+  }, [targetIndex, sliderR, sliderG, sliderB, playAudio, isGoldenRound, isRainbowRound, triggerScreenFlash, triggerPixelFill])
 
   const handleExit = useCallback(() => {
     onExit()
@@ -356,6 +430,9 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
       { ref: perfectAudioRef, src: perfectSfx },
       { ref: slideAudioRef, src: slideSfx },
       { ref: missAudioRef, src: missSfx },
+      { ref: comboAudioRef, src: comboSfx },
+      { ref: levelupAudioRef, src: levelupSfx },
+      { ref: feverAudioRef, src: feverSfx },
       { ref: gameOverAudioRef, src: gameOverHitSfx },
     ]
     audios.forEach(({ ref, src }) => {
@@ -368,10 +445,12 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     lastSubmitAtRef.current = performance.now()
 
     return () => {
-      if (lastSubmitTimerRef.current !== null) window.clearTimeout(lastSubmitTimerRef.current)
-      if (bonusTextTimerRef.current !== null) window.clearTimeout(bonusTextTimerRef.current)
-      if (hintCooldownTimerRef.current !== null) window.clearTimeout(hintCooldownTimerRef.current)
-      if (screenFlashTimerRef.current !== null) window.clearTimeout(screenFlashTimerRef.current)
+      clearTimeoutSafe(lastSubmitTimerRef)
+      clearTimeoutSafe(bonusTextTimerRef)
+      clearTimeoutSafe(hintCooldownTimerRef)
+      clearTimeoutSafe(screenFlashTimerRef)
+      clearTimeoutSafe(pixelAnimTimerRef)
+      clearTimeoutSafe(rankUpTimerRef)
       effects.cleanup()
       audios.forEach(({ ref }) => { ref.current = null })
     }
@@ -433,143 +512,164 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const currentAccuracy = target ? scoreFromDistance(currentDist) : 0
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
-  const comboMult = 1 + combo * COMBO_MULTIPLIER_STEP
   const accuracyInfo = getAccuracyLabel(currentAccuracy)
+  const currentRank = getRank(perfectCount)
+  const colorPoolSize = Math.min(TARGET_COLORS.length, 6 + Math.floor(colorsMatched / DIFFICULTY_SCALE_INTERVAL))
 
   return (
-    <section className="mini-game-panel paint-mix-panel" aria-label="paint-mix-game" style={{ position: 'relative', maxWidth: '432px', width: '100%', height: '100%', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}>
+    <section className="mini-game-panel pm-panel" aria-label="paint-mix-game" style={{ position: 'relative', maxWidth: '432px', width: '100%', height: '100%', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}>
       <style>{GAME_EFFECTS_CSS}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
-      {/* Screen flash overlay */}
       {screenFlashColor && (
         <div className="pm-screen-flash" style={{ background: screenFlashColor }} />
       )}
 
-      {/* Header */}
+      {/* === PIXEL HEADER === */}
       <div className="pm-header">
         <img className="pm-avatar" src={characterImg} alt="Artist" />
-        <div style={{ flex: 1 }}>
+        <div className="pm-header-info">
           <p className="pm-score">{score.toLocaleString()}</p>
           <p className="pm-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
-        <p className={`pm-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
+        <div className="pm-header-time">
+          <p className={`pm-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
+        </div>
       </div>
 
-      {/* Stats row */}
-      <div className="pm-stats-row">
-        <span className="pm-stat">{'\u{1F3A8}'} <strong>{colorsMatched}</strong></span>
-        <span className="pm-stat">Combo <strong style={{ color: combo > 1 ? '#e11d48' : undefined }}>{combo}</strong></span>
-        {comboMult > 1 && <span className="pm-stat" style={{ color: '#e11d48' }}>x{comboMult.toFixed(2)}</span>}
-        {perfectCount > 0 && <span className="pm-stat" style={{ color: '#16a34a' }}>{'\u{2B50}'} {perfectCount}</span>}
+      {/* === STATS BAR === */}
+      <div className="pm-stats-bar">
+        <span className="pm-pixel-badge">{currentRank.emoji} {currentRank.label}</span>
+        <span className="pm-pixel-stat">x{combo}</span>
+        <span className="pm-pixel-stat">{'\u{1F3A8}'}{colorsMatched}</span>
+        <span className="pm-pixel-stat">{'\u{2B50}'}{perfectCount}</span>
+        <span className="pm-pixel-stat">LV{colorPoolSize}</span>
       </div>
 
-      {/* Fever banner */}
+      {/* === BANNERS === */}
       {isFever && (
-        <p className="pm-fever-banner">
-          {'\u{1F525}'} FEVER x{FEVER_MULTIPLIER} ({(feverMs / 1000).toFixed(1)}s) {'\u{1F525}'}
-        </p>
+        <div className="pm-fever-banner">
+          {'\u{1F525}'} FEVER x{FEVER_MULTIPLIER} {(feverMs / 1000).toFixed(1)}s {'\u{1F525}'}
+        </div>
       )}
-
-      {/* Golden round indicator */}
       {isGoldenRound && (
-        <p className="pm-golden-banner">{'\u{1F451}'} GOLDEN ROUND x3! {'\u{1F451}'}</p>
+        <div className="pm-golden-banner">{'\u{1F451}'} GOLDEN x3 {'\u{1F451}'}</div>
       )}
-
-      {/* Rainbow round indicator */}
       {isRainbowRound && (
-        <p className="pm-rainbow-banner">{'\u{1F308}'} RAINBOW BONUS! {'\u{1F308}'}</p>
+        <div className="pm-rainbow-banner">{'\u{1F308}'} RAINBOW BONUS {'\u{1F308}'}</div>
       )}
+      {showRankUp && (
+        <div className="pm-rankup-banner">RANK UP! {currentRankLabel}</div>
+      )}
+      {bonusText && <div className="pm-bonus-text">{bonusText}</div>}
 
-      {bonusText && <p className="pm-bonus-text">{bonusText}</p>}
-
-      {/* Target name */}
-      <p className="pm-target-name">
-        TARGET: {target?.name ?? '?'}
+      {/* === TARGET LABEL === */}
+      <div className="pm-target-label">
+        TARGET: <span style={{ color: targetRgb }}>{'\u{25A0}\u{25A0}\u{25A0}'}</span> {target?.name ?? '?'}
         {isGoldenRound && ' \u{1F451}'}
-      </p>
+      </div>
 
-      {/* Color comparison */}
-      <div className="pm-color-area">
-        <div className="pm-swatch-container">
-          <div className="pm-swatch" style={{
+      {/* === COLOR COMPARE === */}
+      <div className="pm-color-compare">
+        <div className="pm-pixel-swatch-wrap">
+          <div className="pm-pixel-swatch" style={{
             backgroundColor: targetRgb,
-            boxShadow: isGoldenRound ? '0 0 20px rgba(255,215,0,0.6)' : isFever ? '0 4px 12px rgba(225,29,72,0.5)' : '0 4px 12px rgba(0,0,0,0.15)',
-            border: isGoldenRound ? '3px solid #fbbf24' : '3px solid rgba(124,58,237,0.3)',
-          }}>
-            <span className="pm-swatch-label">Target</span>
+            boxShadow: isGoldenRound
+              ? '4px 4px 0 #92400e, 0 0 16px rgba(251,191,36,0.6)'
+              : '4px 4px 0 rgba(0,0,0,0.3)',
+          }} />
+          <span className="pm-swatch-tag">Target</span>
+        </div>
+
+        <div className="pm-accuracy-display">
+          <div className="pm-accuracy-bar-bg">
+            <div
+              className="pm-accuracy-bar-fill"
+              style={{
+                width: `${currentAccuracy}%`,
+                background: accuracyInfo.color,
+              }}
+            />
           </div>
-          <div className="pm-accuracy-ring" style={{ borderColor: accuracyInfo.color }}>
-            <span className="pm-accuracy-text" style={{ color: accuracyInfo.color }}>{currentAccuracy}%</span>
-            <span className="pm-accuracy-label" style={{ color: accuracyInfo.color }}>{accuracyInfo.text}</span>
-          </div>
-          <div className="pm-swatch" style={{ backgroundColor: mixRgb }}>
-            <span className="pm-swatch-label">Your Mix</span>
-          </div>
+          <span className="pm-accuracy-num" style={{ color: accuracyInfo.color }}>{currentAccuracy}%</span>
+          <span className="pm-accuracy-txt" style={{ color: accuracyInfo.color }}>{accuracyInfo.text}</span>
+        </div>
+
+        <div className="pm-pixel-swatch-wrap">
+          <div className="pm-pixel-swatch" style={{
+            backgroundColor: mixRgb,
+            boxShadow: '4px 4px 0 rgba(0,0,0,0.3)',
+          }} />
+          <span className="pm-swatch-tag">Mix</span>
         </div>
       </div>
 
-      {/* Sliders */}
+      {/* === PIXEL CANVAS (mini artwork preview) === */}
+      <div className={`pm-pixel-canvas ${pixelFillAnimation ? 'pop' : ''}`}>
+        {pixelCanvas.map((row, ri) => (
+          <div className="pm-pixel-row" key={ri}>
+            {row.map((filled, ci) => (
+              <div
+                className="pm-pixel-cell"
+                key={ci}
+                style={{
+                  background: filled ? mixRgb : 'rgba(0,0,0,0.05)',
+                  animationDelay: filled ? `${(ri * CANVAS_COLS + ci) * 15}ms` : undefined,
+                }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* === SLIDERS === */}
       <div className="pm-slider-group">
-        <div className="pm-slider-row">
-          <span className="pm-slider-label" style={{ color: '#ef4444' }}>R</span>
-          <input
-            className="pm-slider pm-slider-r"
-            type="range"
-            min={0}
-            max={255}
-            value={sliderR}
-            onChange={(e) => { setSliderR(Number(e.target.value)); playAudio(slideAudioRef, 0.15, 0.8 + Number(e.target.value) / 500) }}
-          />
-          <span className="pm-slider-value">{sliderR}</span>
-          {showHints && target && <span className="pm-hint">{getChannelHint(sliderR, target.r)}</span>}
-        </div>
-        <div className="pm-slider-row">
-          <span className="pm-slider-label" style={{ color: '#22c55e' }}>G</span>
-          <input
-            className="pm-slider pm-slider-g"
-            type="range"
-            min={0}
-            max={255}
-            value={sliderG}
-            onChange={(e) => { setSliderG(Number(e.target.value)); playAudio(slideAudioRef, 0.15, 0.8 + Number(e.target.value) / 500) }}
-          />
-          <span className="pm-slider-value">{sliderG}</span>
-          {showHints && target && <span className="pm-hint">{getChannelHint(sliderG, target.g)}</span>}
-        </div>
-        <div className="pm-slider-row">
-          <span className="pm-slider-label" style={{ color: '#3b82f6' }}>B</span>
-          <input
-            className="pm-slider pm-slider-b"
-            type="range"
-            min={0}
-            max={255}
-            value={sliderB}
-            onChange={(e) => { setSliderB(Number(e.target.value)); playAudio(slideAudioRef, 0.15, 0.8 + Number(e.target.value) / 500) }}
-          />
-          <span className="pm-slider-value">{sliderB}</span>
-          {showHints && target && <span className="pm-hint">{getChannelHint(sliderB, target.b)}</span>}
-        </div>
+        {[
+          { label: 'R', color: '#ef4444', value: sliderR, setter: setSliderR, targetVal: target?.r },
+          { label: 'G', color: '#22c55e', value: sliderG, setter: setSliderG, targetVal: target?.g },
+          { label: 'B', color: '#3b82f6', value: sliderB, setter: setSliderB, targetVal: target?.b },
+        ].map(({ label, color, value, setter, targetVal }) => (
+          <div className="pm-slider-row" key={label}>
+            <span className="pm-slider-label" style={{ color }}>{label}</span>
+            <div className="pm-slider-track-wrap">
+              <input
+                className={`pm-slider pm-slider-${label.toLowerCase()}`}
+                type="range"
+                min={0}
+                max={255}
+                value={value}
+                onChange={(e) => {
+                  setter(Number(e.target.value))
+                  playAudio(slideAudioRef, 0.1, 0.8 + Number(e.target.value) / 500)
+                }}
+              />
+            </div>
+            <span className="pm-slider-value">{value}</span>
+            {showHints && targetVal !== undefined && (
+              <span className="pm-hint" style={{ color }}>{getChannelHint(value, targetVal)}</span>
+            )}
+          </div>
+        ))}
       </div>
 
-      {/* Actions */}
+      {/* === ACTIONS === */}
       <div className="pm-action-area">
         <button
-          className="pm-hint-btn"
+          className="pm-pixel-btn pm-hint-btn"
           type="button"
           onClick={useHint}
           disabled={!hintAvailable}
         >
-          {hintAvailable ? '\u{1F4A1} Hint' : '\u{23F3} Cooldown'}
+          {hintAvailable ? '\u{1F4A1}Hint' : '\u{23F3}Wait'}
         </button>
-        <button className="pm-submit-btn" type="button" onClick={handleSubmit}>
-          {'\u{1F3A8}'} Submit Mix
+        <button className="pm-pixel-btn pm-submit-btn" type="button" onClick={handleSubmit}>
+          {'\u{1F3A8}'} MIX!
         </button>
       </div>
 
-      {/* Feedback */}
+      {/* === FEEDBACK === */}
       {lastSubmitScore !== null && (
         <div className={`pm-feedback ${lastSubmitFade ? 'fade' : ''}`}>
           <span className={`pm-feedback-text ${lastSubmitScore >= 80 ? 'excellent' : lastSubmitScore >= 50 ? 'good' : 'poor'}`}>
@@ -578,23 +678,28 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         </div>
       )}
 
-      {/* Footer */}
-      <button className="pm-hub-btn" type="button" onClick={handleExit}>
+      {/* === FOOTER === */}
+      <button className="pm-pixel-btn pm-hub-btn" type="button" onClick={handleExit}>
         Hub
       </button>
 
       <style>{`
-        .paint-mix-panel {
+        /* ==================== PIXEL ART THEME ==================== */
+        .pm-panel {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 6px;
+          gap: 4px;
           height: 100%;
           user-select: none;
           -webkit-user-select: none;
           touch-action: manipulation;
           overflow: hidden;
-          background: linear-gradient(180deg, #7c3aed 0%, #a78bfa 12%, #f5f4ef 35%, #ede9df 100%);
+          background:
+            repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.02) 3px, rgba(0,0,0,0.02) 4px),
+            linear-gradient(180deg, #2d1b69 0%, #4c1d95 8%, #f5f4ef 28%, #ede9df 100%);
+          image-rendering: pixelated;
+          font-family: 'Courier New', 'Monaco', monospace;
         }
 
         .pm-screen-flash {
@@ -602,7 +707,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           inset: 0;
           pointer-events: none;
           z-index: 100;
-          animation: pm-flash-fade 0.3s ease-out forwards;
+          animation: pm-flash-fade 0.3s steps(4) forwards;
         }
 
         @keyframes pm-flash-fade {
@@ -610,126 +715,167 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           to { opacity: 0; }
         }
 
+        /* ---- HEADER ---- */
         .pm-header {
           display: flex;
           align-items: center;
           gap: 10px;
           width: 100%;
-          padding: 12px 16px 8px;
-          background: linear-gradient(180deg, rgba(0,0,0,0.35), transparent);
+          padding: 10px 14px 8px;
+          background: linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(45,27,105,0.8) 100%);
           box-sizing: border-box;
+          border-bottom: 4px solid #7c3aed;
+          image-rendering: pixelated;
         }
 
         .pm-avatar {
-          width: clamp(44px, 12vw, 56px);
-          height: clamp(44px, 12vw, 56px);
-          border-radius: 50%;
-          border: 3px solid #c084fc;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+          width: clamp(48px, 13vw, 60px);
+          height: clamp(48px, 13vw, 60px);
+          border: 4px solid #a855f7;
+          box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+          image-rendering: pixelated;
           object-fit: cover;
         }
 
+        .pm-header-info {
+          flex: 1;
+        }
+
         .pm-score {
-          font-size: clamp(28px, 7vw, 36px);
+          font-size: clamp(28px, 7vw, 38px);
           font-weight: 900;
           color: #faf5ff;
           margin: 0;
-          text-shadow: 0 2px 6px rgba(0,0,0,0.5);
-          letter-spacing: 1px;
+          text-shadow: 3px 3px 0 rgba(0,0,0,0.5);
+          letter-spacing: 2px;
         }
 
         .pm-best {
           font-size: 10px;
-          font-weight: 600;
-          color: rgba(250,245,255,0.6);
+          font-weight: 700;
+          color: rgba(250,245,255,0.5);
           margin: 0;
+          letter-spacing: 1px;
+        }
+
+        .pm-header-time {
+          text-align: right;
         }
 
         .pm-time {
-          font-size: clamp(20px, 5vw, 26px);
-          font-weight: 800;
+          font-size: clamp(20px, 5vw, 28px);
+          font-weight: 900;
           color: #faf5ff;
           margin: 0;
           font-variant-numeric: tabular-nums;
-          text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
         }
 
         .pm-time.low-time {
-          color: #fca5a5;
-          animation: pm-pulse 0.5s ease-in-out infinite alternate;
+          color: #f87171;
+          animation: pm-blink 0.4s steps(2) infinite;
         }
 
-        @keyframes pm-pulse {
-          from { opacity: 1; transform: scale(1); }
-          to { opacity: 0.6; transform: scale(1.05); }
+        @keyframes pm-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
         }
 
-        .pm-stats-row {
+        /* ---- STATS BAR ---- */
+        .pm-stats-bar {
           display: flex;
+          align-items: center;
           justify-content: center;
-          gap: 14px;
-          padding: 4px 12px;
+          gap: 10px;
+          padding: 6px 12px;
+          width: 100%;
+          box-sizing: border-box;
+          background: rgba(124,58,237,0.1);
+          border-bottom: 2px solid rgba(124,58,237,0.2);
         }
 
-        .pm-stat {
+        .pm-pixel-badge {
+          font-size: 12px;
+          font-weight: 900;
+          color: #7c3aed;
+          padding: 2px 8px;
+          background: rgba(124,58,237,0.15);
+          border: 2px solid #7c3aed;
+          letter-spacing: 1px;
+        }
+
+        .pm-pixel-stat {
           font-size: 13px;
-          font-weight: 700;
-          color: #6b21a8;
+          font-weight: 900;
+          color: #581c87;
+          letter-spacing: 1px;
         }
 
-        .pm-stat strong {
-          font-size: 15px;
-        }
-
+        /* ---- BANNERS ---- */
         .pm-fever-banner {
+          width: 100%;
+          text-align: center;
           font-size: clamp(14px, 4vw, 18px);
           font-weight: 900;
           color: #fff;
-          letter-spacing: 3px;
-          text-align: center;
-          margin: 0;
           padding: 6px 0;
-          background: linear-gradient(90deg, #e11d48, #f97316, #e11d48);
-          background-size: 200% 100%;
-          animation: pm-fever-slide 0.6s linear infinite;
-          text-shadow: 0 0 10px rgba(0,0,0,0.4);
-          width: 100%;
+          background: repeating-linear-gradient(90deg, #ef4444 0px, #ef4444 8px, #f97316 8px, #f97316 16px);
+          background-size: 16px 100%;
+          animation: pm-fever-scroll 0.3s linear infinite;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
+          letter-spacing: 3px;
+          border-top: 2px solid #fbbf24;
+          border-bottom: 2px solid #fbbf24;
         }
 
-        @keyframes pm-fever-slide {
-          0% { background-position: 0% 0%; }
-          100% { background-position: 200% 0%; }
+        @keyframes pm-fever-scroll {
+          0% { background-position: 0 0; }
+          100% { background-position: 16px 0; }
         }
 
         .pm-golden-banner {
-          font-size: 15px;
-          font-weight: 900;
-          color: #92400e;
-          text-align: center;
-          margin: 0;
-          padding: 5px 0;
-          background: linear-gradient(90deg, #fef3c7, #fde68a, #fef3c7);
           width: 100%;
+          text-align: center;
+          font-size: 14px;
+          font-weight: 900;
+          color: #78350f;
+          padding: 4px 0;
+          background: repeating-linear-gradient(90deg, #fde68a 0px, #fde68a 6px, #fef3c7 6px, #fef3c7 12px);
+          border-top: 2px solid #f59e0b;
+          border-bottom: 2px solid #f59e0b;
           letter-spacing: 2px;
-          animation: pm-golden-glow 0.5s ease-in-out infinite alternate;
-        }
-
-        @keyframes pm-golden-glow {
-          from { box-shadow: inset 0 0 20px rgba(251,191,36,0.3); }
-          to { box-shadow: inset 0 0 30px rgba(251,191,36,0.6); }
         }
 
         .pm-rainbow-banner {
+          width: 100%;
+          text-align: center;
           font-size: 14px;
           font-weight: 900;
-          text-align: center;
-          margin: 0;
           padding: 4px 0;
           background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #3b82f6, #8b5cf6);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
+        }
+
+        .pm-rankup-banner {
           width: 100%;
+          text-align: center;
+          font-size: clamp(16px, 4vw, 22px);
+          font-weight: 900;
+          color: #fff;
+          padding: 8px 0;
+          background: linear-gradient(135deg, #7c3aed, #a855f7);
+          border-top: 3px solid #fbbf24;
+          border-bottom: 3px solid #fbbf24;
+          animation: pm-rankup-flash 0.3s steps(3) infinite alternate;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
+          letter-spacing: 3px;
+        }
+
+        @keyframes pm-rankup-flash {
+          from { opacity: 0.7; }
+          to { opacity: 1; }
         }
 
         .pm-bonus-text {
@@ -738,149 +884,229 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           color: #f59e0b;
           text-align: center;
           margin: 0;
-          text-shadow: 0 0 8px rgba(245,158,11,0.5);
-          animation: pm-bonus-pop 0.3s ease-out;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.2);
+          animation: pm-bonus-pop 0.3s steps(4);
         }
 
         @keyframes pm-bonus-pop {
-          0% { transform: scale(0.5); opacity: 0; }
-          60% { transform: scale(1.15); }
+          0% { transform: scale(0.3); opacity: 0; }
+          50% { transform: scale(1.2); }
           100% { transform: scale(1); opacity: 1; }
         }
 
-        .pm-target-name {
+        /* ---- TARGET LABEL ---- */
+        .pm-target-label {
           font-size: clamp(14px, 3.5vw, 18px);
-          color: #581c87;
           font-weight: 900;
+          color: #581c87;
           text-align: center;
           margin: 0;
           letter-spacing: 2px;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.1);
         }
 
-        .pm-color-area {
-          padding: 4px 16px;
+        /* ---- COLOR COMPARE ---- */
+        .pm-color-compare {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          padding: 4px 14px;
           width: 100%;
           box-sizing: border-box;
         }
 
-        .pm-swatch-container {
-          display: flex;
-          gap: 10px;
-          justify-content: center;
-          align-items: center;
-        }
-
-        .pm-swatch {
-          width: clamp(72px, 20vw, 96px);
-          height: clamp(72px, 20vw, 96px);
-          border-radius: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          transition: all 0.2s;
-        }
-
-        .pm-swatch-label {
-          position: absolute;
-          bottom: -18px;
-          font-size: 10px;
-          font-weight: 700;
-          color: #7c3aed;
-          white-space: nowrap;
-        }
-
-        .pm-accuracy-ring {
+        .pm-pixel-swatch-wrap {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          width: 72px;
-          height: 72px;
-          border-radius: 50%;
-          border: 4px solid;
-          transition: all 0.2s;
+          gap: 4px;
         }
 
-        .pm-accuracy-text {
-          font-size: clamp(18px, 5vw, 24px);
+        .pm-pixel-swatch {
+          width: clamp(64px, 18vw, 88px);
+          height: clamp(64px, 18vw, 88px);
+          border: 4px solid #1a1a2e;
+          transition: background-color 0.1s steps(4);
+          image-rendering: pixelated;
+        }
+
+        .pm-swatch-tag {
+          font-size: 10px;
           font-weight: 900;
+          color: #7c3aed;
+          letter-spacing: 1px;
         }
 
-        .pm-accuracy-label {
-          font-size: 9px;
-          font-weight: 800;
+        .pm-accuracy-display {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          min-width: 64px;
         }
 
+        .pm-accuracy-bar-bg {
+          width: 56px;
+          height: 48px;
+          background: #1a1a2e;
+          border: 3px solid #4c1d95;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+          overflow: hidden;
+        }
+
+        .pm-accuracy-bar-fill {
+          width: 100%;
+          transition: height 0.15s steps(6);
+          height: ${currentAccuracy}%;
+        }
+
+        .pm-accuracy-num {
+          font-size: clamp(18px, 5vw, 26px);
+          font-weight: 900;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+        }
+
+        .pm-accuracy-txt {
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 1px;
+        }
+
+        /* ---- PIXEL CANVAS ---- */
+        .pm-pixel-canvas {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          padding: 4px;
+          background: #1a1a2e;
+          border: 3px solid #4c1d95;
+          box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+          transition: transform 0.2s steps(3);
+        }
+
+        .pm-pixel-canvas.pop {
+          animation: pm-canvas-pop 0.5s steps(4);
+        }
+
+        @keyframes pm-canvas-pop {
+          0% { transform: scale(0.95); }
+          30% { transform: scale(1.05); }
+          100% { transform: scale(1); }
+        }
+
+        .pm-pixel-row {
+          display: flex;
+          gap: 1px;
+        }
+
+        .pm-pixel-cell {
+          width: clamp(8px, 2.5vw, 12px);
+          height: clamp(8px, 2.5vw, 12px);
+          transition: background-color 0.05s steps(2);
+        }
+
+        .pm-pixel-canvas.pop .pm-pixel-cell {
+          animation: pm-cell-fill 0.4s steps(2) backwards;
+        }
+
+        @keyframes pm-cell-fill {
+          from { opacity: 0; transform: scale(0); }
+          to { opacity: 1; transform: scale(1); }
+        }
+
+        /* ---- SLIDERS ---- */
         .pm-slider-group {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px;
           width: 100%;
-          max-width: 360px;
-          padding: 0 16px;
+          max-width: 380px;
+          padding: 0 14px;
           box-sizing: border-box;
         }
 
         .pm-slider-row {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
         }
 
         .pm-slider-label {
-          font-size: 16px;
+          font-size: 18px;
           font-weight: 900;
-          width: 20px;
+          width: 22px;
           text-align: center;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+        }
+
+        .pm-slider-track-wrap {
+          flex: 1;
+          position: relative;
         }
 
         .pm-slider-value {
           font-size: 13px;
-          font-weight: 700;
-          width: 32px;
+          font-weight: 900;
+          width: 34px;
           text-align: right;
-          color: #581c87;
+          color: #4c1d95;
         }
 
         .pm-hint {
-          font-size: 16px;
+          font-size: 18px;
           width: 24px;
           text-align: center;
+          animation: pm-hint-bounce 0.5s steps(3) infinite alternate;
+        }
+
+        @keyframes pm-hint-bounce {
+          from { transform: translateY(-2px); }
+          to { transform: translateY(2px); }
         }
 
         .pm-slider {
           flex: 1;
-          height: 28px;
+          width: 100%;
+          height: 32px;
           -webkit-appearance: none;
           appearance: none;
-          border-radius: 14px;
+          border: 3px solid #1a1a2e;
           outline: none;
-          border: 2px solid rgba(124,58,237,0.2);
         }
 
         .pm-slider::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
-          width: 26px;
-          height: 32px;
-          border-radius: 8px;
-          background: #fff;
-          border: 3px solid #7c3aed;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+          width: 20px;
+          height: 36px;
+          background: #faf5ff;
+          border: 3px solid #1a1a2e;
+          box-shadow: 3px 3px 0 rgba(0,0,0,0.3);
           cursor: pointer;
         }
 
-        .pm-slider.pm-slider-r {
-          background: linear-gradient(to right, #1a1a1a, #ef4444);
+        .pm-slider.pm-slider-r { background: linear-gradient(to right, #1a1a2e, #ef4444); }
+        .pm-slider.pm-slider-g { background: linear-gradient(to right, #1a1a2e, #22c55e); }
+        .pm-slider.pm-slider-b { background: linear-gradient(to right, #1a1a2e, #3b82f6); }
+
+        /* ---- BUTTONS ---- */
+        .pm-pixel-btn {
+          font-family: 'Courier New', 'Monaco', monospace;
+          font-weight: 900;
+          cursor: pointer;
+          border: 3px solid #1a1a2e;
+          box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+          transition: transform 0.05s steps(2), box-shadow 0.05s steps(2);
+          letter-spacing: 1px;
+          image-rendering: pixelated;
         }
 
-        .pm-slider.pm-slider-g {
-          background: linear-gradient(to right, #1a1a1a, #22c55e);
-        }
-
-        .pm-slider.pm-slider-b {
-          background: linear-gradient(to right, #1a1a1a, #3b82f6);
+        .pm-pixel-btn:active {
+          transform: translate(3px, 3px);
+          box-shadow: 1px 1px 0 rgba(0,0,0,0.3);
         }
 
         .pm-action-area {
@@ -888,94 +1114,59 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           gap: 10px;
           justify-content: center;
           align-items: center;
-          padding: 4px 16px;
+          padding: 4px 14px;
         }
 
         .pm-hint-btn {
           font-size: 14px;
-          font-weight: 700;
-          padding: 10px 16px;
-          border-radius: 12px;
-          border: 2px solid rgba(124,58,237,0.3);
-          background: rgba(255,255,255,0.8);
+          padding: 10px 14px;
+          background: #ede9fe;
           color: #7c3aed;
-          cursor: pointer;
-          transition: all 0.1s;
         }
 
         .pm-hint-btn:disabled {
-          opacity: 0.4;
+          opacity: 0.35;
           cursor: default;
         }
 
-        .pm-hint-btn:active:not(:disabled) {
-          transform: scale(0.95);
-        }
-
         .pm-submit-btn {
-          font-size: clamp(16px, 4vw, 20px);
-          font-weight: 900;
-          padding: 12px 32px;
-          border-radius: 16px;
-          border: none;
-          background: linear-gradient(135deg, #7c3aed, #a855f7);
+          font-size: clamp(16px, 4vw, 22px);
+          padding: 12px 28px;
+          background: linear-gradient(180deg, #a855f7, #7c3aed);
           color: #fff;
-          cursor: pointer;
-          box-shadow: 0 4px 16px rgba(124,58,237,0.5);
-          transition: transform 0.1s, box-shadow 0.1s;
-          letter-spacing: 1px;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
         }
 
-        .pm-submit-btn:active {
-          transform: scale(0.93);
-          box-shadow: 0 2px 8px rgba(124,58,237,0.3);
-        }
-
+        /* ---- FEEDBACK ---- */
         .pm-feedback {
           text-align: center;
           min-height: 24px;
-          transition: opacity 0.4s;
+          transition: opacity 0.3s steps(4);
         }
 
-        .pm-feedback.fade {
-          opacity: 0;
-        }
+        .pm-feedback.fade { opacity: 0; }
 
         .pm-feedback-text {
-          font-size: clamp(16px, 4vw, 20px);
+          font-size: clamp(16px, 4vw, 22px);
           font-weight: 900;
+          letter-spacing: 2px;
         }
 
         .pm-feedback-text.excellent {
-          color: #16a34a;
-          text-shadow: 0 0 10px rgba(22,163,74,0.4);
+          color: #22c55e;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
         }
+        .pm-feedback-text.good { color: #eab308; }
+        .pm-feedback-text.poor { color: #ef4444; }
 
-        .pm-feedback-text.good {
-          color: #ca8a04;
-        }
-
-        .pm-feedback-text.poor {
-          color: #dc2626;
-        }
-
+        /* ---- FOOTER ---- */
         .pm-hub-btn {
-          font-size: 13px;
-          font-weight: 700;
-          padding: 8px 24px;
-          border-radius: 10px;
-          border: 2px solid rgba(124,58,237,0.3);
-          background: rgba(255,255,255,0.7);
+          font-size: 12px;
+          padding: 8px 20px;
+          background: #f5f4ef;
           color: #7c3aed;
-          cursor: pointer;
-          transition: transform 0.1s, background 0.1s;
           margin-top: auto;
-          margin-bottom: 10px;
-        }
-
-        .pm-hub-btn:active {
-          transform: scale(0.95);
-          background: rgba(255,255,255,0.9);
+          margin-bottom: 8px;
         }
       `}</style>
     </section>

@@ -14,39 +14,79 @@ import timeWarnSfx from '../../../assets/sounds/maze-run-time-warning.mp3'
 import comboSfx from '../../../assets/sounds/maze-run-combo.mp3'
 import teleportSfx from '../../../assets/sounds/maze-run-teleport.mp3'
 import timeBonusSfx from '../../../assets/sounds/maze-run-time-bonus.mp3'
+import keySfx from '../../../assets/sounds/maze-run-key.mp3'
+import chestSfx from '../../../assets/sounds/maze-run-chest.mp3'
+import enemySfx from '../../../assets/sounds/maze-run-enemy.mp3'
+import chainSfx from '../../../assets/sounds/maze-run-chain.mp3'
+import levelupSfx from '../../../assets/sounds/maze-run-levelup.mp3'
+import minimapSfx from '../../../assets/sounds/maze-run-minimap.mp3'
+
+// ─── 8-bit Color Palette ─────────────────────────────────
+const PAL = {
+  bg: '#0f0b1a',
+  wall: '#5b21b6',
+  wallLight: '#7c3aed',
+  floor: '#1a1033',
+  player: '#facc15',
+  playerLight: '#fde68a',
+  exit: '#22c55e',
+  exitLight: '#4ade80',
+  coin: '#f59e0b',
+  coinLight: '#fbbf24',
+  key: '#e879f9',
+  keyLight: '#f0abfc',
+  chest: '#d97706',
+  chestLight: '#fbbf24',
+  boost: '#3b82f6',
+  boostLight: '#60a5fa',
+  trap: '#dc2626',
+  trapLight: '#f87171',
+  teleport: '#a855f7',
+  teleportLight: '#c084fc',
+  timeBonus: '#34d399',
+  ghost: '#ef4444',
+  ghostLight: '#fca5a5',
+  text: '#e2e8f0',
+  textDim: '#64748b',
+  hud: '#1e1b4b',
+  accent: '#6366f1',
+} as const
 
 // ─── Constants ────────────────────────────────────────────
 const INITIAL_GRID_SIZE = 5
 const MAX_GRID_SIZE = 9
 const GRID_GROW_EVERY = 3
 const ROUND_DURATION_MS = 60000
-const CLEAR_BONUS_BASE = 20
+const CLEAR_BONUS_BASE = 25
 const TIME_BONUS_MULTIPLIER = 0.5
-const CELL_PX = 36
-const WALL_PX = 3
-const PLAYER_RADIUS = 12
-const EXIT_RADIUS = 12
-const MOVE_COOLDOWN_MS = 100
+const CELL_PX = 32
+const WALL_PX = 4
+const MOVE_COOLDOWN_MS = 95
+const PIXEL = 2 // base pixel unit for dot-art rendering
 
-const COIN_SCORE = 8
-const COIN_SPAWN_CHANCE = 0.28
-const COIN_RADIUS = 6
-
+const COIN_SCORE = 10
+const COIN_SPAWN_CHANCE = 0.3
 const SPEED_BOOST_DURATION_MS = 5000
-const SPEED_BOOST_COOLDOWN_MS = 40
+const SPEED_BOOST_COOLDOWN_MS = 35
 const SPEED_BOOST_SPAWN_CHANCE = 0.15
-
 const STREAK_MULTIPLIER_STEP = 3
 const MAX_STREAK_MULTIPLIER = 5
 
 const TIME_BONUS_MS = 5000
 const TIME_BONUS_SCORE = 5
 const TIME_BONUS_SPAWN_CHANCE = 0.15
-
 const TRAP_PENALTY_MS = 3000
 const TRAP_SPAWN_CHANCE = 0.08
-
 const TELEPORTER_SPAWN_CHANCE = 0.2
+
+const KEY_SPAWN_FROM_LEVEL = 2
+const CHEST_SPAWN_CHANCE = 0.12
+const CHEST_SCORE_MIN = 15
+const CHEST_SCORE_MAX = 50
+const GHOST_SPAWN_FROM_LEVEL = 4
+const GHOST_SPEED = 0.0015 // cells per ms
+const GHOST_PENALTY_MS = 4000
+const COMBO_TIMEOUT_MS = 2000
 
 const SWIPE_THRESHOLD = 30
 
@@ -56,83 +96,64 @@ const DIR_RIGHT = 1
 const DIR_DOWN = 2
 const DIR_LEFT = 3
 type Direction = typeof DIR_UP | typeof DIR_RIGHT | typeof DIR_DOWN | typeof DIR_LEFT
-
 const DX: readonly number[] = [0, 1, 0, -1]
 const DY: readonly number[] = [-1, 0, 1, 0]
 
-interface Cell {
-  readonly walls: [boolean, boolean, boolean, boolean]
-}
-
+interface Cell { readonly walls: [boolean, boolean, boolean, boolean] }
 interface MazeGrid {
   readonly cells: Cell[][]
-  readonly startRow: number
-  readonly startCol: number
-  readonly exitRow: number
-  readonly exitCol: number
+  readonly startRow: number; readonly startCol: number
+  readonly exitRow: number; readonly exitCol: number
 }
-
 interface CoinItem { readonly row: number; readonly col: number; collected: boolean }
 interface SpeedBoost { readonly row: number; readonly col: number; collected: boolean }
 interface TimeBonusItem { readonly row: number; readonly col: number; collected: boolean }
 interface TrapItem { readonly row: number; readonly col: number; triggered: boolean }
 interface Teleporter { readonly row1: number; readonly col1: number; readonly row2: number; readonly col2: number }
+interface KeyItem { readonly row: number; readonly col: number; collected: boolean }
+interface ChestItem { readonly row: number; readonly col: number; opened: boolean; readonly reward: number }
+interface GhostEntity { row: number; col: number; targetRow: number; targetCol: number; moveTimer: number }
 interface TrailPoint { readonly x: number; readonly y: number; readonly age: number }
 
 function getGridSize(mazesCleared: number): number {
   return Math.min(MAX_GRID_SIZE, INITIAL_GRID_SIZE + Math.floor(mazesCleared / GRID_GROW_EVERY))
 }
-
 function getGridMetrics(gridSize: number) {
   const cellTotalPx = CELL_PX + WALL_PX
-  const gridTotalPx = gridSize * cellTotalPx + WALL_PX
-  return { cellTotalPx, gridTotalPx }
+  return { cellTotalPx, gridTotalPx: gridSize * cellTotalPx + WALL_PX }
 }
+function oppositeDirection(dir: Direction): Direction { return ((dir + 2) % 4) as Direction }
 
-function oppositeDirection(dir: Direction): Direction {
-  return ((dir + 2) % 4) as Direction
-}
-
-function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array]
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const temp = shuffled[i]
-    shuffled[i] = shuffled[j]
-    shuffled[j] = temp
+function shuffleArray<T>(arr: T[]): T[] {
+  const s = [...arr]
+  for (let i = s.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [s[i], s[j]] = [s[j], s[i]]
   }
-  return shuffled
+  return s
 }
 
 function generateMaze(gridSize: number): MazeGrid {
   const cells: { walls: [boolean, boolean, boolean, boolean] }[][] = []
-  for (let row = 0; row < gridSize; row += 1) {
-    const rowCells: { walls: [boolean, boolean, boolean, boolean] }[] = []
-    for (let col = 0; col < gridSize; col += 1) {
-      rowCells.push({ walls: [true, true, true, true] })
-    }
-    cells.push(rowCells)
+  for (let r = 0; r < gridSize; r++) {
+    const row: { walls: [boolean, boolean, boolean, boolean] }[] = []
+    for (let c = 0; c < gridSize; c++) row.push({ walls: [true, true, true, true] })
+    cells.push(row)
   }
-  const visited: boolean[][] = []
-  for (let row = 0; row < gridSize; row += 1) {
-    visited.push(new Array(gridSize).fill(false))
-  }
-  const stack: [number, number][] = []
+  const visited: boolean[][] = Array.from({ length: gridSize }, () => new Array(gridSize).fill(false))
+  const stack: [number, number][] = [[0, 0]]
   visited[0][0] = true
-  stack.push([0, 0])
   while (stack.length > 0) {
-    const [currentRow, currentCol] = stack[stack.length - 1]
-    const directions = shuffleArray<Direction>([DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT])
+    const [cr, cc] = stack[stack.length - 1]
+    const dirs = shuffleArray<Direction>([DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT])
     let found = false
-    for (const dir of directions) {
-      const nextRow = currentRow + DY[dir]
-      const nextCol = currentCol + DX[dir]
-      if (nextRow < 0 || nextRow >= gridSize || nextCol < 0 || nextCol >= gridSize) continue
-      if (visited[nextRow][nextCol]) continue
-      cells[currentRow][currentCol].walls[dir] = false
-      cells[nextRow][nextCol].walls[oppositeDirection(dir)] = false
-      visited[nextRow][nextCol] = true
-      stack.push([nextRow, nextCol])
+    for (const d of dirs) {
+      const nr = cr + DY[d], nc = cc + DX[d]
+      if (nr < 0 || nr >= gridSize || nc < 0 || nc >= gridSize || visited[nr][nc]) continue
+      cells[cr][cc].walls[d] = false
+      cells[nr][nc].walls[oppositeDirection(d)] = false
+      visited[nr][nc] = true
+      stack.push([nr, nc])
       found = true
       break
     }
@@ -141,65 +162,84 @@ function generateMaze(gridSize: number): MazeGrid {
   return { cells, startRow: 0, startCol: 0, exitRow: gridSize - 1, exitCol: gridSize - 1 }
 }
 
-function isStartOrExit(row: number, col: number, startRow: number, startCol: number, exitRow: number, exitCol: number) {
-  return (row === startRow && col === startCol) || (row === exitRow && col === exitCol)
+function isSpecial(r: number, c: number, sR: number, sC: number, eR: number, eC: number) {
+  return (r === sR && c === sC) || (r === eR && c === eC)
 }
 
-function generateCoins(gridSize: number, sR: number, sC: number, eR: number, eC: number): CoinItem[] {
-  const coins: CoinItem[] = []
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      if (isStartOrExit(row, col, sR, sC, eR, eC)) continue
-      if (Math.random() < COIN_SPAWN_CHANCE) coins.push({ row, col, collected: false })
-    }
+function randomCell(gs: number, sR: number, sC: number, eR: number, eC: number, avoid: Set<string>): [number, number] | null {
+  for (let i = 0; i < 40; i++) {
+    const r = Math.floor(Math.random() * gs), c = Math.floor(Math.random() * gs)
+    if (isSpecial(r, c, sR, sC, eR, eC) || avoid.has(`${r},${c}`)) continue
+    return [r, c]
   }
+  return null
+}
+
+function generateCoins(gs: number, sR: number, sC: number, eR: number, eC: number): CoinItem[] {
+  const coins: CoinItem[] = []
+  for (let r = 0; r < gs; r++)
+    for (let c = 0; c < gs; c++) {
+      if (isSpecial(r, c, sR, sC, eR, eC)) continue
+      if (Math.random() < COIN_SPAWN_CHANCE) coins.push({ row: r, col: c, collected: false })
+    }
   return coins
 }
 
-function generateSpeedBoost(gridSize: number, sR: number, sC: number, eR: number, eC: number): SpeedBoost | null {
+function generateSpeedBoost(gs: number, sR: number, sC: number, eR: number, eC: number): SpeedBoost | null {
   if (Math.random() > SPEED_BOOST_SPAWN_CHANCE) return null
-  for (let i = 0; i < 20; i++) {
-    const row = Math.floor(Math.random() * gridSize)
-    const col = Math.floor(Math.random() * gridSize)
-    if (isStartOrExit(row, col, sR, sC, eR, eC)) continue
-    return { row, col, collected: false }
-  }
-  return null
+  const cell = randomCell(gs, sR, sC, eR, eC, new Set())
+  return cell ? { row: cell[0], col: cell[1], collected: false } : null
 }
 
-function generateTimeBonus(gridSize: number, sR: number, sC: number, eR: number, eC: number): TimeBonusItem | null {
+function generateTimeBonus(gs: number, sR: number, sC: number, eR: number, eC: number): TimeBonusItem | null {
   if (Math.random() > TIME_BONUS_SPAWN_CHANCE) return null
-  for (let i = 0; i < 20; i++) {
-    const row = Math.floor(Math.random() * gridSize)
-    const col = Math.floor(Math.random() * gridSize)
-    if (isStartOrExit(row, col, sR, sC, eR, eC)) continue
-    return { row, col, collected: false }
-  }
-  return null
+  const cell = randomCell(gs, sR, sC, eR, eC, new Set())
+  return cell ? { row: cell[0], col: cell[1], collected: false } : null
 }
 
-function generateTraps(gridSize: number, sR: number, sC: number, eR: number, eC: number): TrapItem[] {
+function generateTraps(gs: number, sR: number, sC: number, eR: number, eC: number): TrapItem[] {
   const traps: TrapItem[] = []
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      if (isStartOrExit(row, col, sR, sC, eR, eC)) continue
-      if (Math.random() < TRAP_SPAWN_CHANCE) traps.push({ row, col, triggered: false })
+  for (let r = 0; r < gs; r++)
+    for (let c = 0; c < gs; c++) {
+      if (isSpecial(r, c, sR, sC, eR, eC)) continue
+      if (Math.random() < TRAP_SPAWN_CHANCE) traps.push({ row: r, col: c, triggered: false })
     }
-  }
   return traps
 }
 
-function generateTeleporter(gridSize: number, sR: number, sC: number, eR: number, eC: number): Teleporter | null {
-  if (gridSize < 6 || Math.random() > TELEPORTER_SPAWN_CHANCE) return null
-  for (let i = 0; i < 30; i++) {
-    const r1 = Math.floor(Math.random() * gridSize), c1 = Math.floor(Math.random() * gridSize)
-    const r2 = Math.floor(Math.random() * gridSize), c2 = Math.floor(Math.random() * gridSize)
-    if (isStartOrExit(r1, c1, sR, sC, eR, eC) || isStartOrExit(r2, c2, sR, sC, eR, eC)) continue
-    if (r1 === r2 && c1 === c2) continue
-    if (Math.abs(r1 - r2) + Math.abs(c1 - c2) < 3) continue
-    return { row1: r1, col1: c1, row2: r2, col2: c2 }
-  }
-  return null
+function generateTeleporter(gs: number, sR: number, sC: number, eR: number, eC: number): Teleporter | null {
+  if (gs < 6 || Math.random() > TELEPORTER_SPAWN_CHANCE) return null
+  const avoid = new Set<string>()
+  const c1 = randomCell(gs, sR, sC, eR, eC, avoid)
+  if (!c1) return null
+  avoid.add(`${c1[0]},${c1[1]}`)
+  const c2 = randomCell(gs, sR, sC, eR, eC, avoid)
+  if (!c2 || Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) < 3) return null
+  return { row1: c1[0], col1: c1[1], row2: c2[0], col2: c2[1] }
+}
+
+function generateKey(gs: number, sR: number, sC: number, eR: number, eC: number, level: number): KeyItem | null {
+  if (level < KEY_SPAWN_FROM_LEVEL) return null
+  const cell = randomCell(gs, sR, sC, eR, eC, new Set())
+  return cell ? { row: cell[0], col: cell[1], collected: false } : null
+}
+
+function generateChests(gs: number, sR: number, sC: number, eR: number, eC: number): ChestItem[] {
+  const chests: ChestItem[] = []
+  for (let r = 0; r < gs; r++)
+    for (let c = 0; c < gs; c++) {
+      if (isSpecial(r, c, sR, sC, eR, eC)) continue
+      if (Math.random() < CHEST_SPAWN_CHANCE)
+        chests.push({ row: r, col: c, opened: false, reward: CHEST_SCORE_MIN + Math.floor(Math.random() * (CHEST_SCORE_MAX - CHEST_SCORE_MIN)) })
+    }
+  return chests
+}
+
+function generateGhost(gs: number, sR: number, sC: number, eR: number, eC: number, level: number): GhostEntity | null {
+  if (level < GHOST_SPAWN_FROM_LEVEL) return null
+  const cell = randomCell(gs, sR, sC, eR, eC, new Set())
+  if (!cell) return null
+  return { row: cell[0], col: cell[1], targetRow: sR, targetCol: sC, moveTimer: 0 }
 }
 
 function canMove(maze: MazeGrid, row: number, col: number, dir: Direction): boolean {
@@ -208,12 +248,127 @@ function canMove(maze: MazeGrid, row: number, col: number, dir: Direction): bool
   return !maze.cells[row][col].walls[dir]
 }
 
-function cellScreenX(col: number, cellTotalPx: number): number {
-  return WALL_PX + col * cellTotalPx + CELL_PX / 2
+function cellCenterX(col: number, ctp: number): number { return WALL_PX + col * ctp + CELL_PX / 2 }
+function cellCenterY(row: number, ctp: number): number { return WALL_PX + row * ctp + CELL_PX / 2 }
+
+// ─── Pixel Art Renderers (SVG) ───────────────────────────
+
+// Draws a pixel-art square character
+function PixelPlayer({ cx, cy, boosted, bumpX, bumpY }: { cx: number; cy: number; boosted: boolean; bumpX: number; bumpY: number }) {
+  const p = PIXEL
+  const x = cx + bumpX - 6 * p
+  const y = cy + bumpY - 6 * p
+  const body = boosted ? PAL.boost : PAL.player
+  const light = boosted ? PAL.boostLight : PAL.playerLight
+  return (
+    <g>
+      {/* body */}
+      <rect x={x + 2 * p} y={y + 1 * p} width={8 * p} height={10 * p} fill={body} />
+      {/* highlight */}
+      <rect x={x + 3 * p} y={y + 2 * p} width={3 * p} height={2 * p} fill={light} opacity="0.7" />
+      {/* eyes */}
+      <rect x={x + 3 * p} y={y + 4 * p} width={2 * p} height={2 * p} fill={PAL.bg} />
+      <rect x={x + 7 * p} y={y + 4 * p} width={2 * p} height={2 * p} fill={PAL.bg} />
+      {/* eye shine */}
+      <rect x={x + 3 * p} y={y + 4 * p} width={p} height={p} fill="#fff" />
+      <rect x={x + 7 * p} y={y + 4 * p} width={p} height={p} fill="#fff" />
+      {/* mouth */}
+      <rect x={x + 4 * p} y={y + 7 * p} width={4 * p} height={p} fill={PAL.bg} />
+      {/* feet */}
+      <rect x={x + 2 * p} y={y + 11 * p} width={3 * p} height={p} fill={body} />
+      <rect x={x + 7 * p} y={y + 11 * p} width={3 * p} height={p} fill={body} />
+      {boosted && (
+        <rect x={x} y={y} width={12 * p} height={12 * p} fill="none" stroke={PAL.boostLight} strokeWidth={p} opacity="0.5">
+          <animate attributeName="opacity" values="0.5;0.2;0.5" dur="0.4s" repeatCount="indefinite" />
+        </rect>
+      )}
+    </g>
+  )
 }
 
-function cellScreenY(row: number, cellTotalPx: number): number {
-  return WALL_PX + row * cellTotalPx + CELL_PX / 2
+function PixelCoin({ cx, cy, frame }: { cx: number; cy: number; frame: number }) {
+  const p = PIXEL
+  const stretch = Math.abs(Math.sin(frame * 0.05)) * 2
+  return (
+    <g>
+      <rect x={cx - 3 * p + stretch * 0.5} y={cy - 3 * p} width={6 * p - stretch} height={6 * p} rx={p} fill={PAL.coin} />
+      <rect x={cx - p + stretch * 0.3} y={cy - 2 * p} width={2 * p} height={2 * p} fill={PAL.coinLight} opacity="0.6" />
+    </g>
+  )
+}
+
+function PixelKey({ cx, cy, frame }: { cx: number; cy: number; frame: number }) {
+  const p = PIXEL
+  const bob = Math.sin(frame * 0.06) * 2
+  return (
+    <g transform={`translate(0,${bob})`}>
+      {/* head */}
+      <rect x={cx - 3 * p} y={cy - 4 * p} width={6 * p} height={4 * p} rx={p} fill={PAL.key} />
+      <rect x={cx - p} y={cy - 3 * p} width={2 * p} height={2 * p} fill={PAL.bg} />
+      {/* shaft */}
+      <rect x={cx - p} y={cy} width={2 * p} height={5 * p} fill={PAL.keyLight} />
+      {/* teeth */}
+      <rect x={cx + p} y={cy + 3 * p} width={2 * p} height={p} fill={PAL.keyLight} />
+      <rect x={cx + p} y={cy + p} width={2 * p} height={p} fill={PAL.keyLight} />
+    </g>
+  )
+}
+
+function PixelChest({ cx, cy, opened }: { cx: number; cy: number; opened: boolean }) {
+  const p = PIXEL
+  return (
+    <g>
+      <rect x={cx - 5 * p} y={cy - 3 * p} width={10 * p} height={6 * p} fill={opened ? PAL.textDim : PAL.chest} />
+      <rect x={cx - 5 * p} y={cy - 3 * p} width={10 * p} height={2 * p} fill={opened ? PAL.textDim : PAL.chestLight} />
+      <rect x={cx - p} y={cy - 2 * p} width={2 * p} height={2 * p} fill={opened ? PAL.textDim : '#fff'} />
+      {!opened && <rect x={cx - 4 * p} y={cy - p} width={8 * p} height={p} fill={PAL.bg} opacity="0.3" />}
+    </g>
+  )
+}
+
+function PixelGhost({ cx, cy, frame }: { cx: number; cy: number; frame: number }) {
+  const p = PIXEL
+  const wobble = Math.sin(frame * 0.08) * p
+  return (
+    <g>
+      {/* body */}
+      <rect x={cx - 5 * p} y={cy - 5 * p + wobble} width={10 * p} height={8 * p} rx={2 * p} fill={PAL.ghost} opacity="0.85" />
+      {/* tail */}
+      <rect x={cx - 5 * p} y={cy + 3 * p + wobble} width={3 * p} height={2 * p} fill={PAL.ghost} opacity="0.85" />
+      <rect x={cx - p} y={cy + 3 * p + wobble} width={3 * p} height={3 * p} fill={PAL.ghost} opacity="0.85" />
+      <rect x={cx + 3 * p} y={cy + 3 * p + wobble} width={3 * p} height={2 * p} fill={PAL.ghost} opacity="0.85" />
+      {/* eyes */}
+      <rect x={cx - 3 * p} y={cy - 3 * p + wobble} width={3 * p} height={3 * p} fill="#fff" />
+      <rect x={cx + p} y={cy - 3 * p + wobble} width={3 * p} height={3 * p} fill="#fff" />
+      <rect x={cx - 2 * p} y={cy - 2 * p + wobble} width={2 * p} height={2 * p} fill={PAL.bg} />
+      <rect x={cx + 2 * p} y={cy - 2 * p + wobble} width={2 * p} height={2 * p} fill={PAL.bg} />
+    </g>
+  )
+}
+
+function PixelExit({ cx, cy, locked, frame }: { cx: number; cy: number; locked: boolean; frame: number }) {
+  const p = PIXEL
+  const pulse = 0.5 + Math.sin(frame * 0.04) * 0.3
+  const color = locked ? PAL.trapLight : PAL.exit
+  const light = locked ? PAL.trap : PAL.exitLight
+  return (
+    <g>
+      <rect x={cx - 6 * p} y={cy - 6 * p} width={12 * p} height={12 * p} rx={2 * p} fill={color} opacity={pulse} />
+      <rect x={cx - 4 * p} y={cy - 4 * p} width={8 * p} height={8 * p} rx={p} fill={light} opacity="0.8" />
+      {locked ? (
+        <>
+          <rect x={cx - 2 * p} y={cy - p} width={4 * p} height={4 * p} fill={PAL.bg} />
+          <rect x={cx - p} y={cy - 3 * p} width={2 * p} height={3 * p} rx={p} fill="none" stroke={PAL.bg} strokeWidth={p} />
+        </>
+      ) : (
+        <>
+          <rect x={cx - 2 * p} y={cy - 3 * p} width={p} height={6 * p} fill="#fff" opacity="0.6" />
+          <rect x={cx + p} y={cy - 3 * p} width={p} height={6 * p} fill="#fff" opacity="0.6" />
+          <rect x={cx - p} y={cy + p} width={2 * p} height={2 * p} fill="#fff" opacity="0.4" />
+        </>
+      )}
+    </g>
+  )
 }
 
 // ─── Game Component ──────────────────────────────────────
@@ -238,9 +393,17 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   const [wallBumpDir, setWallBumpDir] = useState<Direction | null>(null)
   const [trapFlash, setTrapFlash] = useState(false)
   const [, setTimeWarningPlayed] = useState(false)
+  const [keyItem, setKeyItem] = useState<KeyItem | null>(null)
+  const [hasKey, setHasKey] = useState(true) // no key needed at start
+  const [chests, setChests] = useState<ChestItem[]>([])
+  const [ghost, setGhost] = useState<GhostEntity | null>(null)
+  const [combo, setCombo] = useState(0)
+  const [animFrame, setAnimFrame] = useState(0)
+  const [showMinimap, setShowMinimap] = useState(false)
 
   const effects = useGameEffects()
 
+  // Refs for game loop
   const mazeRef = useRef<MazeGrid>(maze)
   const playerRowRef = useRef(0)
   const playerColRef = useRef(0)
@@ -248,7 +411,7 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   const mazesClearedRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const finishedRef = useRef(false)
-  const animationFrameRef = useRef<number | null>(null)
+  const animFrameIdRef = useRef<number | null>(null)
   const lastFrameAtRef = useRef<number | null>(null)
   const lastMoveAtRef = useRef(0)
   const clearFlashTimerRef = useRef<number | null>(null)
@@ -262,11 +425,14 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   const teleporterRef = useRef<Teleporter | null>(teleporter)
   const trailRef = useRef<TrailPoint[]>([])
   const timeWarningPlayedRef = useRef(false)
-
-  // Touch swipe refs
+  const keyRef = useRef<KeyItem | null>(null)
+  const hasKeyRef = useRef(true)
+  const chestsRef = useRef<ChestItem[]>([])
+  const ghostRef = useRef<GhostEntity | null>(null)
+  const comboRef = useRef(0)
+  const lastCoinAtRef = useRef(0)
+  const animFrameRef = useRef(0)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
-
-  // Audio refs
   const audioPoolRef = useRef<Record<string, HTMLAudioElement>>({})
 
   const loadAudio = useCallback((key: string, src: string) => {
@@ -275,38 +441,60 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
       a.preload = 'auto'
       audioPoolRef.current[key] = a
     }
-    return audioPoolRef.current[key]
   }, [])
 
   const playSfx = useCallback((key: string, volume = 0.5, rate = 1) => {
     const a = audioPoolRef.current[key]
     if (!a) return
     a.currentTime = 0
-    a.volume = volume
+    a.volume = Math.min(1, volume)
     a.playbackRate = rate
     void a.play().catch(() => {})
   }, [])
 
   // Load all audio on mount
   useEffect(() => {
-    loadAudio('step', stepSfx)
-    loadAudio('coin', coinSfx)
-    loadAudio('clear', clearSfx)
-    loadAudio('boost', boostSfx)
-    loadAudio('gameover', gameoverSfx)
-    loadAudio('wallHit', wallHitSfx)
-    loadAudio('timeWarn', timeWarnSfx)
-    loadAudio('combo', comboSfx)
-    loadAudio('teleport', teleportSfx)
-    loadAudio('timeBonus', timeBonusSfx)
+    const sfxList: [string, string][] = [
+      ['step', stepSfx], ['coin', coinSfx], ['clear', clearSfx], ['boost', boostSfx],
+      ['gameover', gameoverSfx], ['wallHit', wallHitSfx], ['timeWarn', timeWarnSfx],
+      ['combo', comboSfx], ['teleport', teleportSfx], ['timeBonus', timeBonusSfx],
+      ['key', keySfx], ['chest', chestSfx], ['enemy', enemySfx],
+      ['chain', chainSfx], ['levelup', levelupSfx], ['minimap', minimapSfx],
+    ]
+    for (const [k, s] of sfxList) loadAudio(k, s)
     return () => {
-      for (const a of Object.values(audioPoolRef.current)) {
-        a.pause()
-        a.currentTime = 0
-      }
+      for (const a of Object.values(audioPoolRef.current)) { a.pause(); a.currentTime = 0 }
       if (clearFlashTimerRef.current !== null) window.clearTimeout(clearFlashTimerRef.current)
       effects.cleanup()
     }
+  }, [])
+
+  const spawnLevel = useCallback((level: number) => {
+    const gs = getGridSize(level)
+    currentGridSizeRef.current = gs
+    setCurrentGridSize(gs)
+    const m = generateMaze(gs)
+    mazeRef.current = m
+    setMaze(m)
+    const { startRow: sR, startCol: sC, exitRow: eR, exitCol: eC } = m
+
+    coinsRef.current = generateCoins(gs, sR, sC, eR, eC); setCoins([...coinsRef.current])
+    speedBoostRef.current = generateSpeedBoost(gs, sR, sC, eR, eC); setSpeedBoost(speedBoostRef.current)
+    timeBonusRef.current = generateTimeBonus(gs, sR, sC, eR, eC); setTimeBonus(timeBonusRef.current)
+    trapsRef.current = generateTraps(gs, sR, sC, eR, eC); setTraps([...trapsRef.current])
+    teleporterRef.current = generateTeleporter(gs, sR, sC, eR, eC); setTeleporter(teleporterRef.current)
+
+    const k = generateKey(gs, sR, sC, eR, eC, level)
+    keyRef.current = k; setKeyItem(k)
+    hasKeyRef.current = k === null; setHasKey(k === null) // no key = exit open from start
+
+    chestsRef.current = generateChests(gs, sR, sC, eR, eC); setChests([...chestsRef.current])
+    ghostRef.current = generateGhost(gs, sR, sC, eR, eC, level); setGhost(ghostRef.current ? { ...ghostRef.current } : null)
+
+    playerRowRef.current = sR; playerColRef.current = sC
+    setPlayerRow(sR); setPlayerCol(sC)
+    trailRef.current = []; setTrail([])
+    comboRef.current = 0; setCombo(0)
   }, [])
 
   const advanceMaze = useCallback(() => {
@@ -316,192 +504,170 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
 
     const timeLeft = remainingMsRef.current
     const timeBonusVal = Math.floor((timeLeft / 1000) * TIME_BONUS_MULTIPLIER)
-    const streakMultiplier = Math.min(MAX_STREAK_MULTIPLIER, 1 + Math.floor(nextCleared / STREAK_MULTIPLIER_STEP))
-    const clearScore = (CLEAR_BONUS_BASE + timeBonusVal) * streakMultiplier
-    const nextScore = scoreRef.current + clearScore
-    scoreRef.current = nextScore
-    setScore(nextScore)
+    const streakMul = Math.min(MAX_STREAK_MULTIPLIER, 1 + Math.floor(nextCleared / STREAK_MULTIPLIER_STEP))
+    const clearScore = (CLEAR_BONUS_BASE + timeBonusVal) * streakMul
+    scoreRef.current += clearScore; setScore(scoreRef.current)
 
-    const nextGridSize = getGridSize(nextCleared)
-    currentGridSizeRef.current = nextGridSize
-    setCurrentGridSize(nextGridSize)
-
-    const nextMaze = generateMaze(nextGridSize)
-    mazeRef.current = nextMaze
-    setMaze(nextMaze)
-
-    const sR = nextMaze.startRow, sC = nextMaze.startCol, eR = nextMaze.exitRow, eC = nextMaze.exitCol
-    coinsRef.current = generateCoins(nextGridSize, sR, sC, eR, eC)
-    setCoins([...coinsRef.current])
-    speedBoostRef.current = generateSpeedBoost(nextGridSize, sR, sC, eR, eC)
-    setSpeedBoost(speedBoostRef.current)
-    timeBonusRef.current = generateTimeBonus(nextGridSize, sR, sC, eR, eC)
-    setTimeBonus(timeBonusRef.current)
-    trapsRef.current = generateTraps(nextGridSize, sR, sC, eR, eC)
-    setTraps([...trapsRef.current])
-    teleporterRef.current = generateTeleporter(nextGridSize, sR, sC, eR, eC)
-    setTeleporter(teleporterRef.current)
-
-    playerRowRef.current = sR
-    playerColRef.current = sC
-    setPlayerRow(sR)
-    setPlayerCol(sC)
-    trailRef.current = []
-    setTrail([])
+    spawnLevel(nextCleared)
 
     setFlashClear(true)
     if (clearFlashTimerRef.current !== null) window.clearTimeout(clearFlashTimerRef.current)
-    clearFlashTimerRef.current = window.setTimeout(() => {
-      clearFlashTimerRef.current = null
-      setFlashClear(false)
-    }, 400)
+    clearFlashTimerRef.current = window.setTimeout(() => { clearFlashTimerRef.current = null; setFlashClear(false) }, 400)
 
-    playSfx('clear', 0.6, 1.1)
-    if (streakMultiplier > 1) {
-      playSfx('combo', 0.5, 1 + nextCleared * 0.05)
-    }
-
-    const { cellTotalPx } = getGridMetrics(nextGridSize)
-    effects.comboHitBurst(cellScreenX(sC, cellTotalPx), cellScreenY(sR, cellTotalPx), nextCleared, clearScore)
-    if (streakMultiplier > 1) {
-      effects.triggerFlash('rgba(250,204,21,0.35)')
+    if (nextCleared % 5 === 0) {
+      playSfx('levelup', 0.6, 1)
     } else {
-      effects.triggerFlash('rgba(34,197,94,0.25)')
+      playSfx('clear', 0.6, 1 + nextCleared * 0.03)
     }
-  }, [playSfx, effects])
+    if (streakMul > 1) playSfx('combo', 0.4, 1 + nextCleared * 0.04)
 
-  const movePlayer = useCallback(
-    (dir: Direction) => {
-      if (finishedRef.current) return
+    const { cellTotalPx } = getGridMetrics(getGridSize(nextCleared))
+    effects.comboHitBurst(cellCenterX(0, cellTotalPx), cellCenterY(0, cellTotalPx), nextCleared, clearScore)
+    effects.triggerFlash(streakMul > 1 ? 'rgba(250,204,21,0.35)' : 'rgba(34,197,94,0.25)')
+  }, [playSfx, effects, spawnLevel])
 
-      const now = performance.now()
-      const cooldown = speedBoostTimerRef.current > 0 ? SPEED_BOOST_COOLDOWN_MS : MOVE_COOLDOWN_MS
-      if (now - lastMoveAtRef.current < cooldown) return
+  const movePlayer = useCallback((dir: Direction) => {
+    if (finishedRef.current) return
+    const now = performance.now()
+    const cooldown = speedBoostTimerRef.current > 0 ? SPEED_BOOST_COOLDOWN_MS : MOVE_COOLDOWN_MS
+    if (now - lastMoveAtRef.current < cooldown) return
 
-      const currentRow = playerRowRef.current
-      const currentCol = playerColRef.current
+    const cr = playerRowRef.current, cc = playerColRef.current
+    if (!canMove(mazeRef.current, cr, cc, dir)) {
+      playSfx('wallHit', 0.25, 0.7 + Math.random() * 0.4)
+      setWallBumpDir(dir); setTimeout(() => setWallBumpDir(null), 120)
+      effects.triggerShake(3)
+      // combo break on wall hit
+      if (comboRef.current > 0) { comboRef.current = 0; setCombo(0) }
+      return
+    }
 
-      if (!canMove(mazeRef.current, currentRow, currentCol, dir)) {
-        playSfx('wallHit', 0.3, 0.8 + Math.random() * 0.4)
-        setWallBumpDir(dir)
-        setTimeout(() => setWallBumpDir(null), 150)
-        effects.triggerShake(3)
-        return
-      }
+    lastMoveAtRef.current = now
+    const nr = cr + DY[dir], nc = cc + DX[dir]
+    playerRowRef.current = nr; playerColRef.current = nc
+    setPlayerRow(nr); setPlayerCol(nc)
+    playSfx('step', 0.2, 0.9 + Math.random() * 0.2)
 
-      lastMoveAtRef.current = now
-      const nextRow = currentRow + DY[dir]
-      const nextCol = currentCol + DX[dir]
-      playerRowRef.current = nextRow
-      playerColRef.current = nextCol
-      setPlayerRow(nextRow)
-      setPlayerCol(nextCol)
+    const { cellTotalPx: ctp } = getGridMetrics(currentGridSizeRef.current)
 
-      playSfx('step', 0.25, 0.9 + Math.random() * 0.2)
+    // Trail
+    const newTrail = [...trailRef.current, { x: cellCenterX(cc, ctp), y: cellCenterY(cr, ctp), age: 0 }]
+    if (newTrail.length > 25) newTrail.shift()
+    trailRef.current = newTrail; setTrail([...newTrail])
 
-      // Trail
-      const { cellTotalPx } = getGridMetrics(currentGridSizeRef.current)
-      const newTrail = [...trailRef.current, { x: cellScreenX(currentCol, cellTotalPx), y: cellScreenY(currentRow, cellTotalPx), age: 0 }]
-      if (newTrail.length > 20) newTrail.shift()
-      trailRef.current = newTrail
-      setTrail([...newTrail])
-
-      // Check coin
-      for (const coin of coinsRef.current) {
-        if (!coin.collected && coin.row === nextRow && coin.col === nextCol) {
-          coin.collected = true
-          scoreRef.current += COIN_SCORE
-          setScore(scoreRef.current)
-          coinsCollectedRef.current += 1
-          setCoinsCollected(coinsCollectedRef.current)
-          setCoins([...coinsRef.current])
-          playSfx('coin', 0.45, 1.2 + Math.random() * 0.2)
-          effects.showScorePopup(COIN_SCORE, cellScreenX(nextCol, cellTotalPx), cellScreenY(nextRow, cellTotalPx) - 10)
+    // Coins
+    for (const coin of coinsRef.current) {
+      if (!coin.collected && coin.row === nr && coin.col === nc) {
+        coin.collected = true
+        const timeSinceLast = now - lastCoinAtRef.current
+        lastCoinAtRef.current = now
+        if (timeSinceLast < COMBO_TIMEOUT_MS) {
+          comboRef.current += 1; setCombo(comboRef.current)
+          if (comboRef.current >= 3) playSfx('chain', 0.4, 1 + comboRef.current * 0.1)
+        } else {
+          comboRef.current = 1; setCombo(1)
         }
+        const comboBonus = Math.floor(COIN_SCORE * (1 + comboRef.current * 0.2))
+        scoreRef.current += comboBonus; setScore(scoreRef.current)
+        coinsCollectedRef.current += 1; setCoinsCollected(coinsCollectedRef.current)
+        setCoins([...coinsRef.current])
+        playSfx('coin', 0.4, 1.1 + comboRef.current * 0.08)
+        effects.showScorePopup(comboBonus, cellCenterX(nc, ctp), cellCenterY(nr, ctp) - 10)
       }
+    }
 
-      // Check speed boost
-      const boost = speedBoostRef.current
-      if (boost && !boost.collected && boost.row === nextRow && boost.col === nextCol) {
-        boost.collected = true
-        speedBoostTimerRef.current = SPEED_BOOST_DURATION_MS
-        setIsSpeedBoosted(true)
-        setSpeedBoost({ ...boost, collected: true })
-        playSfx('boost', 0.5, 1.3)
-        effects.triggerFlash('rgba(59,130,246,0.3)')
-        effects.showScorePopup(0, cellScreenX(nextCol, cellTotalPx), cellScreenY(nextRow, cellTotalPx) - 10)
-      }
+    // Speed boost
+    const boost = speedBoostRef.current
+    if (boost && !boost.collected && boost.row === nr && boost.col === nc) {
+      boost.collected = true
+      speedBoostTimerRef.current = SPEED_BOOST_DURATION_MS
+      setIsSpeedBoosted(true); setSpeedBoost({ ...boost, collected: true })
+      playSfx('boost', 0.5, 1.2)
+      effects.triggerFlash('rgba(59,130,246,0.25)')
+    }
 
-      // Check time bonus
-      const tb = timeBonusRef.current
-      if (tb && !tb.collected && tb.row === nextRow && tb.col === nextCol) {
-        tb.collected = true
-        remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_MS)
-        setRemainingMs(remainingMsRef.current)
-        scoreRef.current += TIME_BONUS_SCORE
-        setScore(scoreRef.current)
-        setTimeBonus({ ...tb, collected: true })
-        playSfx('timeBonus', 0.5, 1.1)
-        effects.triggerFlash('rgba(52,211,153,0.25)')
-        effects.showScorePopup(TIME_BONUS_SCORE, cellScreenX(nextCol, cellTotalPx), cellScreenY(nextRow, cellTotalPx) - 10)
-      }
+    // Time bonus
+    const tb = timeBonusRef.current
+    if (tb && !tb.collected && tb.row === nr && tb.col === nc) {
+      tb.collected = true
+      remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_MS)
+      setRemainingMs(remainingMsRef.current)
+      scoreRef.current += TIME_BONUS_SCORE; setScore(scoreRef.current)
+      setTimeBonus({ ...tb, collected: true })
+      playSfx('timeBonus', 0.5, 1.1)
+      effects.triggerFlash('rgba(52,211,153,0.2)')
+      effects.showScorePopup(TIME_BONUS_SCORE, cellCenterX(nc, ctp), cellCenterY(nr, ctp) - 10)
+    }
 
-      // Check traps
-      for (const trap of trapsRef.current) {
-        if (!trap.triggered && trap.row === nextRow && trap.col === nextCol) {
-          trap.triggered = true
-          remainingMsRef.current = Math.max(0, remainingMsRef.current - TRAP_PENALTY_MS)
-          setRemainingMs(remainingMsRef.current)
-          setTraps([...trapsRef.current])
-          playSfx('wallHit', 0.6, 0.5)
-          effects.triggerShake(8)
-          effects.triggerFlash('rgba(239,68,68,0.4)')
-          setTrapFlash(true)
-          setTimeout(() => setTrapFlash(false), 300)
-        }
+    // Traps
+    for (const trap of trapsRef.current) {
+      if (!trap.triggered && trap.row === nr && trap.col === nc) {
+        trap.triggered = true
+        remainingMsRef.current = Math.max(0, remainingMsRef.current - TRAP_PENALTY_MS)
+        setRemainingMs(remainingMsRef.current); setTraps([...trapsRef.current])
+        playSfx('enemy', 0.5, 0.6)
+        effects.triggerShake(10); effects.triggerFlash('rgba(239,68,68,0.4)')
+        setTrapFlash(true); setTimeout(() => setTrapFlash(false), 300)
+        comboRef.current = 0; setCombo(0)
       }
+    }
 
-      // Check teleporter
-      const tp = teleporterRef.current
-      if (tp) {
-        if (nextRow === tp.row1 && nextCol === tp.col1) {
-          playerRowRef.current = tp.row2
-          playerColRef.current = tp.col2
-          setPlayerRow(tp.row2)
-          setPlayerCol(tp.col2)
-          playSfx('teleport', 0.5, 1)
-          effects.triggerFlash('rgba(168,85,247,0.3)')
-        } else if (nextRow === tp.row2 && nextCol === tp.col2) {
-          playerRowRef.current = tp.row1
-          playerColRef.current = tp.col1
-          setPlayerRow(tp.row1)
-          setPlayerCol(tp.col1)
-          playSfx('teleport', 0.5, 1)
-          effects.triggerFlash('rgba(168,85,247,0.3)')
-        }
-      }
+    // Key pickup
+    const k = keyRef.current
+    if (k && !k.collected && k.row === nr && k.col === nc) {
+      k.collected = true; hasKeyRef.current = true
+      setKeyItem({ ...k, collected: true }); setHasKey(true)
+      playSfx('key', 0.5, 1.2)
+      effects.triggerFlash('rgba(232,121,249,0.3)')
+      effects.showScorePopup(0, cellCenterX(nc, ctp), cellCenterY(nr, ctp) - 10)
+    }
 
-      // Check exit
-      const finalRow = playerRowRef.current
-      const finalCol = playerColRef.current
-      if (finalRow === mazeRef.current.exitRow && finalCol === mazeRef.current.exitCol) {
-        advanceMaze()
+    // Chests
+    for (const chest of chestsRef.current) {
+      if (!chest.opened && chest.row === nr && chest.col === nc) {
+        chest.opened = true
+        scoreRef.current += chest.reward; setScore(scoreRef.current)
+        setChests([...chestsRef.current])
+        playSfx('chest', 0.5, 1)
+        effects.showScorePopup(chest.reward, cellCenterX(nc, ctp), cellCenterY(nr, ctp) - 10)
+        effects.comboHitBurst(cellCenterX(nc, ctp), cellCenterY(nr, ctp), 3, chest.reward)
       }
-    },
-    [advanceMaze, playSfx, effects],
-  )
+    }
+
+    // Teleporter
+    const tp = teleporterRef.current
+    if (tp) {
+      let teleported = false
+      if (nr === tp.row1 && nc === tp.col1) {
+        playerRowRef.current = tp.row2; playerColRef.current = tp.col2
+        setPlayerRow(tp.row2); setPlayerCol(tp.col2); teleported = true
+      } else if (nr === tp.row2 && nc === tp.col2) {
+        playerRowRef.current = tp.row1; playerColRef.current = tp.col1
+        setPlayerRow(tp.row1); setPlayerCol(tp.col1); teleported = true
+      }
+      if (teleported) {
+        playSfx('teleport', 0.5, 1)
+        effects.triggerFlash('rgba(168,85,247,0.3)')
+      }
+    }
+
+    // Exit check
+    const fr = playerRowRef.current, fc = playerColRef.current
+    if (fr === mazeRef.current.exitRow && fc === mazeRef.current.exitCol && hasKeyRef.current) {
+      advanceMaze()
+    }
+  }, [advanceMaze, playSfx, effects])
 
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
-    playSfx('gameover', 0.6, 0.95)
-    const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
-    onFinish({ score: scoreRef.current, durationMs: elapsedMs })
+    playSfx('gameover', 0.6, 0.9)
+    onFinish({ score: scoreRef.current, durationMs: Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current)) })
   }, [onFinish, playSfx])
 
   // Keyboard
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent) => {
       if (finishedRef.current) return
       switch (e.code) {
         case 'Escape': e.preventDefault(); onExit(); break
@@ -509,636 +675,636 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
         case 'ArrowRight': case 'KeyD': e.preventDefault(); movePlayer(DIR_RIGHT); break
         case 'ArrowDown': case 'KeyS': e.preventDefault(); movePlayer(DIR_DOWN); break
         case 'ArrowLeft': case 'KeyA': e.preventDefault(); movePlayer(DIR_LEFT); break
+        case 'KeyM': e.preventDefault(); setShowMinimap(v => { if (!v) playSfx('minimap', 0.4); return !v }); break
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [movePlayer, onExit])
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [movePlayer, onExit, playSfx])
 
-  // Touch swipe on entire game area
+  // Touch swipe
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    const t = e.touches[0]
-    touchStartRef.current = { x: t.clientX, y: t.clientY }
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
   }, [])
-
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!touchStartRef.current) return
-    const t = e.changedTouches[0]
-    const dx = t.clientX - touchStartRef.current.x
-    const dy = t.clientY - touchStartRef.current.y
+    const dx = e.changedTouches[0].clientX - touchStartRef.current.x
+    const dy = e.changedTouches[0].clientY - touchStartRef.current.y
     touchStartRef.current = null
     if (Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) return
-    if (Math.abs(dx) > Math.abs(dy)) {
-      movePlayer(dx > 0 ? DIR_RIGHT : DIR_LEFT)
-    } else {
-      movePlayer(dy > 0 ? DIR_DOWN : DIR_UP)
-    }
+    if (Math.abs(dx) > Math.abs(dy)) movePlayer(dx > 0 ? DIR_RIGHT : DIR_LEFT)
+    else movePlayer(dy > 0 ? DIR_DOWN : DIR_UP)
   }, [movePlayer])
 
   // Game loop
   useEffect(() => {
     lastFrameAtRef.current = null
     const step = (now: number) => {
-      if (finishedRef.current) { animationFrameRef.current = null; return }
+      if (finishedRef.current) { animFrameIdRef.current = null; return }
       if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
-      const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
+      const dt = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
 
-      remainingMsRef.current = Math.max(0, remainingMsRef.current - deltaMs)
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - dt)
       setRemainingMs(remainingMsRef.current)
 
       // Speed boost timer
       if (speedBoostTimerRef.current > 0) {
-        speedBoostTimerRef.current = Math.max(0, speedBoostTimerRef.current - deltaMs)
+        speedBoostTimerRef.current = Math.max(0, speedBoostTimerRef.current - dt)
         if (speedBoostTimerRef.current <= 0) setIsSpeedBoosted(false)
       }
 
       // Trail aging
       if (trailRef.current.length > 0) {
-        trailRef.current = trailRef.current
-          .map(t => ({ ...t, age: t.age + deltaMs }))
-          .filter(t => t.age < 800)
+        trailRef.current = trailRef.current.map(t => ({ ...t, age: t.age + dt })).filter(t => t.age < 600)
         setTrail([...trailRef.current])
       }
 
-      // Time warning at 10s
+      // Ghost AI
+      const g = ghostRef.current
+      if (g) {
+        g.targetRow = playerRowRef.current
+        g.targetCol = playerColRef.current
+        g.moveTimer += dt
+        const moveInterval = 1 / GHOST_SPEED
+        if (g.moveTimer >= moveInterval) {
+          g.moveTimer -= moveInterval
+          // Simple pathfinding: try to move toward player
+          const dirs: Direction[] = []
+          if (g.targetRow < g.row) dirs.push(DIR_UP)
+          if (g.targetRow > g.row) dirs.push(DIR_DOWN)
+          if (g.targetCol < g.col) dirs.push(DIR_LEFT)
+          if (g.targetCol > g.col) dirs.push(DIR_RIGHT)
+          const shuffled = shuffleArray([...dirs, ...shuffleArray<Direction>([DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT])])
+          for (const d of shuffled) {
+            if (canMove(mazeRef.current, g.row, g.col, d)) {
+              g.row += DY[d]; g.col += DX[d]
+              break
+            }
+          }
+          // Check collision with player
+          if (g.row === playerRowRef.current && g.col === playerColRef.current) {
+            remainingMsRef.current = Math.max(0, remainingMsRef.current - GHOST_PENALTY_MS)
+            setRemainingMs(remainingMsRef.current)
+            playSfx('enemy', 0.6, 0.8)
+            effects.triggerShake(12)
+            effects.triggerFlash('rgba(239,68,68,0.5)')
+            // Respawn ghost far from player
+            const gs = currentGridSizeRef.current
+            g.row = Math.floor(Math.random() * gs)
+            g.col = Math.floor(Math.random() * gs)
+          }
+          setGhost({ ...g })
+        }
+      }
+
+      // Time warning
       if (remainingMsRef.current <= 10000 && !timeWarningPlayedRef.current) {
         timeWarningPlayedRef.current = true
         setTimeWarningPlayed(true)
         playSfx('timeWarn', 0.5, 1)
       }
 
+      // Anim frame counter
+      animFrameRef.current += 1
+      setAnimFrame(animFrameRef.current)
+
       effects.updateParticles()
 
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
-      animationFrameRef.current = window.requestAnimationFrame(step)
+      if (remainingMsRef.current <= 0) { finishGame(); animFrameIdRef.current = null; return }
+      animFrameIdRef.current = window.requestAnimationFrame(step)
     }
-    animationFrameRef.current = window.requestAnimationFrame(step)
+    animFrameIdRef.current = window.requestAnimationFrame(step)
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
+      if (animFrameIdRef.current !== null) window.cancelAnimationFrame(animFrameIdRef.current)
       lastFrameAtRef.current = null
     }
   }, [finishGame, playSfx, effects])
 
-  // ─── Derived values ────────────────────────────────────
+  // ─── Derived ───────────────────────────────────────────
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const isLowTime = remainingMs <= 10000
   const comboLabel = getComboLabel(mazesCleared)
   const comboColor = getComboColor(mazesCleared)
   const gridSize = currentGridSize
   const { cellTotalPx, gridTotalPx } = getGridMetrics(gridSize)
-  const streakMultiplier = Math.min(MAX_STREAK_MULTIPLIER, 1 + Math.floor(mazesCleared / STREAK_MULTIPLIER_STEP))
+  const streakMul = Math.min(MAX_STREAK_MULTIPLIER, 1 + Math.floor(mazesCleared / STREAK_MULTIPLIER_STEP))
+  const timePercent = (remainingMs / ROUND_DURATION_MS) * 100
 
   const mazeWalls = useMemo(() => {
     const gs = maze.cells.length
     const { cellTotalPx: ctp, gridTotalPx: gtp } = getGridMetrics(gs)
-    const walls: { key: string; x: number; y: number; width: number; height: number }[] = []
-    walls.push({ key: 'bt', x: 0, y: 0, width: gtp, height: WALL_PX })
-    walls.push({ key: 'bb', x: 0, y: gtp - WALL_PX, width: gtp, height: WALL_PX })
-    walls.push({ key: 'bl', x: 0, y: 0, width: WALL_PX, height: gtp })
-    walls.push({ key: 'br', x: gtp - WALL_PX, y: 0, width: WALL_PX, height: gtp })
-    for (let row = 0; row < gs; row += 1) {
-      for (let col = 0; col < gs; col += 1) {
-        const cell = maze.cells[row][col]
-        const cellX = WALL_PX + col * ctp
-        const cellY = WALL_PX + row * ctp
-        if (cell.walls[DIR_RIGHT] && col < gs - 1) {
-          walls.push({ key: `r-${row}-${col}`, x: cellX + CELL_PX, y: cellY, width: WALL_PX, height: CELL_PX })
-        }
-        if (cell.walls[DIR_DOWN] && row < gs - 1) {
-          walls.push({ key: `d-${row}-${col}`, x: cellX, y: cellY + CELL_PX, width: CELL_PX, height: WALL_PX })
-        }
+    const walls: { key: string; x: number; y: number; w: number; h: number }[] = []
+    walls.push({ key: 'bt', x: 0, y: 0, w: gtp, h: WALL_PX })
+    walls.push({ key: 'bb', x: 0, y: gtp - WALL_PX, w: gtp, h: WALL_PX })
+    walls.push({ key: 'bl', x: 0, y: 0, w: WALL_PX, h: gtp })
+    walls.push({ key: 'br', x: gtp - WALL_PX, y: 0, w: WALL_PX, h: gtp })
+    for (let r = 0; r < gs; r++)
+      for (let c = 0; c < gs; c++) {
+        const cell = maze.cells[r][c]
+        const cx = WALL_PX + c * ctp, cy = WALL_PX + r * ctp
+        if (cell.walls[DIR_RIGHT] && c < gs - 1) walls.push({ key: `r${r}${c}`, x: cx + CELL_PX, y: cy, w: WALL_PX, h: CELL_PX })
+        if (cell.walls[DIR_DOWN] && r < gs - 1) walls.push({ key: `d${r}${c}`, x: cx, y: cy + CELL_PX, w: CELL_PX, h: WALL_PX })
       }
-    }
     return walls
   }, [maze])
 
-  const pScreenX = cellScreenX(playerCol, cellTotalPx)
-  const pScreenY = cellScreenY(playerRow, cellTotalPx)
-  const eScreenX = cellScreenX(maze.exitCol, cellTotalPx)
-  const eScreenY = cellScreenY(maze.exitRow, cellTotalPx)
+  const px = cellCenterX(playerCol, cellTotalPx)
+  const py = cellCenterY(playerRow, cellTotalPx)
+  const ex = cellCenterX(maze.exitCol, cellTotalPx)
+  const ey = cellCenterY(maze.exitRow, cellTotalPx)
+  let bumpX = 0, bumpY = 0
+  if (wallBumpDir !== null) { bumpX = DX[wallBumpDir] * 3; bumpY = DY[wallBumpDir] * 3 }
 
-  // Player bump offset
-  let playerOffsetX = 0, playerOffsetY = 0
-  if (wallBumpDir !== null) {
-    playerOffsetX = DX[wallBumpDir] * 3
-    playerOffsetY = DY[wallBumpDir] * 3
-  }
-
-  // Time progress bar
-  const timePercent = (remainingMs / ROUND_DURATION_MS) * 100
+  // Minimap
+  const minimapSize = 60
+  void minimapSize
 
   return (
     <section
-      className="mini-game-panel maze-run-panel"
+      className="mini-game-panel mr-panel"
       aria-label="maze-run-game"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}
     >
       <style>{GAME_EFFECTS_CSS}{`
-        .maze-run-panel {
+        .mr-panel {
           display: flex;
           flex-direction: column;
           height: 100%;
-          background: linear-gradient(180deg, #1e1b4b 0%, #312e81 30%, #1e293b 100%);
+          background: ${PAL.bg};
           user-select: none;
           -webkit-user-select: none;
           touch-action: none;
           padding: 0;
           gap: 0;
+          image-rendering: pixelated;
+          font-family: 'Courier New', monospace;
         }
 
-        .maze-run-topbar {
+        .mr-topbar {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 10px 14px;
-          background: linear-gradient(135deg, #4f46e5, #4338ca);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          gap: 8px;
+          padding: 8px 12px;
+          background: ${PAL.hud};
+          border-bottom: 3px solid ${PAL.wall};
         }
 
-        .maze-run-avatar {
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          border: 2px solid rgba(255,255,255,0.4);
+        .mr-avatar {
+          width: 40px;
+          height: 40px;
+          border-radius: 4px;
+          border: 2px solid ${PAL.wall};
           object-fit: contain;
-          background: rgba(255,255,255,0.1);
+          background: ${PAL.floor};
           flex-shrink: 0;
+          image-rendering: pixelated;
         }
 
-        .maze-run-score-block {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 1px;
-        }
+        .mr-score-block { flex: 1; }
 
-        .maze-run-score {
+        .mr-score {
           margin: 0;
-          font-size: 2rem;
+          font-size: 1.8rem;
           font-weight: 900;
-          color: #fff;
-          text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          color: ${PAL.player};
+          text-shadow: 2px 2px 0 ${PAL.bg}, -1px -1px 0 ${PAL.bg};
           line-height: 1.1;
+          letter-spacing: 2px;
         }
 
-        .maze-run-best {
+        .mr-best {
           margin: 0;
-          font-size: 0.65rem;
-          color: rgba(255,255,255,0.5);
-          font-weight: 600;
+          font-size: 0.55rem;
+          color: ${PAL.textDim};
+          font-weight: 700;
+          letter-spacing: 1px;
         }
 
-        .maze-run-timer {
-          text-align: right;
-        }
-
-        .maze-run-timer-text {
-          font-size: 1.4rem;
-          font-weight: 800;
+        .mr-timer {
+          font-size: 1.2rem;
+          font-weight: 900;
           font-variant-numeric: tabular-nums;
-          color: rgba(255,255,255,0.9);
+          color: ${PAL.text};
+          text-shadow: 1px 1px 0 ${PAL.bg};
+          letter-spacing: 1px;
         }
 
-        .maze-run-timer-low {
-          color: #fca5a5;
-          animation: mr-pulse 0.5s ease-in-out infinite alternate;
+        .mr-timer-low {
+          color: ${PAL.trap};
+          animation: mr-blink 0.4s step-end infinite;
         }
 
-        @keyframes mr-pulse {
-          from { opacity: 1; transform: scale(1); }
-          to { opacity: 0.5; transform: scale(1.05); }
+        @keyframes mr-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
         }
 
-        .maze-run-timebar {
+        .mr-timebar {
           height: 4px;
-          background: rgba(255,255,255,0.1);
-          border-radius: 2px;
-          margin: 0 14px 2px;
-          overflow: hidden;
+          background: ${PAL.floor};
+          margin: 0;
         }
 
-        .maze-run-timebar-fill {
+        .mr-timebar-fill {
           height: 100%;
-          border-radius: 2px;
-          transition: width 0.1s linear, background 0.3s;
+          transition: width 0.1s linear;
         }
 
-        .maze-run-stats {
+        .mr-stats {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 4px 14px;
-          font-size: 0.7rem;
-          font-weight: 700;
+          gap: 8px;
+          padding: 4px 12px;
+          font-size: 0.65rem;
+          font-weight: 800;
+          letter-spacing: 1px;
           flex-wrap: wrap;
+          border-bottom: 2px solid ${PAL.wall}44;
         }
 
-        .maze-run-board {
+        .mr-board {
           flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
-          margin: 4px 8px;
-          border-radius: 14px;
-          overflow: hidden;
-          border: 2px solid rgba(99,102,241,0.4);
-          background: #0f0f23;
-          transition: box-shadow 0.3s ease;
+          margin: 4px;
+          border: 3px solid ${PAL.wall};
+          background: ${PAL.floor};
+          position: relative;
           min-height: 0;
+          border-radius: 2px;
         }
 
-        .maze-run-board-clear {
-          box-shadow: 0 0 28px 6px rgba(34,197,94,0.6);
+        .mr-board-clear { border-color: ${PAL.exit}; box-shadow: 0 0 20px ${PAL.exit}80; }
+        .mr-board-trap { border-color: ${PAL.trap}; box-shadow: 0 0 20px ${PAL.trap}80; }
+
+        .mr-svg { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+
+        .mr-minimap {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          border: 2px solid ${PAL.wall};
+          background: ${PAL.bg}cc;
+          border-radius: 2px;
+          overflow: hidden;
         }
 
-        .maze-run-board-trap {
-          box-shadow: 0 0 28px 6px rgba(239,68,68,0.6);
+        .mr-crt {
+          pointer-events: none;
+          position: absolute;
+          inset: 0;
+          background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.08) 2px,
+            rgba(0,0,0,0.08) 4px
+          );
+          z-index: 2;
         }
 
-        .maze-run-svg {
-          display: block;
-          width: 100%;
-          height: 100%;
+        .mr-vignette {
+          pointer-events: none;
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);
+          z-index: 3;
         }
 
-        .maze-run-dpad {
+        .mr-dpad {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 4px;
-          padding: 10px 0 6px;
+          gap: 3px;
+          padding: 8px 0 4px;
         }
 
-        .maze-run-dpad-row {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
+        .mr-dpad-row { display: flex; align-items: center; gap: 3px; }
 
-        .maze-run-dpad-center {
-          width: 56px;
-          height: 56px;
-        }
+        .mr-dpad-center { width: 52px; height: 52px; }
 
-        .maze-run-dpad-btn {
-          width: 56px;
-          height: 56px;
-          border: 2px solid rgba(99,102,241,0.5);
-          border-radius: 14px;
-          background: linear-gradient(180deg, rgba(79,70,229,0.45) 0%, rgba(49,46,129,0.65) 100%);
-          color: #c7d2fe;
+        .mr-dpad-btn {
+          width: 52px;
+          height: 52px;
+          border: 3px solid ${PAL.wall};
+          border-radius: 4px;
+          background: ${PAL.hud};
+          color: ${PAL.text};
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: background 0.08s, transform 0.06s;
+          transition: transform 0.06s;
           -webkit-tap-highlight-color: transparent;
           touch-action: manipulation;
-          box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+          box-shadow: inset -2px -2px 0 ${PAL.bg}, inset 2px 2px 0 ${PAL.wallLight}40;
+          image-rendering: pixelated;
         }
 
-        .maze-run-dpad-btn:active {
-          background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
-          transform: scale(0.9);
+        .mr-dpad-btn:active {
+          transform: scale(0.88);
+          box-shadow: inset 2px 2px 0 ${PAL.bg}, inset -2px -2px 0 ${PAL.wallLight}40;
         }
 
-        .maze-run-actions {
+        .mr-actions {
           display: flex;
-          gap: 8px;
-          padding: 2px 14px 10px;
+          gap: 6px;
+          padding: 2px 12px 8px;
           justify-content: center;
         }
 
-        .maze-run-btn {
-          padding: 10px 24px;
-          border: 2px solid rgba(99,102,241,0.4);
-          border-radius: 12px;
-          background: linear-gradient(180deg, rgba(79,70,229,0.3) 0%, rgba(49,46,129,0.4) 100%);
-          color: #e0e7ff;
-          font-size: 0.85rem;
-          font-weight: 700;
+        .mr-btn {
+          padding: 8px 20px;
+          border: 2px solid ${PAL.wall};
+          border-radius: 3px;
+          background: ${PAL.hud};
+          color: ${PAL.text};
+          font-size: 0.75rem;
+          font-weight: 800;
+          font-family: 'Courier New', monospace;
           cursor: pointer;
-          transition: background 0.15s, transform 0.1s;
+          letter-spacing: 1px;
+          box-shadow: inset -2px -2px 0 ${PAL.bg};
           -webkit-tap-highlight-color: transparent;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.2);
         }
 
-        .maze-run-btn:active { transform: scale(0.94); }
+        .mr-btn:active { transform: scale(0.94); box-shadow: inset 2px 2px 0 ${PAL.bg}; }
 
-        .maze-run-btn-ghost {
+        .mr-btn-ghost {
           background: transparent;
-          color: rgba(255,255,255,0.35);
-          border-color: rgba(255,255,255,0.12);
+          color: ${PAL.textDim};
+          border-color: ${PAL.textDim}44;
           box-shadow: none;
         }
 
-        @keyframes mr-tp-glow {
-          0%, 100% { opacity: 0.6; }
-          50% { opacity: 1; }
+        .mr-combo-display {
+          position: absolute;
+          top: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          font-size: 1.1rem;
+          font-weight: 900;
+          color: ${PAL.coinLight};
+          text-shadow: 2px 2px 0 ${PAL.bg};
+          z-index: 4;
+          letter-spacing: 2px;
+          pointer-events: none;
+          animation: mr-combo-pop 0.3s ease-out;
+        }
+
+        @keyframes mr-combo-pop {
+          0% { transform: translateX(-50%) scale(1.5); }
+          100% { transform: translateX(-50%) scale(1); }
+        }
+
+        .mr-key-indicator {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          padding: 2px 6px;
+          border-radius: 3px;
+          font-size: 0.6rem;
+          font-weight: 800;
         }
       `}</style>
+
+      {/* CRT scanline overlay */}
+      <div className="mr-crt" />
+      <div className="mr-vignette" />
 
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
 
+      {/* Combo display */}
+      {combo >= 3 && (
+        <div className="mr-combo-display" key={combo}>
+          {combo}x COMBO!
+        </div>
+      )}
+
       {/* Top bar */}
-      <div className="maze-run-topbar">
-        <img className="maze-run-avatar" src={seoTaijiImage} alt="" />
-        <div className="maze-run-score-block">
-          <p className="maze-run-score">{score}</p>
-          <p className="maze-run-best">BEST {displayedBestScore}</p>
+      <div className="mr-topbar">
+        <img className="mr-avatar" src={seoTaijiImage} alt="" />
+        <div className="mr-score-block">
+          <p className="mr-score">{score}</p>
+          <p className="mr-best">BEST {displayedBestScore}</p>
         </div>
-        <div className="maze-run-timer">
-          <span className={`maze-run-timer-text ${isLowTime ? 'maze-run-timer-low' : ''}`}>
-            {(remainingMs / 1000).toFixed(1)}s
-          </span>
-        </div>
+        {!hasKey && (
+          <div className="mr-key-indicator" style={{ background: PAL.key + '30', border: `2px solid ${PAL.key}` }}>
+            <span style={{ color: PAL.key }}>KEY</span>
+          </div>
+        )}
+        {hasKey && keyItem && (
+          <div className="mr-key-indicator" style={{ background: PAL.exit + '30', border: `2px solid ${PAL.exit}` }}>
+            <span style={{ color: PAL.exit }}>GO!</span>
+          </div>
+        )}
+        <span className={`mr-timer ${isLowTime ? 'mr-timer-low' : ''}`}>
+          {(remainingMs / 1000).toFixed(1)}
+        </span>
       </div>
 
       {/* Time bar */}
-      <div className="maze-run-timebar">
-        <div
-          className="maze-run-timebar-fill"
-          style={{
-            width: `${timePercent}%`,
-            background: isLowTime
-              ? 'linear-gradient(90deg, #ef4444, #f97316)'
-              : 'linear-gradient(90deg, #22c55e, #4ade80)',
-          }}
-        />
+      <div className="mr-timebar">
+        <div className="mr-timebar-fill" style={{
+          width: `${timePercent}%`,
+          background: isLowTime ? PAL.trap : PAL.exit,
+        }} />
       </div>
 
-      {/* Stats row */}
-      <div className="maze-run-stats">
-        <span style={{ color: '#4ade80' }}>CLEARED {mazesCleared}</span>
-        {streakMultiplier > 1 && <span style={{ color: '#facc15' }}>x{streakMultiplier}</span>}
+      {/* Stats */}
+      <div className="mr-stats">
+        <span style={{ color: PAL.exit }}>LV.{mazesCleared + 1}</span>
+        {streakMul > 1 && <span style={{ color: PAL.coin }}>x{streakMul}</span>}
         {comboLabel && <span style={{ color: comboColor }}>{comboLabel}</span>}
-        <span style={{ color: '#fbbf24' }}>COINS {coinsCollected}</span>
-        {isSpeedBoosted && <span style={{ color: '#60a5fa', animation: 'mr-pulse 0.3s ease-in-out infinite alternate' }}>BOOST!</span>}
-        <span style={{ color: 'rgba(255,255,255,0.3)' }}>{gridSize}x{gridSize}</span>
+        <span style={{ color: PAL.coinLight }}>COIN:{coinsCollected}</span>
+        {isSpeedBoosted && <span style={{ color: PAL.boostLight, animation: 'mr-blink 0.3s step-end infinite' }}>SPD!</span>}
+        {ghost && <span style={{ color: PAL.ghostLight, animation: 'mr-blink 0.6s step-end infinite' }}>GHOST!</span>}
+        <span style={{ color: PAL.textDim }}>{gridSize}x{gridSize}</span>
       </div>
 
-      {/* Maze board - flex:1 fills all remaining vertical space */}
-      <div className={`maze-run-board ${flashClear ? 'maze-run-board-clear' : ''} ${trapFlash ? 'maze-run-board-trap' : ''}`}>
-        <svg
-          className="maze-run-svg"
-          viewBox={`0 0 ${gridTotalPx} ${gridTotalPx}`}
-          preserveAspectRatio="xMidYMid meet"
-        >
-          <defs>
-            <radialGradient id="mr-exit-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#22c55e" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id="mr-player-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor={isSpeedBoosted ? '#3b82f6' : '#f59e0b'} stopOpacity="0.4" />
-              <stop offset="100%" stopColor={isSpeedBoosted ? '#3b82f6' : '#f59e0b'} stopOpacity="0" />
-            </radialGradient>
-          </defs>
+      {/* Maze board */}
+      <div className={`mr-board ${flashClear ? 'mr-board-clear' : ''} ${trapFlash ? 'mr-board-trap' : ''}`}>
+        <svg className="mr-svg" viewBox={`0 0 ${gridTotalPx} ${gridTotalPx}`} preserveAspectRatio="xMidYMid meet">
+          {/* Floor */}
+          <rect x="0" y="0" width={gridTotalPx} height={gridTotalPx} fill={PAL.floor} />
 
-          <rect x="0" y="0" width={gridTotalPx} height={gridTotalPx} fill="#0f0f23" />
-
-          {/* Exit cell glow */}
-          <rect
-            x={WALL_PX + maze.exitCol * cellTotalPx + 1}
-            y={WALL_PX + maze.exitRow * cellTotalPx + 1}
-            width={CELL_PX - 2}
-            height={CELL_PX - 2}
-            rx="4"
-            fill="#22c55e"
-            opacity="0.2"
-          >
-            <animate attributeName="opacity" values="0.15;0.35;0.15" dur="1.4s" repeatCount="indefinite" />
-          </rect>
+          {/* Floor grid pattern */}
+          {Array.from({ length: gridSize }).map((_, r) =>
+            Array.from({ length: gridSize }).map((_, c) => (
+              <rect
+                key={`floor-${r}-${c}`}
+                x={WALL_PX + c * cellTotalPx + 1}
+                y={WALL_PX + r * cellTotalPx + 1}
+                width={CELL_PX - 2}
+                height={CELL_PX - 2}
+                fill={(r + c) % 2 === 0 ? PAL.floor : `${PAL.wall}10`}
+              />
+            ))
+          )}
 
           {/* Trail */}
           {trail.map((t, i) => (
-            <circle
+            <rect
               key={`trail-${i}`}
-              cx={t.x}
-              cy={t.y}
-              r={3}
-              fill={isSpeedBoosted ? '#60a5fa' : '#fbbf24'}
-              opacity={Math.max(0, 1 - t.age / 800) * 0.4}
+              x={t.x - PIXEL}
+              y={t.y - PIXEL}
+              width={PIXEL * 2}
+              height={PIXEL * 2}
+              fill={isSpeedBoosted ? PAL.boostLight : PAL.playerLight}
+              opacity={Math.max(0, (1 - t.age / 600) * 0.5)}
             />
           ))}
 
           {/* Coins */}
-          {coins.filter(c => !c.collected).map((coin, i) => (
-            <g key={`coin-${i}`}>
-              <circle
-                cx={cellScreenX(coin.col, cellTotalPx)}
-                cy={cellScreenY(coin.row, cellTotalPx)}
-                r={COIN_RADIUS}
-                fill="#fbbf24"
-                opacity="0.9"
-              >
-                <animate attributeName="r" values="4.5;6.5;4.5" dur="1s" repeatCount="indefinite" />
-              </circle>
-              <circle
-                cx={cellScreenX(coin.col, cellTotalPx) - 1.5}
-                cy={cellScreenY(coin.row, cellTotalPx) - 1.5}
-                r={2}
-                fill="#fff"
-                opacity="0.5"
-              />
-            </g>
+          {coins.filter(c => !c.collected).map((c, i) => (
+            <PixelCoin key={`c${i}`} cx={cellCenterX(c.col, cellTotalPx)} cy={cellCenterY(c.row, cellTotalPx)} frame={animFrame} />
           ))}
 
           {/* Speed boost */}
           {speedBoost && !speedBoost.collected && (
             <g>
-              <rect
-                x={cellScreenX(speedBoost.col, cellTotalPx) - 7}
-                y={cellScreenY(speedBoost.row, cellTotalPx) - 7}
-                width={14} height={14} rx="3"
-                fill="#3b82f6" opacity="0.9"
-              >
-                <animate attributeName="opacity" values="0.6;1;0.6" dur="0.7s" repeatCount="indefinite" />
-              </rect>
-              <text
-                x={cellScreenX(speedBoost.col, cellTotalPx)}
-                y={cellScreenY(speedBoost.row, cellTotalPx) + 3.5}
-                textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold"
-                style={{ pointerEvents: 'none' }}
-              >S</text>
+              <rect x={cellCenterX(speedBoost.col, cellTotalPx) - 5 * PIXEL} y={cellCenterY(speedBoost.row, cellTotalPx) - 5 * PIXEL}
+                width={10 * PIXEL} height={10 * PIXEL} fill={PAL.boost} opacity={0.6 + Math.sin(animFrame * 0.1) * 0.3} />
+              <rect x={cellCenterX(speedBoost.col, cellTotalPx) - 3 * PIXEL} y={cellCenterY(speedBoost.row, cellTotalPx) - PIXEL}
+                width={6 * PIXEL} height={2 * PIXEL} fill={PAL.boostLight} />
+              <rect x={cellCenterX(speedBoost.col, cellTotalPx) - PIXEL} y={cellCenterY(speedBoost.row, cellTotalPx) - 3 * PIXEL}
+                width={2 * PIXEL} height={6 * PIXEL} fill={PAL.boostLight} />
             </g>
           )}
 
           {/* Time bonus */}
           {timeBonus && !timeBonus.collected && (
             <g>
-              <circle
-                cx={cellScreenX(timeBonus.col, cellTotalPx)}
-                cy={cellScreenY(timeBonus.row, cellTotalPx)}
-                r={7}
-                fill="#34d399" opacity="0.85"
-              >
-                <animate attributeName="r" values="5;7.5;5" dur="1.2s" repeatCount="indefinite" />
-              </circle>
-              <text
-                x={cellScreenX(timeBonus.col, cellTotalPx)}
-                y={cellScreenY(timeBonus.row, cellTotalPx) + 3.5}
-                textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold"
-                style={{ pointerEvents: 'none' }}
-              >+T</text>
+              <rect x={cellCenterX(timeBonus.col, cellTotalPx) - 5 * PIXEL} y={cellCenterY(timeBonus.row, cellTotalPx) - 5 * PIXEL}
+                width={10 * PIXEL} height={10 * PIXEL} rx={PIXEL} fill={PAL.timeBonus}
+                opacity={0.5 + Math.sin(animFrame * 0.08) * 0.3} />
+              <rect x={cellCenterX(timeBonus.col, cellTotalPx) - PIXEL} y={cellCenterY(timeBonus.row, cellTotalPx) - 3 * PIXEL}
+                width={2 * PIXEL} height={4 * PIXEL} fill="#fff" opacity="0.7" />
+              <rect x={cellCenterX(timeBonus.col, cellTotalPx) - PIXEL} y={cellCenterY(timeBonus.row, cellTotalPx) + PIXEL}
+                width={2 * PIXEL} height={PIXEL} fill="#fff" opacity="0.7" />
             </g>
           )}
 
-          {/* Traps */}
-          {traps.filter(t => !t.triggered).map((trap, i) => (
-            <g key={`trap-${i}`}>
-              <rect
-                x={cellScreenX(trap.col, cellTotalPx) - 6}
-                y={cellScreenY(trap.row, cellTotalPx) - 6}
-                width={12} height={12} rx="2"
-                fill="#ef4444" opacity="0.2"
-              />
-              <text
-                x={cellScreenX(trap.col, cellTotalPx)}
-                y={cellScreenY(trap.row, cellTotalPx) + 3}
-                textAnchor="middle" fill="#ef4444" fontSize="7" fontWeight="bold" opacity="0.4"
-                style={{ pointerEvents: 'none' }}
-              >!</text>
-            </g>
+          {/* Traps (subtle - almost hidden) */}
+          {traps.filter(t => !t.triggered).map((t, i) => (
+            <rect key={`trap${i}`}
+              x={cellCenterX(t.col, cellTotalPx) - 4 * PIXEL}
+              y={cellCenterY(t.row, cellTotalPx) - 4 * PIXEL}
+              width={8 * PIXEL} height={8 * PIXEL}
+              fill={PAL.trap} opacity="0.12"
+            />
+          ))}
+
+          {/* Key */}
+          {keyItem && !keyItem.collected && (
+            <PixelKey cx={cellCenterX(keyItem.col, cellTotalPx)} cy={cellCenterY(keyItem.row, cellTotalPx)} frame={animFrame} />
+          )}
+
+          {/* Chests */}
+          {chests.map((ch, i) => (
+            <PixelChest key={`ch${i}`} cx={cellCenterX(ch.col, cellTotalPx)} cy={cellCenterY(ch.row, cellTotalPx)} opened={ch.opened} />
           ))}
 
           {/* Teleporter portals */}
           {teleporter && (
             <>
-              <circle
-                cx={cellScreenX(teleporter.col1, cellTotalPx)}
-                cy={cellScreenY(teleporter.row1, cellTotalPx)}
-                r={8}
-                fill="none" stroke="#a855f7" strokeWidth="2"
-                style={{ animation: 'mr-tp-glow 1s ease-in-out infinite' }}
-              />
-              <circle
-                cx={cellScreenX(teleporter.col1, cellTotalPx)}
-                cy={cellScreenY(teleporter.row1, cellTotalPx)}
-                r={4}
-                fill="#a855f7" opacity="0.5"
-              >
-                <animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite" />
-              </circle>
-              <circle
-                cx={cellScreenX(teleporter.col2, cellTotalPx)}
-                cy={cellScreenY(teleporter.row2, cellTotalPx)}
-                r={8}
-                fill="none" stroke="#a855f7" strokeWidth="2"
-                style={{ animation: 'mr-tp-glow 1s ease-in-out infinite' }}
-              />
-              <circle
-                cx={cellScreenX(teleporter.col2, cellTotalPx)}
-                cy={cellScreenY(teleporter.row2, cellTotalPx)}
-                r={4}
-                fill="#a855f7" opacity="0.5"
-              >
-                <animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite" />
-              </circle>
+              {[{ r: teleporter.row1, c: teleporter.col1 }, { r: teleporter.row2, c: teleporter.col2 }].map((pt, i) => {
+                const tcx = cellCenterX(pt.c, cellTotalPx), tcy = cellCenterY(pt.r, cellTotalPx)
+                return (
+                  <g key={`tp${i}`}>
+                    <rect x={tcx - 6 * PIXEL} y={tcy - 6 * PIXEL} width={12 * PIXEL} height={12 * PIXEL}
+                      fill="none" stroke={PAL.teleport} strokeWidth={PIXEL}
+                      opacity={0.5 + Math.sin(animFrame * 0.06 + i * 3) * 0.3} />
+                    <rect x={tcx - 3 * PIXEL} y={tcy - 3 * PIXEL} width={6 * PIXEL} height={6 * PIXEL}
+                      fill={PAL.teleportLight} opacity={0.3 + Math.sin(animFrame * 0.08 + i * 3) * 0.2} />
+                  </g>
+                )
+              })}
             </>
           )}
 
-          {/* Walls */}
-          {mazeWalls.map((wall) => (
-            <rect
-              key={wall.key}
-              x={wall.x} y={wall.y}
-              width={wall.width} height={wall.height}
-              fill="#6366f1"
-            />
+          {/* Ghost */}
+          {ghost && (
+            <PixelGhost cx={cellCenterX(ghost.col, cellTotalPx)} cy={cellCenterY(ghost.row, cellTotalPx)} frame={animFrame} />
+          )}
+
+          {/* Walls - pixelated */}
+          {mazeWalls.map(w => (
+            <rect key={w.key} x={w.x} y={w.y} width={w.w} height={w.h} fill={PAL.wall} />
+          ))}
+          {/* Wall highlight (top/left edge lighter) */}
+          {mazeWalls.map(w => (
+            w.h > w.w ? ( // vertical wall
+              <rect key={`hl${w.key}`} x={w.x} y={w.y} width={1} height={w.h} fill={PAL.wallLight} opacity="0.3" />
+            ) : ( // horizontal wall
+              <rect key={`hl${w.key}`} x={w.x} y={w.y} width={w.w} height={1} fill={PAL.wallLight} opacity="0.3" />
+            )
           ))}
 
-          {/* Exit marker */}
-          <circle cx={eScreenX} cy={eScreenY} r={EXIT_RADIUS * 1.8} fill="url(#mr-exit-glow)" />
-          <circle cx={eScreenX} cy={eScreenY} r={EXIT_RADIUS} fill="#22c55e" opacity="0.85">
-            <animate attributeName="r" values="9;13;9" dur="1.2s" repeatCount="indefinite" />
-          </circle>
-          <text
-            x={eScreenX} y={eScreenY + 4}
-            textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold"
-            style={{ pointerEvents: 'none' }}
-          >EXIT</text>
-
-          {/* Player glow */}
-          <circle
-            cx={pScreenX + playerOffsetX}
-            cy={pScreenY + playerOffsetY}
-            r={PLAYER_RADIUS * 2}
-            fill="url(#mr-player-glow)"
-          />
+          {/* Exit */}
+          <PixelExit cx={ex} cy={ey} locked={!hasKey} frame={animFrame} />
 
           {/* Player */}
-          <circle
-            cx={pScreenX + playerOffsetX}
-            cy={pScreenY + playerOffsetY}
-            r={PLAYER_RADIUS}
-            fill={isSpeedBoosted ? '#3b82f6' : '#f59e0b'}
-          />
-          <circle
-            cx={pScreenX + playerOffsetX}
-            cy={pScreenY + playerOffsetY}
-            r={PLAYER_RADIUS - 3}
-            fill={isSpeedBoosted ? '#60a5fa' : '#fbbf24'}
-          />
-          <circle
-            cx={pScreenX + playerOffsetX - 3}
-            cy={pScreenY + playerOffsetY - 3}
-            r={3}
-            fill="#fff" opacity="0.7"
-          />
-          {isSpeedBoosted && (
-            <circle
-              cx={pScreenX + playerOffsetX}
-              cy={pScreenY + playerOffsetY}
-              r={PLAYER_RADIUS + 2}
-              fill="none" stroke="#60a5fa" strokeWidth="1.5" opacity="0.6"
-            >
-              <animate attributeName="r" values={`${PLAYER_RADIUS + 1};${PLAYER_RADIUS + 5};${PLAYER_RADIUS + 1}`} dur="0.6s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.6;0.2;0.6" dur="0.6s" repeatCount="indefinite" />
-            </circle>
-          )}
+          <PixelPlayer cx={px} cy={py} boosted={isSpeedBoosted} bumpX={bumpX} bumpY={bumpY} />
         </svg>
+
+        {/* Minimap */}
+        {showMinimap && (
+          <div className="mr-minimap" style={{ width: minimapSize, height: minimapSize }}>
+            <svg width={minimapSize} height={minimapSize} viewBox={`0 0 ${gridTotalPx} ${gridTotalPx}`}>
+              <rect width={gridTotalPx} height={gridTotalPx} fill={PAL.bg} />
+              {mazeWalls.map(w => (
+                <rect key={`mm${w.key}`} x={w.x} y={w.y} width={w.w} height={w.h} fill={PAL.wall} />
+              ))}
+              <rect x={cellCenterX(playerCol, cellTotalPx) - 4} y={cellCenterY(playerRow, cellTotalPx) - 4}
+                width={8} height={8} fill={PAL.player} />
+              <rect x={ex - 4} y={ey - 4} width={8} height={8} fill={hasKey ? PAL.exit : PAL.trap} />
+            </svg>
+          </div>
+        )}
       </div>
 
       {/* D-pad */}
-      <div className="maze-run-dpad" role="group" aria-label="controls">
-        <div className="maze-run-dpad-row">
-          <button className="maze-run-dpad-btn" type="button" onClick={() => movePlayer(DIR_UP)} aria-label="up">
-            <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 4 L4 16 L20 16 Z" fill="currentColor" /></svg>
+      <div className="mr-dpad" role="group" aria-label="controls">
+        <div className="mr-dpad-row">
+          <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_UP)} aria-label="up">
+            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="6" y="2" width="4" height="4" fill="currentColor" /><rect x="4" y="6" width="8" height="4" fill="currentColor" /><rect x="2" y="10" width="12" height="4" fill="currentColor" /></svg>
           </button>
         </div>
-        <div className="maze-run-dpad-row">
-          <button className="maze-run-dpad-btn" type="button" onClick={() => movePlayer(DIR_LEFT)} aria-label="left">
-            <svg viewBox="0 0 24 24" width="28" height="28"><path d="M4 12 L16 4 L16 20 Z" fill="currentColor" /></svg>
+        <div className="mr-dpad-row">
+          <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_LEFT)} aria-label="left">
+            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="2" y="6" width="4" height="4" fill="currentColor" /><rect x="6" y="4" width="4" height="8" fill="currentColor" /><rect x="10" y="2" width="4" height="12" fill="currentColor" /></svg>
           </button>
-          <div className="maze-run-dpad-center" />
-          <button className="maze-run-dpad-btn" type="button" onClick={() => movePlayer(DIR_RIGHT)} aria-label="right">
-            <svg viewBox="0 0 24 24" width="28" height="28"><path d="M20 12 L8 4 L8 20 Z" fill="currentColor" /></svg>
+          <div className="mr-dpad-center" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button
+              className="mr-dpad-btn"
+              type="button"
+              onClick={() => { setShowMinimap(v => { if (!v) playSfx('minimap', 0.4); return !v }) }}
+              style={{ width: 36, height: 36, fontSize: '0.5rem', color: showMinimap ? PAL.exit : PAL.textDim }}
+              aria-label="minimap"
+            >MAP</button>
+          </div>
+          <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_RIGHT)} aria-label="right">
+            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="10" y="6" width="4" height="4" fill="currentColor" /><rect x="6" y="4" width="4" height="8" fill="currentColor" /><rect x="2" y="2" width="4" height="12" fill="currentColor" /></svg>
           </button>
         </div>
-        <div className="maze-run-dpad-row">
-          <button className="maze-run-dpad-btn" type="button" onClick={() => movePlayer(DIR_DOWN)} aria-label="down">
-            <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 20 L4 8 L20 8 Z" fill="currentColor" /></svg>
+        <div className="mr-dpad-row">
+          <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_DOWN)} aria-label="down">
+            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="2" y="2" width="12" height="4" fill="currentColor" /><rect x="4" y="6" width="8" height="4" fill="currentColor" /><rect x="6" y="10" width="4" height="4" fill="currentColor" /></svg>
           </button>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="maze-run-actions">
-        <button className="maze-run-btn" type="button" onClick={finishGame}>FINISH</button>
-        <button className="maze-run-btn maze-run-btn-ghost" type="button" onClick={onExit}>EXIT</button>
+      <div className="mr-actions">
+        <button className="mr-btn" type="button" onClick={finishGame}>FINISH</button>
+        <button className="mr-btn mr-btn-ghost" type="button" onClick={onExit}>EXIT</button>
       </div>
     </section>
   )
@@ -1148,11 +1314,11 @@ export const mazeRunModule: MiniGameModule = {
   manifest: {
     id: 'maze-run',
     title: 'Maze Run',
-    description: 'Escape the maze fast! Speed = time bonus!',
+    description: 'Escape the maze fast! Collect keys and avoid ghosts!',
     unlockCost: 40,
     baseReward: 14,
     scoreRewardMultiplier: 1.15,
-    accentColor: '#4f46e5',
+    accentColor: '#5b21b6',
   },
   Component: MazeRunGame,
 }

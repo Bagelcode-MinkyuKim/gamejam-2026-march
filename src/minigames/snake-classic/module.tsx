@@ -12,591 +12,641 @@ import snakeWarpSfx from '../../../assets/sounds/snake-warp.mp3'
 import snakePoisonSfx from '../../../assets/sounds/snake-poison.mp3'
 import snakeFeverSfx from '../../../assets/sounds/snake-fever.mp3'
 import snakeBombSfx from '../../../assets/sounds/snake-bomb.mp3'
+import snakeStarSfx from '../../../assets/sounds/snake-star.mp3'
+import snakeMagnetSfx from '../../../assets/sounds/snake-magnet.mp3'
+import snakeReverseSfx from '../../../assets/sounds/snake-reverse.mp3'
+import snakeLevelUpSfx from '../../../assets/sounds/snake-levelup.mp3'
+import snakePerfectSfx from '../../../assets/sounds/snake-perfect.mp3'
 
-// ── Grid & Snake constants ──
-const GRID_SIZE = 18
-const CELL_COUNT = GRID_SIZE * GRID_SIZE
-const INITIAL_SNAKE_LENGTH = 3
-const INITIAL_MOVE_INTERVAL_MS = 180
-const MIN_MOVE_INTERVAL_MS = 55
-const SPEED_INCREASE_THRESHOLD = 50
-const SPEED_DECREASE_MS = 10
-const SCORE_PER_APPLE = 10
-
-// ── Apple variants ──
-const GOLDEN_APPLE_INTERVAL = 8
-const GOLDEN_APPLE_SCORE = 50
-const POISON_APPLE_CHANCE = 0.15
+// ══════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════
+const G = 16 // grid size — 16x16 retro
+const CELLS = G * G
+const INIT_LEN = 3
+const INIT_INTERVAL = 190
+const MIN_INTERVAL = 50
+const SPD_THRESHOLD = 50
+const SPD_STEP = 12
+const PTS_APPLE = 10
+const PTS_GOLDEN = 50
+const PTS_STAR = 30
+const GOLDEN_EVERY = 7
+const POISON_CHANCE = 0.12
 const POISON_SHRINK = 2
+const WALL_WRAP_AT = 100
 
-// ── Wall wrap ──
-const WALL_WRAP_SCORE_THRESHOLD = 100
+// Power-ups
+const PUP_SHIELD_CHANCE = 0.11
+const PUP_RUSH_CHANCE = 0.07
+const PUP_BOMB_CHANCE = 0.06
+const PUP_MAGNET_CHANCE = 0.06
+const PUP_GHOST_CHANCE = 0.05
+const SHIELD_MS = 8000
+const RUSH_MS = 5000
+const MAGNET_MS = 6000
+const GHOST_MS = 4000
 
-// ── Power-ups ──
-const SHIELD_SPAWN_CHANCE = 0.12
-const SHIELD_DURATION_MS = 8000
-const SPEED_RUSH_SPAWN_CHANCE = 0.08
-const SPEED_RUSH_DURATION_MS = 5000
-const BOMB_SPAWN_CHANCE = 0.06
+// Combo / Fever
+const COMBO_WINDOW = 3500
+const FEVER_AT = 5
+const FEVER_MS = 6000
+const FEVER_MUL = 2
 
-// ── Combo / Fever ──
-const COMBO_WINDOW_MS = 3500
-const FEVER_COMBO_THRESHOLD = 5
-const FEVER_DURATION_MS = 6000
-const FEVER_SCORE_MULTIPLIER = 2
+// Obstacles & Stars
+const OBS_START = 60
+const MAX_OBS = 6
+const STAR_SPAWN_CHANCE = 0.18
+const STAR_LIFETIME_MS = 6000
 
-// ── Obstacles ──
-const OBSTACLE_START_SCORE = 60
-const MAX_OBSTACLES = 6
+// Reverse trap
+const REVERSE_MS = 4000
 
-type Direction = 'up' | 'down' | 'left' | 'right'
-type PowerUpType = 'shield' | 'speed-rush' | 'bomb'
-type AppleType = 'normal' | 'golden' | 'poison'
+type Dir = 'up' | 'down' | 'left' | 'right'
+type PupType = 'shield' | 'rush' | 'bomb' | 'magnet' | 'ghost'
+type AppleKind = 'normal' | 'golden' | 'poison'
 
-interface Position { readonly x: number; readonly y: number }
-interface PowerUp { readonly position: Position; readonly type: PowerUpType }
+interface Pos { readonly x: number; readonly y: number }
+interface Pup { readonly pos: Pos; readonly type: PupType }
+interface Star { readonly pos: Pos; readonly expiresAt: number }
 
-function posEq(a: Position, b: Position): boolean { return a.x === b.x && a.y === b.y }
-function posIdx(p: Position): number { return p.y * GRID_SIZE + p.x }
-function oob(p: Position): boolean { return p.x < 0 || p.x >= GRID_SIZE || p.y < 0 || p.y >= GRID_SIZE }
+const eq = (a: Pos, b: Pos) => a.x === b.x && a.y === b.y
+const idx = (p: Pos) => p.y * G + p.x
+const oob = (p: Pos) => p.x < 0 || p.x >= G || p.y < 0 || p.y >= G
+const opp = (a: Dir, b: Dir) => (a === 'up' && b === 'down') || (a === 'down' && b === 'up') || (a === 'left' && b === 'right') || (a === 'right' && b === 'left')
 
-function move(p: Position, d: Direction): Position {
-  switch (d) {
-    case 'up': return { x: p.x, y: p.y - 1 }
-    case 'down': return { x: p.x, y: p.y + 1 }
-    case 'left': return { x: p.x - 1, y: p.y }
-    case 'right': return { x: p.x + 1, y: p.y }
-  }
+function mv(p: Pos, d: Dir): Pos {
+  return d === 'up' ? { x: p.x, y: p.y - 1 } : d === 'down' ? { x: p.x, y: p.y + 1 }
+    : d === 'left' ? { x: p.x - 1, y: p.y } : { x: p.x + 1, y: p.y }
 }
 
-function opposite(a: Direction, b: Direction): boolean {
-  return (a === 'up' && b === 'down') || (a === 'down' && b === 'up') ||
-    (a === 'left' && b === 'right') || (a === 'right' && b === 'left')
+function flipDir(d: Dir): Dir {
+  return d === 'up' ? 'down' : d === 'down' ? 'up' : d === 'left' ? 'right' : 'left'
 }
 
-function makeSnake(): Position[] {
-  const cx = Math.floor(GRID_SIZE / 2), cy = Math.floor(GRID_SIZE / 2)
-  return Array.from({ length: INITIAL_SNAKE_LENGTH }, (_, i) => ({ x: cx, y: cy + i }))
+function mkSnake(): Pos[] {
+  const c = Math.floor(G / 2)
+  return Array.from({ length: INIT_LEN }, (_, i) => ({ x: c, y: c + i }))
 }
 
-function spawnFree(occupied: Set<number>): Position {
-  const free: Position[] = []
-  for (let y = 0; y < GRID_SIZE; y++) for (let x = 0; x < GRID_SIZE; x++) {
-    if (!occupied.has(posIdx({ x, y }))) free.push({ x, y })
-  }
-  return free.length > 0 ? free[Math.floor(Math.random() * free.length)] : { x: 0, y: 0 }
-}
-
-function allOccupied(snake: Position[], extras: Position[]): Set<number> {
-  const s = new Set(snake.map(posIdx))
-  for (const e of extras) s.add(posIdx(e))
+function occ(snake: Pos[], extras: Pos[]): Set<number> {
+  const s = new Set(snake.map(idx))
+  for (const e of extras) s.add(idx(e))
   return s
 }
 
-function calcInterval(score: number, rush: boolean): number {
-  const lvl = Math.floor(score / SPEED_INCREASE_THRESHOLD)
-  const base = Math.max(MIN_MOVE_INTERVAL_MS, INITIAL_MOVE_INTERVAL_MS - lvl * SPEED_DECREASE_MS)
-  return rush ? Math.max(MIN_MOVE_INTERVAL_MS, base * 0.55) : base
+function spawn(occupied: Set<number>): Pos {
+  const f: Pos[] = []
+  for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) if (!occupied.has(idx({ x, y }))) f.push({ x, y })
+  return f.length > 0 ? f[Math.floor(Math.random() * f.length)] : { x: 0, y: 0 }
 }
 
-function calcSpeedLvl(score: number): number { return Math.floor(score / SPEED_INCREASE_THRESHOLD) + 1 }
-
-function dirEmoji(d: Direction): string {
-  return d === 'up' ? '▲' : d === 'down' ? '▼' : d === 'left' ? '◀' : '▶'
+function mkObs(score: number, snake: Pos[], apple: Pos, extras: Pos[]): Pos[] {
+  if (score < OBS_START) return []
+  const n = Math.min(MAX_OBS, Math.floor((score - OBS_START) / 40) + 1)
+  const o = occ(snake, [apple, ...extras])
+  const r: Pos[] = []
+  for (let i = 0; i < n; i++) { const p = spawn(o); o.add(idx(p)); r.push(p) }
+  return r
 }
 
-function generateObstacles(score: number, snake: Position[], apple: Position, extras: Position[]): Position[] {
-  if (score < OBSTACLE_START_SCORE) return []
-  const count = Math.min(MAX_OBSTACLES, Math.floor((score - OBSTACLE_START_SCORE) / 40) + 1)
-  const occ = allOccupied(snake, [apple, ...extras])
-  const obs: Position[] = []
-  for (let i = 0; i < count; i++) {
-    const p = spawnFree(occ)
-    occ.add(posIdx(p))
-    obs.push(p)
-  }
-  return obs
+function interval(score: number, rush: boolean): number {
+  const base = Math.max(MIN_INTERVAL, INIT_INTERVAL - Math.floor(score / SPD_THRESHOLD) * SPD_STEP)
+  return rush ? Math.max(MIN_INTERVAL, base * 0.55) : base
 }
 
-// ── Component ──
+function spdLvl(score: number) { return Math.floor(score / SPD_THRESHOLD) + 1 }
+
+// Retro dot palette
+const C = {
+  bg: '#0a1208', grid: '#0d1a0a', cell: '#111e0e',
+  body: '#33ff33', bodyDark: '#22cc22', head: '#66ff66', headGlow: 'rgba(51,255,51,0.6)',
+  apple: '#ff3333', appleGlow: 'rgba(255,51,51,0.6)',
+  golden: '#ffcc00', goldenGlow: 'rgba(255,204,0,0.8)',
+  poison: '#cc44ff', poisonGlow: 'rgba(204,68,255,0.6)',
+  star: '#ffff44', starGlow: 'rgba(255,255,68,0.8)',
+  obs: '#334433',
+  shield: '#44aaff', rush: '#ff8833', bomb: '#ff4444', magnet: '#ff44ff', ghost: '#aaffaa',
+  trail: 'rgba(51,255,51,0.08)',
+  border: '#225522', borderActive: '#33ff33',
+  text: '#33ff33', textDim: '#227722',
+}
+
+// ══════════════════════════════════════════════════
+// COMPONENT
+// ══════════════════════════════════════════════════
 function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const [snake, setSnake] = useState<Position[]>(makeSnake)
-  const [apple, setApple] = useState<Position>(() => spawnFree(allOccupied(makeSnake(), [])))
+  const [snake, setSnake] = useState<Pos[]>(mkSnake)
+  const [apple, setApple] = useState<Pos>(() => spawn(occ(mkSnake(), [])))
   const [score, setScore] = useState(0)
   const [gameOver, setGameOver] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
-  const [appleType, setAppleType] = useState<AppleType>('normal')
-  const [isWallWrap, setIsWallWrap] = useState(false)
-  const [powerUp, setPowerUp] = useState<PowerUp | null>(null)
+  const [appleKind, setAppleKind] = useState<AppleKind>('normal')
+  const [wallWrap, setWallWrap] = useState(false)
+  const [pup, setPup] = useState<Pup | null>(null)
   const [hasShield, setHasShield] = useState(false)
-  const [isSpeedRush, setIsSpeedRush] = useState(false)
+  const [hasRush, setHasRush] = useState(false)
+  const [hasMagnet, setHasMagnet] = useState(false)
+  const [hasGhost, setHasGhost] = useState(false)
   const [combo, setCombo] = useState(0)
-  const [isFever, setIsFever] = useState(false)
-  const [trail, setTrail] = useState<Position[]>([])
-  const [bgHue, setBgHue] = useState(140)
-  const [direction, setDirection] = useState<Direction>('up')
-  const [obstacles, setObstacles] = useState<Position[]>([])
+  const [fever, setFever] = useState(false)
+  const [reversed, setReversed] = useState(false)
+  const [trail, setTrail] = useState<Pos[]>([])
+  const [dir, setDir] = useState<Dir>('up')
+  const [obs, setObs] = useState<Pos[]>([])
+  const [stars, setStars] = useState<Star[]>([])
   const [maxCombo, setMaxCombo] = useState(0)
+  const [lvlUpFlash, setLvlUpFlash] = useState(0)
 
-  const effects = useGameEffects()
+  const fx = useGameEffects()
 
-  // Refs for game loop
-  const snakeR = useRef(snake)
-  const appleR = useRef(apple)
-  const dirR = useRef<Direction>('up')
-  const nextDirR = useRef<Direction>('up')
-  const scoreR = useRef(0)
-  const elapsedR = useRef(0)
-  const overR = useRef(false)
-  const doneR = useRef(false)
-  const moveAccR = useRef(0)
-  const rafR = useRef<number | null>(null)
-  const lastFrameR = useRef<number | null>(null)
-  const pupR = useRef<PowerUp | null>(null)
-  const shieldR = useRef(false)
-  const shieldExpR = useRef(0)
-  const rushR = useRef(false)
-  const rushExpR = useRef(0)
-  const trailR = useRef<Position[]>([])
-  const applesEatenR = useRef(0)
-  const appleTypeR = useRef<AppleType>('normal')
-  const comboR = useRef(0)
-  const lastEatR = useRef(0)
-  const feverR = useRef(false)
-  const feverExpR = useRef(0)
-  const obstaclesR = useRef<Position[]>([])
-  const maxComboR = useRef(0)
-  const wallWrapActiveR = useRef(false)
+  // ── Refs ──
+  const R = useRef({
+    snake: mkSnake() as Pos[], apple: spawn(occ(mkSnake(), [])),
+    dir: 'up' as Dir, nextDir: 'up' as Dir,
+    score: 0, elapsed: 0, over: false, done: false,
+    moveAcc: 0, raf: null as number | null, lastFrame: null as number | null,
+    pup: null as Pup | null,
+    shield: false, shieldExp: 0,
+    rush: false, rushExp: 0,
+    magnet: false, magnetExp: 0,
+    ghost: false, ghostExp: 0,
+    trail: [] as Pos[],
+    eaten: 0, appleKind: 'normal' as AppleKind,
+    combo: 0, lastEat: 0, maxCombo: 0,
+    fever: false, feverExp: 0,
+    obs: [] as Pos[], stars: [] as Star[],
+    reversed: false, reverseExp: 0,
+    wallWrap: false,
+  })
 
-  const audioPool = useRef<Map<string, HTMLAudioElement>>(new Map())
-
-  const loadAudio = useCallback((key: string, src: string) => {
-    if (audioPool.current.has(key)) return
-    const a = new Audio(src); a.preload = 'auto'; audioPool.current.set(key, a)
-  }, [])
-
-  const sfx = useCallback((key: string, vol: number, rate = 1) => {
-    const a = audioPool.current.get(key)
-    if (!a) return
-    a.currentTime = 0; a.volume = Math.min(1, Math.max(0, vol)); a.playbackRate = rate
-    void a.play().catch(() => {})
-  }, [])
+  const audio = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const load = useCallback((k: string, s: string) => { if (!audio.current.has(k)) { const a = new Audio(s); a.preload = 'auto'; audio.current.set(k, a) } }, [])
+  const sfx = useCallback((k: string, v: number, r = 1) => { const a = audio.current.get(k); if (!a) return; a.currentTime = 0; a.volume = Math.min(1, Math.max(0, v)); a.playbackRate = r; void a.play().catch(() => {}) }, [])
 
   const finish = useCallback(() => {
-    if (doneR.current) return
-    doneR.current = true
-    effects.cleanup()
-    onFinish({ score: scoreR.current, durationMs: Math.max(Math.round(elapsedR.current), Math.round(DEFAULT_FRAME_MS)) })
-  }, [onFinish, effects])
+    const r = R.current; if (r.done) return; r.done = true; fx.cleanup()
+    onFinish({ score: r.score, durationMs: Math.max(Math.round(r.elapsed), Math.round(DEFAULT_FRAME_MS)) })
+  }, [onFinish, fx])
 
-  const changeDir = useCallback((nd: Direction) => {
-    if (overR.current) return
-    if (opposite(dirR.current, nd)) return
-    if (nextDirR.current !== nd) {
-      nextDirR.current = nd
-      sfx('turn', 0.25, 1.1)
-    }
+  const chDir = useCallback((nd: Dir) => {
+    const r = R.current; if (r.over) return
+    const actual = r.reversed ? flipDir(nd) : nd
+    if (opp(r.dir, actual)) return
+    if (r.nextDir !== actual) { r.nextDir = actual; sfx('turn', 0.2, 1.1) }
   }, [sfx])
 
   // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
-      if (overR.current) return
-      const map: Record<string, Direction> = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' }
-      const d = map[e.code]
-      if (d) { e.preventDefault(); changeDir(d) }
+      if (R.current.over) return
+      const m: Record<string, Dir> = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' }
+      const d = m[e.code]; if (d) { e.preventDefault(); chDir(d) }
     }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [changeDir, onExit])
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
+  }, [chDir, onExit])
 
-  // Audio init
+  // Audio
   useEffect(() => {
-    loadAudio('eat', snakeEatSfx); loadAudio('golden', snakeGoldenSfx)
-    loadAudio('combo', snakeComboSfx); loadAudio('crash', snakeCrashSfx)
-    loadAudio('turn', snakeTurnSfx); loadAudio('speedup', snakeSpeedUpSfx)
-    loadAudio('warp', snakeWarpSfx); loadAudio('poison', snakePoisonSfx)
-    loadAudio('fever', snakeFeverSfx); loadAudio('bomb', snakeBombSfx)
-    return () => { effects.cleanup(); audioPool.current.forEach(a => { a.pause(); a.currentTime = 0 }) }
+    load('eat', snakeEatSfx); load('golden', snakeGoldenSfx); load('combo', snakeComboSfx)
+    load('crash', snakeCrashSfx); load('turn', snakeTurnSfx); load('speedup', snakeSpeedUpSfx)
+    load('warp', snakeWarpSfx); load('poison', snakePoisonSfx); load('fever', snakeFeverSfx)
+    load('bomb', snakeBombSfx); load('star', snakeStarSfx); load('magnet', snakeMagnetSfx)
+    load('reverse', snakeReverseSfx); load('levelup', snakeLevelUpSfx); load('perfect', snakePerfectSfx)
+    return () => { fx.cleanup(); audio.current.forEach(a => { a.pause(); a.currentTime = 0 }) }
   }, [])
 
-  // Game loop
+  // ── Game Loop ──
   useEffect(() => {
-    lastFrameR.current = null; moveAccR.current = 0
+    const r = R.current; r.lastFrame = null; r.moveAcc = 0
 
     const die = () => {
-      overR.current = true; setGameOver(true)
-      sfx('crash', 0.7, 0.9); effects.triggerShake(10); effects.triggerFlash('rgba(239,68,68,0.6)')
-      finish(); rafR.current = null
+      r.over = true; setGameOver(true)
+      sfx('crash', 0.7, 0.85); fx.triggerShake(12); fx.triggerFlash('rgba(255,50,50,0.6)')
+      finish(); r.raf = null
     }
 
     const step = (now: number) => {
-      if (overR.current) { rafR.current = null; return }
-      if (lastFrameR.current === null) lastFrameR.current = now
-      const dt = Math.min(now - lastFrameR.current, MAX_FRAME_DELTA_MS)
-      lastFrameR.current = now; elapsedR.current += dt; setElapsedMs(elapsedR.current)
-      effects.updateParticles()
+      if (r.over) { r.raf = null; return }
+      if (r.lastFrame === null) r.lastFrame = now
+      const dt = Math.min(now - r.lastFrame, MAX_FRAME_DELTA_MS)
+      r.lastFrame = now; r.elapsed += dt; setElapsedMs(r.elapsed)
+      fx.updateParticles()
 
-      // Expiry checks
-      if (shieldR.current && now > shieldExpR.current) { shieldR.current = false; setHasShield(false) }
-      if (rushR.current && now > rushExpR.current) { rushR.current = false; setIsSpeedRush(false) }
-      if (feverR.current && now > feverExpR.current) { feverR.current = false; setIsFever(false) }
+      // Expiries
+      if (r.shield && now > r.shieldExp) { r.shield = false; setHasShield(false) }
+      if (r.rush && now > r.rushExp) { r.rush = false; setHasRush(false) }
+      if (r.magnet && now > r.magnetExp) { r.magnet = false; setHasMagnet(false) }
+      if (r.ghost && now > r.ghostExp) { r.ghost = false; setHasGhost(false) }
+      if (r.fever && now > r.feverExp) { r.fever = false; setFever(false) }
+      if (r.reversed && now > r.reverseExp) { r.reversed = false; setReversed(false) }
 
-      const interval = calcInterval(scoreR.current, rushR.current)
-      moveAccR.current += dt
-      if (moveAccR.current < interval) { rafR.current = requestAnimationFrame(step); return }
-      moveAccR.current -= interval
+      // Remove expired stars
+      r.stars = r.stars.filter(s => now < s.expiresAt); setStars(r.stars)
 
-      dirR.current = nextDirR.current; setDirection(dirR.current)
-      const curSnake = snakeR.current
-      const head = curSnake[0]
-      let newHead = move(head, dirR.current)
+      const iv = interval(r.score, r.rush)
+      r.moveAcc += dt
+      if (r.moveAcc < iv) { r.raf = requestAnimationFrame(step); return }
+      r.moveAcc -= iv
+
+      r.dir = r.nextDir; setDir(r.dir)
+      const cur = r.snake, head = cur[0]
+      let nh = mv(head, r.dir)
 
       // Trail
-      trailR.current = [head, ...trailR.current].slice(0, 8); setTrail(trailR.current)
+      r.trail = [head, ...r.trail].slice(0, 10); setTrail(r.trail)
 
-      // Wall-wrap
-      const wwActive = scoreR.current >= WALL_WRAP_SCORE_THRESHOLD
-      if (wwActive !== wallWrapActiveR.current) { wallWrapActiveR.current = wwActive; setIsWallWrap(wwActive) }
+      // Wall wrap
+      const ww = r.score >= WALL_WRAP_AT
+      if (ww !== r.wallWrap) { r.wallWrap = ww; setWallWrap(ww) }
 
-      if (oob(newHead)) {
-        if (wwActive) {
-          newHead = { x: ((newHead.x % GRID_SIZE) + GRID_SIZE) % GRID_SIZE, y: ((newHead.y % GRID_SIZE) + GRID_SIZE) % GRID_SIZE }
-          sfx('warp', 0.4, 1.0)
-        } else if (shieldR.current) {
-          shieldR.current = false; setHasShield(false)
-          newHead = head
-          effects.triggerFlash('rgba(59,130,246,0.4)'); effects.triggerShake(4)
-        } else { die(); return }
+      if (oob(nh)) {
+        if (ww) { nh = { x: ((nh.x % G) + G) % G, y: ((nh.y % G) + G) % G }; sfx('warp', 0.35, 1.0) }
+        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fx.triggerFlash('rgba(68,170,255,0.4)'); fx.triggerShake(4) }
+        else if (r.ghost) { nh = { x: ((nh.x % G) + G) % G, y: ((nh.y % G) + G) % G } }
+        else { die(); return }
       }
 
-      // Obstacle collision
-      const obstacleHit = obstaclesR.current.some(o => posEq(newHead, o))
-      if (obstacleHit) {
-        if (shieldR.current) {
-          shieldR.current = false; setHasShield(false)
-          newHead = head
-          effects.triggerFlash('rgba(59,130,246,0.4)'); effects.triggerShake(4)
-        } else { die(); return }
+      // Obstacle
+      if (r.obs.some(o => eq(nh, o))) {
+        if (r.ghost) { /* pass through */ }
+        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fx.triggerFlash('rgba(68,170,255,0.4)'); fx.triggerShake(4) }
+        else { die(); return }
       }
 
       // Self collision
-      const bodyHit = curSnake.some((seg, i) => i > 0 && posEq(newHead, seg))
-      if (bodyHit) {
-        if (shieldR.current) {
-          shieldR.current = false; setHasShield(false)
-          newHead = head
-          effects.triggerFlash('rgba(59,130,246,0.4)'); effects.triggerShake(4)
-        } else { die(); return }
+      if (cur.some((s, i) => i > 0 && eq(nh, s))) {
+        if (r.ghost) { /* pass through */ }
+        else if (r.shield) { r.shield = false; setHasShield(false); nh = head; fx.triggerFlash('rgba(68,170,255,0.4)'); fx.triggerShake(4) }
+        else { die(); return }
       }
 
-      // Apple eat
-      const ateApple = posEq(newHead, appleR.current)
-      let nextSnake: Position[]
+      // ── Collect star ──
+      const starHit = r.stars.findIndex(s => eq(nh, s.pos))
+      if (starHit >= 0) {
+        r.stars.splice(starHit, 1); setStars([...r.stars])
+        r.score += PTS_STAR; setScore(r.score)
+        sfx('star', 0.6, 1.2)
+        const ex = nh.x * (100 / G) + (50 / G), ey = nh.y * (100 / G) + (50 / G)
+        fx.comboHitBurst(ex, ey, r.eaten, PTS_STAR)
+      }
 
-      if (ateApple) {
-        const ate = appleTypeR.current
+      // ── Eat apple ──
+      const ate = eq(nh, r.apple)
+      let next: Pos[]
 
-        if (ate === 'poison') {
-          // Poison: shrink snake
-          nextSnake = curSnake.length > POISON_SHRINK + 1
-            ? [newHead, ...curSnake.slice(0, -(POISON_SHRINK))]
-            : [newHead]
-          sfx('poison', 0.6, 1.0)
-          effects.triggerFlash('rgba(168,85,247,0.4)')
-          effects.triggerShake(4)
-          // No score gain, but combo resets
-          comboR.current = 0; setCombo(0)
+      if (ate) {
+        const kind = r.appleKind
+
+        if (kind === 'poison') {
+          next = cur.length > POISON_SHRINK + 1 ? [nh, ...cur.slice(0, -POISON_SHRINK)] : [nh]
+          sfx('poison', 0.6, 1.0); fx.triggerFlash('rgba(204,68,255,0.35)'); fx.triggerShake(4)
+          // Reverse controls as penalty!
+          r.reversed = true; r.reverseExp = now + REVERSE_MS; setReversed(true)
+          sfx('reverse', 0.5, 1.0)
+          r.combo = 0; setCombo(0)
         } else {
-          nextSnake = [newHead, ...curSnake]
-          applesEatenR.current += 1
+          next = [nh, ...cur]; r.eaten += 1
 
           // Combo
-          const timeSince = now - lastEatR.current
-          if (timeSince < COMBO_WINDOW_MS && lastEatR.current > 0) { comboR.current += 1 } else { comboR.current = 1 }
-          lastEatR.current = now; setCombo(comboR.current)
-          if (comboR.current > maxComboR.current) { maxComboR.current = comboR.current; setMaxCombo(comboR.current) }
+          const since = now - r.lastEat
+          if (since < COMBO_WINDOW && r.lastEat > 0) r.combo += 1; else r.combo = 1
+          r.lastEat = now; setCombo(r.combo)
+          if (r.combo > r.maxCombo) { r.maxCombo = r.combo; setMaxCombo(r.combo) }
 
-          // Fever mode trigger
-          if (comboR.current >= FEVER_COMBO_THRESHOLD && !feverR.current) {
-            feverR.current = true; feverExpR.current = now + FEVER_DURATION_MS; setIsFever(true)
-            sfx('fever', 0.7, 1.0); effects.triggerFlash('rgba(251,191,36,0.3)')
+          // Fever
+          if (r.combo >= FEVER_AT && !r.fever) {
+            r.fever = true; r.feverExp = now + FEVER_MS; setFever(true)
+            sfx('fever', 0.7, 1.0); fx.triggerFlash('rgba(255,204,0,0.3)')
           }
 
           // Score
-          const comboMul = Math.min(comboR.current, 5)
-          const basePts = ate === 'golden' ? GOLDEN_APPLE_SCORE : SCORE_PER_APPLE
-          const feverMul = feverR.current ? FEVER_SCORE_MULTIPLIER : 1
-          const appleScore = basePts * comboMul * feverMul
-          const prevScore = scoreR.current
-          scoreR.current += appleScore; setScore(scoreR.current)
+          const cmul = Math.min(r.combo, 5)
+          const base = kind === 'golden' ? PTS_GOLDEN : PTS_APPLE
+          const fmul = r.fever ? FEVER_MUL : 1
+          const pts = base * cmul * fmul
+          const prev = r.score; r.score += pts; setScore(r.score)
 
-          setBgHue(prev => (prev + 8) % 360)
+          // Level up flash
+          const prevLvl = spdLvl(prev), newLvl = spdLvl(r.score)
+          if (newLvl > prevLvl) {
+            sfx('levelup', 0.6, 1.0); setLvlUpFlash(newLvl)
+            setTimeout(() => setLvlUpFlash(0), 1200)
+          }
 
           // Sound
-          if (ate === 'golden') { sfx('golden', 0.7, 1.2) }
-          else { sfx('eat', 0.5, 1 + Math.min(0.5, applesEatenR.current * 0.015)) }
-          if (comboR.current >= 3) sfx('combo', 0.5, 0.9 + comboR.current * 0.08)
-          if (calcSpeedLvl(scoreR.current) > calcSpeedLvl(prevScore)) sfx('speedup', 0.5, 1.0)
+          if (kind === 'golden') { sfx('golden', 0.7, 1.2) }
+          else { sfx('eat', 0.5, 1 + Math.min(0.5, r.eaten * 0.015)) }
+          if (r.combo >= 3) sfx('combo', 0.5, 0.9 + r.combo * 0.08)
 
-          // Effects
-          const ex = newHead.x * (100 / GRID_SIZE) + (50 / GRID_SIZE)
-          const ey = newHead.y * (100 / GRID_SIZE) + (50 / GRID_SIZE)
-          effects.comboHitBurst(ex, ey, applesEatenR.current, appleScore)
+          // Perfect combo milestone
+          if (r.combo === 10) { sfx('perfect', 0.7, 1.0); fx.triggerFlash('rgba(255,255,68,0.3)') }
+
+          // Burst
+          const ex = nh.x * (100 / G) + (50 / G), ey = nh.y * (100 / G) + (50 / G)
+          fx.comboHitBurst(ex, ey, r.eaten, pts)
         }
 
-        // Spawn next apple
-        const extras = pupR.current ? [pupR.current.position] : []
-        const nextApple = spawnFree(allOccupied(nextSnake, [...extras, ...obstaclesR.current]))
-        appleR.current = nextApple; setApple(nextApple)
+        // Next apple
+        const extras = r.pup ? [r.pup.pos] : []
+        const na = spawn(occ(next, [...extras, ...r.obs, ...r.stars.map(s => s.pos)]))
+        r.apple = na; setApple(na)
 
-        // Decide next apple type
-        const nextIsGolden = applesEatenR.current % GOLDEN_APPLE_INTERVAL === (GOLDEN_APPLE_INTERVAL - 1)
-        const nextIsPoisonRoll = !nextIsGolden && applesEatenR.current > 5 && Math.random() < POISON_APPLE_CHANCE
-        const nextType: AppleType = nextIsGolden ? 'golden' : nextIsPoisonRoll ? 'poison' : 'normal'
-        appleTypeR.current = nextType; setAppleType(nextType)
+        // Next kind
+        const isGolden = r.eaten % GOLDEN_EVERY === (GOLDEN_EVERY - 1)
+        const isPoisonRoll = !isGolden && r.eaten > 4 && Math.random() < POISON_CHANCE
+        const nk: AppleKind = isGolden ? 'golden' : isPoisonRoll ? 'poison' : 'normal'
+        r.appleKind = nk; setAppleKind(nk)
 
-        // Spawn power-up
-        if (!pupR.current && applesEatenR.current > 3) {
-          const r = Math.random()
-          let pType: PowerUpType | null = null
-          if (r < SHIELD_SPAWN_CHANCE) pType = 'shield'
-          else if (r < SHIELD_SPAWN_CHANCE + SPEED_RUSH_SPAWN_CHANCE) pType = 'speed-rush'
-          else if (r < SHIELD_SPAWN_CHANCE + SPEED_RUSH_SPAWN_CHANCE + BOMB_SPAWN_CHANCE) pType = 'bomb'
-          if (pType) {
-            const pup: PowerUp = { position: spawnFree(allOccupied(nextSnake, [nextApple, ...obstaclesR.current])), type: pType }
-            pupR.current = pup; setPowerUp(pup)
+        // Power-up spawn
+        if (!r.pup && r.eaten > 2) {
+          let rand = Math.random(), pt: PupType | null = null
+          if ((rand -= PUP_SHIELD_CHANCE) < 0) pt = 'shield'
+          else if ((rand -= PUP_RUSH_CHANCE) < 0) pt = 'rush'
+          else if ((rand -= PUP_BOMB_CHANCE) < 0) pt = 'bomb'
+          else if ((rand -= PUP_MAGNET_CHANCE) < 0) pt = 'magnet'
+          else if ((rand -= PUP_GHOST_CHANCE) < 0) pt = 'ghost'
+          if (pt) { const p: Pup = { pos: spawn(occ(next, [na, ...r.obs])), type: pt }; r.pup = p; setPup(p) }
+        }
+
+        // Star spawn
+        if (Math.random() < STAR_SPAWN_CHANCE && r.stars.length < 3) {
+          const sp = spawn(occ(next, [na, ...r.obs, ...(r.pup ? [r.pup.pos] : [])]))
+          r.stars.push({ pos: sp, expiresAt: now + STAR_LIFETIME_MS }); setStars([...r.stars])
+        }
+
+        // Obstacles
+        if (r.score >= OBS_START) {
+          const o = mkObs(r.score, next, na, r.pup ? [r.pup.pos] : [])
+          r.obs = o; setObs(o)
+        }
+
+        if (next.length >= CELLS) { r.over = true; setGameOver(true); finish(); r.raf = null; return }
+      } else {
+        next = [nh, ...cur.slice(0, -1)]
+      }
+
+      // Magnet: move apple toward head
+      if (r.magnet && !ate) {
+        const a = r.apple, h = nh
+        const dx = h.x - a.x, dy = h.y - a.y
+        const dist = Math.abs(dx) + Math.abs(dy)
+        if (dist > 1 && dist < 6) {
+          const nx = a.x + Math.sign(dx), ny = a.y + Math.sign(dy)
+          const np = { x: Math.max(0, Math.min(G - 1, nx)), y: Math.max(0, Math.min(G - 1, ny)) }
+          if (!next.some(s => eq(s, np)) && !r.obs.some(o => eq(o, np))) {
+            r.apple = np; setApple(np)
           }
         }
-
-        // Regenerate obstacles
-        if (scoreR.current >= OBSTACLE_START_SCORE) {
-          const obs = generateObstacles(scoreR.current, nextSnake, nextApple, pupR.current ? [pupR.current.position] : [])
-          obstaclesR.current = obs; setObstacles(obs)
-        }
-
-        if (nextSnake.length >= CELL_COUNT) { overR.current = true; setGameOver(true); finish(); rafR.current = null; return }
-      } else {
-        nextSnake = [newHead, ...curSnake.slice(0, -1)]
       }
 
       // Collect power-up
-      if (pupR.current && posEq(newHead, pupR.current.position)) {
-        const pt = pupR.current.type
-        if (pt === 'shield') {
-          shieldR.current = true; shieldExpR.current = now + SHIELD_DURATION_MS; setHasShield(true)
-          effects.triggerFlash('rgba(59,130,246,0.3)'); sfx('golden', 0.5, 1.5)
-        } else if (pt === 'speed-rush') {
-          rushR.current = true; rushExpR.current = now + SPEED_RUSH_DURATION_MS; setIsSpeedRush(true)
-          effects.triggerFlash('rgba(251,191,36,0.3)'); sfx('speedup', 0.6, 1.3)
-        } else if (pt === 'bomb') {
-          // Bomb: clear all obstacles
-          obstaclesR.current = []; setObstacles([])
-          effects.triggerFlash('rgba(249,115,22,0.4)'); effects.triggerShake(6); sfx('bomb', 0.7, 1.0)
-          // Bonus score
-          scoreR.current += 30; setScore(scoreR.current)
-        }
-        pupR.current = null; setPowerUp(null)
+      if (r.pup && eq(nh, r.pup.pos)) {
+        const t = r.pup.type
+        if (t === 'shield') { r.shield = true; r.shieldExp = now + SHIELD_MS; setHasShield(true); fx.triggerFlash('rgba(68,170,255,0.25)'); sfx('golden', 0.5, 1.5) }
+        else if (t === 'rush') { r.rush = true; r.rushExp = now + RUSH_MS; setHasRush(true); fx.triggerFlash('rgba(255,136,51,0.25)'); sfx('speedup', 0.6, 1.3) }
+        else if (t === 'bomb') { r.obs = []; setObs([]); fx.triggerFlash('rgba(255,68,68,0.35)'); fx.triggerShake(6); sfx('bomb', 0.7, 1.0); r.score += 30; setScore(r.score) }
+        else if (t === 'magnet') { r.magnet = true; r.magnetExp = now + MAGNET_MS; setHasMagnet(true); fx.triggerFlash('rgba(255,68,255,0.25)'); sfx('magnet', 0.6, 1.0) }
+        else if (t === 'ghost') { r.ghost = true; r.ghostExp = now + GHOST_MS; setHasGhost(true); fx.triggerFlash('rgba(170,255,170,0.25)'); sfx('warp', 0.5, 1.3) }
+        r.pup = null; setPup(null)
       }
 
-      snakeR.current = nextSnake; setSnake(nextSnake)
-      rafR.current = requestAnimationFrame(step)
+      r.snake = next; setSnake(next)
+      r.raf = requestAnimationFrame(step)
     }
 
-    rafR.current = requestAnimationFrame(step)
-    return () => { if (rafR.current !== null) { cancelAnimationFrame(rafR.current); rafR.current = null }; lastFrameR.current = null }
-  }, [finish, sfx, effects])
+    r.raf = requestAnimationFrame(step)
+    return () => { if (r.raf !== null) cancelAnimationFrame(r.raf); r.lastFrame = null }
+  }, [finish, sfx, fx])
 
-  // Computed render data
-  const snakeSet = new Set(snake.map(posIdx))
-  const headIdx = posIdx(snake[0])
-  const appleIdx = posIdx(apple)
+  // ── Render data ──
+  const snakeSet = new Set(snake.map(idx))
+  const headIdx = idx(snake[0])
+  const appleIdx = idx(apple)
+  const trailSet = new Set(trail.map(idx))
+  const pupIdx = pup ? idx(pup.pos) : -1
+  const obsSet = new Set(obs.map(idx))
+  const starSet = new Set(stars.map(s => idx(s.pos)))
   const bestDisp = Math.max(bestScore, score)
-  const spdLvl = calcSpeedLvl(score)
-  const interval = calcInterval(score, isSpeedRush)
-  const trailSet = new Set(trail.map(posIdx))
-  const pupIdx = powerUp ? posIdx(powerUp.position) : -1
-  const obsSet = new Set(obstacles.map(posIdx))
+  const lv = spdLvl(score)
+  const iv = interval(score, hasRush)
+  const lenPct = Math.min(100, (snake.length / (CELLS * 0.5)) * 100)
   const comboLabel = getComboLabel(combo)
   const comboColor = getComboColor(combo)
-  const lengthPct = Math.min(100, (snake.length / (CELL_COUNT * 0.5)) * 100)
 
   const cells = []
-  for (let y = 0; y < GRID_SIZE; y++) for (let x = 0; x < GRID_SIZE; x++) {
-    const idx = posIdx({ x, y })
-    let cls = 'sc-cell'
-    if (idx === headIdx) cls += ' sc-head'
-    else if (snakeSet.has(idx)) cls += ' sc-body'
-    else if (idx === appleIdx) cls += appleType === 'golden' ? ' sc-golden' : appleType === 'poison' ? ' sc-poison' : ' sc-apple'
-    else if (idx === pupIdx) cls += powerUp?.type === 'shield' ? ' sc-pup-shield' : powerUp?.type === 'bomb' ? ' sc-pup-bomb' : ' sc-pup-rush'
-    else if (obsSet.has(idx)) cls += ' sc-obstacle'
-    else if (trailSet.has(idx)) cls += ' sc-trail'
-    cells.push(<div key={idx} className={cls} />)
+  for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+    const i = idx({ x, y })
+    let c = 'sc-c'
+    if (i === headIdx) c += ' sc-hd'
+    else if (snakeSet.has(i)) c += ' sc-bd'
+    else if (i === appleIdx) c += appleKind === 'golden' ? ' sc-gd' : appleKind === 'poison' ? ' sc-ps' : ' sc-ap'
+    else if (starSet.has(i)) c += ' sc-st'
+    else if (i === pupIdx) c += ` sc-pu-${pup?.type ?? 'shield'}`
+    else if (obsSet.has(i)) c += ' sc-ob'
+    else if (trailSet.has(i)) c += ' sc-tr'
+    cells.push(<div key={i} className={c} />)
   }
 
   // Swipe
-  const touchIdR = useRef<number | null>(null)
-  const touchStartR = useRef<{ x: number; y: number } | null>(null)
-  const onTS = useCallback((e: React.TouchEvent) => {
-    if (e.touches.length > 0) { const t = e.touches[0]; touchIdR.current = t.identifier; touchStartR.current = { x: t.clientX, y: t.clientY } }
-  }, [])
+  const tiR = useRef<number | null>(null), tsR = useRef<{ x: number; y: number } | null>(null)
+  const onTS = useCallback((e: React.TouchEvent) => { if (e.touches.length > 0) { const t = e.touches[0]; tiR.current = t.identifier; tsR.current = { x: t.clientX, y: t.clientY } } }, [])
   const onTE = useCallback((e: React.TouchEvent) => {
-    if (!touchStartR.current || touchIdR.current === null) return
+    if (!tsR.current || tiR.current === null) return
     let t: React.Touch | null = null
-    for (let i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === touchIdR.current) { t = e.changedTouches[i]; break }
+    for (let i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === tiR.current) { t = e.changedTouches[i]; break }
     if (!t) return
-    const dx = t.clientX - touchStartR.current.x, dy = t.clientY - touchStartR.current.y
-    if (Math.abs(dx) < 20 && Math.abs(dy) < 20) { touchIdR.current = null; touchStartR.current = null; return }
-    changeDir(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'))
-    touchIdR.current = null; touchStartR.current = null
-  }, [changeDir])
+    const dx = t.clientX - tsR.current.x, dy = t.clientY - tsR.current.y
+    if (Math.abs(dx) < 20 && Math.abs(dy) < 20) { tiR.current = null; tsR.current = null; return }
+    chDir(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'))
+    tiR.current = null; tsR.current = null
+  }, [chDir])
 
   return (
-    <section className="mini-game-panel sc-panel" aria-label="snake-classic-game"
-      style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...effects.getShakeStyle() }}>
+    <section className="mini-game-panel sc-p" aria-label="snake-classic-game"
+      style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', ...fx.getShakeStyle() }}>
       <style>{`
         ${GAME_EFFECTS_CSS}
-        .sc-panel {
-          display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%;
-          max-width: 432px; margin: 0 auto; user-select: none; -webkit-user-select: none;
-          background: linear-gradient(180deg, hsl(${bgHue},15%,12%) 0%, hsl(${(bgHue + 20) % 360},12%,8%) 100%);
-          transition: background 0.8s ease; padding: 4px 6px 6px; box-sizing: border-box;
+        .sc-p {
+          display:flex; flex-direction:column; align-items:center; width:100%; height:100%;
+          max-width:432px; margin:0 auto; user-select:none; -webkit-user-select:none;
+          background:${C.bg}; padding:4px 4px 6px; box-sizing:border-box;
+          font-family:'Press Start 2P','Courier New',monospace; image-rendering:pixelated;
         }
-        ${isFever ? `.sc-panel { animation: sc-fever-bg 0.4s ease-in-out infinite alternate; }
-        @keyframes sc-fever-bg { from { filter: brightness(1); } to { filter: brightness(1.15) saturate(1.3); } }` : ''}
+        ${fever ? `.sc-p::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(255,204,0,0.03) 2px,rgba(255,204,0,0.03) 4px); pointer-events:none; z-index:1; animation:sc-fev 0.3s ease-in-out infinite alternate; }
+        @keyframes sc-fev { from{opacity:0.5} to{opacity:1} }` : ''}
 
-        .sc-hud { display:flex; align-items:center; justify-content:space-between; width:100%; padding:2px 8px; flex-shrink:0; }
-        .sc-hud-left { display:flex; flex-direction:column; align-items:flex-start; }
-        .sc-score { font-size:2.4rem; font-weight:900; color:#22c55e; margin:0; line-height:1; text-shadow:0 0 12px rgba(34,197,94,0.5); }
-        ${isFever ? `.sc-score { color:#fbbf24; text-shadow:0 0 16px rgba(251,191,36,0.7); animation:sc-fever-score 0.3s ease-in-out infinite alternate; }
-        @keyframes sc-fever-score { from{transform:scale(1)} to{transform:scale(1.05)} }` : ''}
-        .sc-best { font-size:0.65rem; color:#52525b; margin:0; }
-        .sc-hud-right { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
-        .sc-badge { font-size:0.6rem; font-weight:700; padding:1px 6px; border-radius:8px; color:#a1a1aa; background:rgba(255,255,255,0.06); }
-        .sc-combo-badge { font-size:0.8rem; font-weight:900; padding:2px 8px; border-radius:10px; animation:sc-cpop 0.3s ease; }
-        @keyframes sc-cpop { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
+        /* CRT scanline overlay */
+        .sc-scan { position:absolute; inset:0; pointer-events:none; z-index:3;
+          background:repeating-linear-gradient(0deg,transparent,transparent 1px,rgba(0,0,0,0.15) 1px,rgba(0,0,0,0.15) 2px); }
 
-        .sc-status { display:flex; gap:4px; justify-content:center; width:100%; flex-shrink:0; min-height:18px; flex-wrap:wrap; }
-        .sc-pill { font-size:0.58rem; font-weight:800; padding:1px 7px; border-radius:10px; animation:sc-ppulse 1s ease-in-out infinite alternate; }
-        @keyframes sc-ppulse { from{opacity:0.8} to{opacity:1;transform:scale(1.05)} }
+        /* HUD */
+        .sc-h { display:flex; align-items:center; justify-content:space-between; width:100%; padding:2px 6px; flex-shrink:0; z-index:2; }
+        .sc-hl { display:flex; flex-direction:column; }
+        .sc-sc { font-size:1.8rem; font-weight:900; color:${C.text}; margin:0; line-height:1; text-shadow:0 0 8px ${C.headGlow}; letter-spacing:2px; }
+        ${fever ? `.sc-sc { color:${C.golden}; text-shadow:0 0 12px ${C.goldenGlow}; animation:sc-fsc 0.25s infinite alternate; }
+        @keyframes sc-fsc { from{transform:scale(1)} to{transform:scale(1.04)} }` : ''}
+        .sc-bs { font-size:0.5rem; color:${C.textDim}; margin:0; letter-spacing:1px; }
+        .sc-hr { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+        .sc-bg { font-size:0.45rem; font-weight:700; padding:1px 5px; border:1px solid ${C.border}; color:${C.textDim}; letter-spacing:0.5px; }
+        .sc-cb { font-size:0.6rem; font-weight:900; padding:2px 6px; border:1px solid; animation:sc-cp 0.3s ease; letter-spacing:1px; }
+        @keyframes sc-cp { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.3)} 100%{transform:scale(1);opacity:1} }
 
-        .sc-length-bar-wrap { width:100%; height:4px; background:rgba(255,255,255,0.06); border-radius:2px; flex-shrink:0; overflow:hidden; }
-        .sc-length-bar { height:100%; border-radius:2px; transition:width 0.3s ease, background 0.3s; }
+        /* Status */
+        .sc-st-bar { display:flex; gap:3px; justify-content:center; width:100%; flex-shrink:0; min-height:14px; flex-wrap:wrap; z-index:2; }
+        .sc-pill { font-size:0.4rem; font-weight:800; padding:1px 5px; border:1px solid; letter-spacing:0.5px; animation:sc-pp 0.8s ease-in-out infinite alternate; }
+        @keyframes sc-pp { from{opacity:0.7} to{opacity:1} }
 
-        .sc-grid-wrap { position:relative; width:100%; flex:1; min-height:0; touch-action:none; display:flex; align-items:center; justify-content:center; padding:3px 0; }
-        .sc-grid-box { position:relative; width:100%; max-height:100%; aspect-ratio:1/1; }
-        .sc-grid { display:grid; grid-template-columns:repeat(${GRID_SIZE},1fr); grid-template-rows:repeat(${GRID_SIZE},1fr);
-          width:100%; height:100%; background:rgba(0,0,0,0.6); border:2px solid rgba(34,197,94,0.2); border-radius:8px; overflow:hidden; gap:0.5px; }
-        .sc-cell { background:rgba(255,255,255,0.02); border-radius:1px; }
-        .sc-body { background:#22c55e; border-radius:2px; box-shadow:inset 0 0 2px rgba(0,0,0,0.3); }
-        .sc-head { background:#4ade80; border-radius:3px; box-shadow:0 0 8px rgba(74,222,128,0.7),inset 0 0 3px rgba(0,0,0,0.2); z-index:2; position:relative; }
-        .sc-trail { background:rgba(34,197,94,0.1); border-radius:1px; }
-        .sc-apple { background:#ef4444; border-radius:50%; box-shadow:0 0 6px rgba(239,68,68,0.7); animation:sc-apulse 0.7s ease-in-out infinite alternate; }
-        .sc-golden { background:#fbbf24; border-radius:50%; box-shadow:0 0 12px rgba(251,191,36,0.9),0 0 24px rgba(251,191,36,0.4); animation:sc-gpulse 0.35s ease-in-out infinite alternate; }
-        .sc-poison { background:#a855f7; border-radius:50%; box-shadow:0 0 8px rgba(168,85,247,0.8); animation:sc-ppulse2 0.5s ease-in-out infinite alternate; }
-        @keyframes sc-ppulse2 { from{transform:scale(0.7);opacity:0.7} to{transform:scale(1.05);opacity:1} }
-        .sc-pup-shield { background:#3b82f6; border-radius:50%; box-shadow:0 0 8px rgba(59,130,246,0.8); animation:sc-pfloat 1s ease-in-out infinite alternate; }
-        .sc-pup-rush { background:#f97316; border-radius:50%; box-shadow:0 0 8px rgba(249,115,22,0.8); animation:sc-pfloat 0.6s ease-in-out infinite alternate; }
-        .sc-pup-bomb { background:#ef4444; border-radius:3px; box-shadow:0 0 10px rgba(239,68,68,0.8); animation:sc-pfloat 0.8s ease-in-out infinite alternate; }
-        .sc-obstacle { background:#52525b; border-radius:2px; box-shadow:inset 0 0 3px rgba(0,0,0,0.6); }
-        @keyframes sc-apulse { from{transform:scale(0.8);opacity:0.8} to{transform:scale(1);opacity:1} }
-        @keyframes sc-gpulse { from{transform:scale(0.85);box-shadow:0 0 10px rgba(251,191,36,0.8)} to{transform:scale(1.15);box-shadow:0 0 24px rgba(251,191,36,1)} }
-        @keyframes sc-pfloat { from{transform:scale(0.75) rotate(0deg)} to{transform:scale(1.1) rotate(15deg)} }
-        .sc-over .sc-grid { opacity:0.35; filter:grayscale(0.5); }
-        .sc-overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; pointer-events:none; z-index:10; }
-        .sc-ov-text { font-size:2.5rem; font-weight:900; color:#ef4444; text-shadow:0 2px 12px rgba(0,0,0,0.7),0 0 30px rgba(239,68,68,0.5); animation:sc-goapp 0.5s cubic-bezier(0.34,1.56,0.64,1); }
-        .sc-ov-score { font-size:1.1rem; font-weight:700; color:#fbbf24; text-shadow:0 1px 6px rgba(0,0,0,0.5); }
-        .sc-ov-stats { font-size:0.7rem; color:#a1a1aa; }
-        @keyframes sc-goapp { 0%{transform:scale(3) rotate(-10deg);opacity:0} 100%{transform:scale(1) rotate(0);opacity:1} }
-        .sc-shield-on .sc-grid { border-color:rgba(59,130,246,0.6); box-shadow:0 0 20px rgba(59,130,246,0.3); }
-        .sc-rush-on .sc-grid { border-color:rgba(249,115,22,0.6); box-shadow:0 0 20px rgba(249,115,22,0.3); }
-        .sc-fever-on .sc-grid { border-color:rgba(251,191,36,0.6); box-shadow:0 0 24px rgba(251,191,36,0.4); }
+        /* Length bar */
+        .sc-lb-w { width:100%; height:3px; background:${C.cell}; flex-shrink:0; overflow:hidden; border:1px solid ${C.border}; z-index:2; }
+        .sc-lb { height:100%; transition:width 0.3s ease; }
 
-        .sc-dpad { display:flex; flex-direction:column; align-items:center; gap:3px; flex-shrink:0; padding:2px 0; }
-        .sc-drow { display:flex; align-items:center; gap:3px; }
-        .sc-dbtn { width:clamp(48px,13vw,60px); height:clamp(48px,13vw,60px); border:none; border-radius:12px; background:rgba(255,255,255,0.08);
-          color:#a1a1aa; font-size:1.3rem; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.1s; -webkit-tap-highlight-color:transparent; backdrop-filter:blur(4px); }
-        .sc-dbtn:active { background:#22c55e; color:#000; transform:scale(0.92); }
-        .sc-dcenter { width:clamp(48px,13vw,60px); height:clamp(48px,13vw,60px); display:flex; align-items:center; justify-content:center; font-size:1.1rem; color:#22c55e; font-weight:900; opacity:0.6; }
-        .sc-acts { display:flex; gap:8px; flex-shrink:0; padding:2px 0; }
-        .sc-abtn { padding:8px 20px; border:none; border-radius:10px; background:#22c55e; color:#000; font-weight:800; font-size:0.85rem; cursor:pointer; transition:all 0.15s; min-height:38px; }
-        .sc-abtn:active { transform:scale(0.95); opacity:0.8; }
-        .sc-abtn.ghost { background:rgba(255,255,255,0.06); color:#71717a; border:1px solid rgba(255,255,255,0.1); }
+        /* Level up flash */
+        .sc-lvl { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:1.2rem; font-weight:900; color:${C.golden};
+          text-shadow:0 0 20px ${C.goldenGlow}; z-index:20; animation:sc-lvla 1.2s ease-out forwards; pointer-events:none; letter-spacing:2px; }
+        @keyframes sc-lvla { 0%{opacity:0;transform:translate(-50%,-50%) scale(2)} 20%{opacity:1;transform:translate(-50%,-50%) scale(1)} 80%{opacity:1} 100%{opacity:0;transform:translate(-50%,-80%) scale(0.8)} }
+
+        /* Reverse warning */
+        ${reversed ? `.sc-p::after { content:'REVERSED!'; position:absolute; top:30%; left:50%; transform:translate(-50%,-50%);
+          font-size:0.7rem; color:${C.poison}; text-shadow:0 0 10px ${C.poisonGlow}; z-index:20; animation:sc-rev 0.5s ease-in-out infinite alternate;
+          pointer-events:none; letter-spacing:2px; font-weight:900; }
+        @keyframes sc-rev { from{opacity:0.4;transform:translate(-50%,-50%) scale(0.95)} to{opacity:1;transform:translate(-50%,-50%) scale(1.05)} }` : ''}
+
+        /* Grid */
+        .sc-gw { position:relative; width:100%; flex:1; min-height:0; touch-action:none; display:flex; align-items:center; justify-content:center; padding:2px 0; z-index:2; }
+        .sc-gb { position:relative; width:100%; max-height:100%; aspect-ratio:1/1; }
+        .sc-g { display:grid; grid-template-columns:repeat(${G},1fr); grid-template-rows:repeat(${G},1fr);
+          width:100%; height:100%; background:${C.grid}; border:2px solid ${C.border}; overflow:hidden; gap:1px; }
+        ${hasShield ? `.sc-g { border-color:${C.shield}; box-shadow:0 0 12px rgba(68,170,255,0.3); }` : ''}
+        ${hasRush ? `.sc-g { border-color:${C.rush}; box-shadow:0 0 12px rgba(255,136,51,0.3); }` : ''}
+        ${fever ? `.sc-g { border-color:${C.golden}; box-shadow:0 0 16px ${C.goldenGlow}; }` : ''}
+        ${hasGhost ? `.sc-g { border-color:${C.ghost}; box-shadow:0 0 12px rgba(170,255,170,0.3); }` : ''}
+
+        .sc-c { background:${C.cell}; }
+        .sc-bd { background:${C.body}; box-shadow:inset 1px 1px 0 ${C.bodyDark}; }
+        .sc-hd { background:${C.head}; box-shadow:0 0 6px ${C.headGlow},inset 1px 1px 0 rgba(255,255,255,0.3); }
+        ${hasGhost ? `.sc-bd,.sc-hd { opacity:0.6; }` : ''}
+        .sc-tr { background:${C.trail}; }
+        .sc-ap { background:${C.apple}; box-shadow:0 0 4px ${C.appleGlow}; animation:sc-apu 0.6s ease-in-out infinite alternate; }
+        .sc-gd { background:${C.golden}; box-shadow:0 0 8px ${C.goldenGlow}; animation:sc-gpu 0.3s ease-in-out infinite alternate; }
+        .sc-ps { background:${C.poison}; box-shadow:0 0 6px ${C.poisonGlow}; animation:sc-ppu 0.4s ease-in-out infinite alternate; }
+        .sc-st { background:${C.star}; box-shadow:0 0 8px ${C.starGlow}; animation:sc-spu 0.5s ease-in-out infinite alternate; }
+        .sc-ob { background:${C.obs}; box-shadow:inset 1px 1px 0 rgba(0,0,0,0.4); }
+        .sc-pu-shield { background:${C.shield}; box-shadow:0 0 6px rgba(68,170,255,0.6); animation:sc-pfl 0.8s ease-in-out infinite alternate; }
+        .sc-pu-rush { background:${C.rush}; box-shadow:0 0 6px rgba(255,136,51,0.6); animation:sc-pfl 0.5s ease-in-out infinite alternate; }
+        .sc-pu-bomb { background:${C.bomb}; box-shadow:0 0 6px rgba(255,68,68,0.6); animation:sc-pfl 0.6s ease-in-out infinite alternate; }
+        .sc-pu-magnet { background:${C.magnet}; box-shadow:0 0 6px rgba(255,68,255,0.6); animation:sc-pfl 0.7s ease-in-out infinite alternate; }
+        .sc-pu-ghost { background:${C.ghost}; box-shadow:0 0 6px rgba(170,255,170,0.6); animation:sc-pfl 0.9s ease-in-out infinite alternate; }
+
+        @keyframes sc-apu { from{transform:scale(0.75)} to{transform:scale(1)} }
+        @keyframes sc-gpu { from{transform:scale(0.8);box-shadow:0 0 4px ${C.goldenGlow}} to{transform:scale(1.1);box-shadow:0 0 12px ${C.goldenGlow}} }
+        @keyframes sc-ppu { from{transform:scale(0.7);opacity:0.6} to{transform:scale(1);opacity:1} }
+        @keyframes sc-spu { from{transform:scale(0.8) rotate(0deg)} to{transform:scale(1.1) rotate(20deg)} }
+        @keyframes sc-pfl { from{transform:scale(0.7)} to{transform:scale(1.1)} }
+
+        .sc-ov .sc-g { opacity:0.3; filter:grayscale(0.6); }
+        .sc-ol { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; pointer-events:none; z-index:10; }
+        .sc-olt { font-size:1.6rem; font-weight:900; color:${C.apple}; text-shadow:0 0 20px ${C.appleGlow}; animation:sc-goa 0.5s cubic-bezier(0.34,1.56,0.64,1); letter-spacing:3px; }
+        .sc-ols { font-size:0.7rem; font-weight:700; color:${C.golden}; text-shadow:0 0 8px rgba(0,0,0,0.5); letter-spacing:1px; }
+        .sc-olst { font-size:0.4rem; color:${C.textDim}; letter-spacing:0.5px; }
+        @keyframes sc-goa { 0%{transform:scale(3) rotate(-10deg);opacity:0} 100%{transform:scale(1) rotate(0);opacity:1} }
+
+        /* D-Pad */
+        .sc-dp { display:flex; flex-direction:column; align-items:center; gap:2px; flex-shrink:0; padding:2px 0; z-index:2; }
+        .sc-dr { display:flex; align-items:center; gap:2px; }
+        .sc-db { width:clamp(46px,12vw,56px); height:clamp(46px,12vw,56px); border:2px solid ${C.border}; border-radius:0; background:${C.cell};
+          color:${C.textDim}; font-size:1.2rem; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.08s;
+          -webkit-tap-highlight-color:transparent; font-family:inherit; }
+        .sc-db:active { background:${C.body}; color:${C.bg}; border-color:${C.body}; }
+        .sc-dc { width:clamp(46px,12vw,56px); height:clamp(46px,12vw,56px); display:flex; align-items:center; justify-content:center;
+          font-size:0.9rem; color:${C.text}; font-weight:900; opacity:0.5; }
+
+        /* Actions */
+        .sc-ac { display:flex; gap:6px; flex-shrink:0; padding:2px 0; z-index:2; }
+        .sc-ab { padding:6px 16px; border:2px solid ${C.body}; border-radius:0; background:transparent; color:${C.body};
+          font-weight:800; font-size:0.6rem; cursor:pointer; transition:all 0.1s; font-family:inherit; letter-spacing:1px; }
+        .sc-ab:active { background:${C.body}; color:${C.bg}; }
+        .sc-ab.gh { border-color:${C.border}; color:${C.textDim}; }
+        .sc-ab.gh:active { background:${C.border}; color:${C.bg}; }
       `}</style>
 
-      <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
-      <ParticleRenderer particles={effects.particles} />
-      <ScorePopupRenderer popups={effects.scorePopups} />
+      <div className="sc-scan" />
+      <FlashOverlay isFlashing={fx.isFlashing} flashColor={fx.flashColor} />
+      <ParticleRenderer particles={fx.particles} />
+      <ScorePopupRenderer popups={fx.scorePopups} />
+      {lvlUpFlash > 0 && <div className="sc-lvl">LEVEL {lvlUpFlash}!</div>}
 
       {/* HUD */}
-      <div className="sc-hud">
-        <div className="sc-hud-left">
-          <p className="sc-score">{score}</p>
-          <p className="sc-best">BEST {bestDisp}</p>
+      <div className="sc-h">
+        <div className="sc-hl">
+          <p className="sc-sc">{score}</p>
+          <p className="sc-bs">BEST {bestDisp}</p>
         </div>
-        <div className="sc-hud-right">
-          <span className="sc-badge">Lv.{spdLvl} | {interval}ms</span>
-          <span className="sc-badge">{snake.length} tiles | {(elapsedMs / 1000).toFixed(1)}s</span>
+        <div className="sc-hr">
+          <span className="sc-bg">LV.{lv} {iv}MS</span>
+          <span className="sc-bg">{snake.length}T {(elapsedMs / 1000).toFixed(1)}S</span>
           {combo >= 2 && (
-            <span className="sc-combo-badge" style={{ color: comboColor, background: `${comboColor}20` }}>
-              {combo}x COMBO{comboLabel ? ` ${comboLabel}` : ''}
+            <span className="sc-cb" style={{ color: comboColor, borderColor: comboColor }}>
+              {combo}X{comboLabel ? ` ${comboLabel}` : ''}
             </span>
           )}
         </div>
       </div>
 
-      {/* Status pills */}
-      <div className="sc-status">
-        {isFever && <span className="sc-pill" style={{ color: '#fbbf24', background: 'rgba(251,191,36,0.2)' }}>FEVER x{FEVER_SCORE_MULTIPLIER}</span>}
-        {appleType === 'golden' && <span className="sc-pill" style={{ color: '#fbbf24', background: 'rgba(251,191,36,0.15)' }}>GOLDEN +{GOLDEN_APPLE_SCORE}</span>}
-        {appleType === 'poison' && <span className="sc-pill" style={{ color: '#a855f7', background: 'rgba(168,85,247,0.15)' }}>POISON!</span>}
-        {hasShield && <span className="sc-pill" style={{ color: '#3b82f6', background: 'rgba(59,130,246,0.15)' }}>SHIELD</span>}
-        {isSpeedRush && <span className="sc-pill" style={{ color: '#f97316', background: 'rgba(249,115,22,0.15)' }}>SPEED RUSH</span>}
-        {isWallWrap && <span className="sc-pill" style={{ color: '#a855f7', background: 'rgba(168,85,247,0.15)' }}>WALL WRAP</span>}
-        {obstacles.length > 0 && <span className="sc-pill" style={{ color: '#71717a', background: 'rgba(113,113,122,0.15)' }}>BLOCKS {obstacles.length}</span>}
+      {/* Status */}
+      <div className="sc-st-bar">
+        {fever && <span className="sc-pill" style={{ color: C.golden, borderColor: C.golden }}>FEVER X{FEVER_MUL}</span>}
+        {appleKind === 'golden' && <span className="sc-pill" style={{ color: C.golden, borderColor: C.golden }}>GOLDEN</span>}
+        {appleKind === 'poison' && <span className="sc-pill" style={{ color: C.poison, borderColor: C.poison }}>POISON</span>}
+        {hasShield && <span className="sc-pill" style={{ color: C.shield, borderColor: C.shield }}>SHIELD</span>}
+        {hasRush && <span className="sc-pill" style={{ color: C.rush, borderColor: C.rush }}>RUSH</span>}
+        {hasMagnet && <span className="sc-pill" style={{ color: C.magnet, borderColor: C.magnet }}>MAGNET</span>}
+        {hasGhost && <span className="sc-pill" style={{ color: C.ghost, borderColor: C.ghost }}>GHOST</span>}
+        {reversed && <span className="sc-pill" style={{ color: C.poison, borderColor: C.poison }}>REVERSE</span>}
+        {wallWrap && <span className="sc-pill" style={{ color: C.ghost, borderColor: C.ghost }}>WARP</span>}
+        {obs.length > 0 && <span className="sc-pill" style={{ color: C.obs, borderColor: C.obs }}>BLOCKS</span>}
       </div>
 
-      {/* Length progress bar */}
-      <div className="sc-length-bar-wrap">
-        <div className="sc-length-bar" style={{
-          width: `${lengthPct}%`,
-          background: isFever ? '#fbbf24' : lengthPct > 70 ? '#ef4444' : lengthPct > 40 ? '#f97316' : '#22c55e',
+      {/* Length bar */}
+      <div className="sc-lb-w">
+        <div className="sc-lb" style={{
+          width: `${lenPct}%`,
+          background: fever ? C.golden : lenPct > 70 ? C.apple : lenPct > 40 ? C.rush : C.body,
         }} />
       </div>
 
       {/* Grid */}
-      <div className={`sc-grid-wrap ${gameOver ? 'sc-over' : ''} ${hasShield ? 'sc-shield-on' : ''} ${isSpeedRush ? 'sc-rush-on' : ''} ${isFever ? 'sc-fever-on' : ''}`}
-        onTouchStart={onTS} onTouchEnd={onTE} role="presentation">
-        <div className="sc-grid-box">
-          <div className="sc-grid">{cells}</div>
+      <div className={`sc-gw ${gameOver ? 'sc-ov' : ''}`} onTouchStart={onTS} onTouchEnd={onTE} role="presentation">
+        <div className="sc-gb">
+          <div className="sc-g">{cells}</div>
           {gameOver && (
-            <div className="sc-overlay">
-              <span className="sc-ov-text">GAME OVER</span>
-              <span className="sc-ov-score">{score} pts</span>
-              <span className="sc-ov-stats">{snake.length} tiles | {applesEatenR.current} apples | max {maxCombo}x combo</span>
+            <div className="sc-ol">
+              <span className="sc-olt">GAME OVER</span>
+              <span className="sc-ols">{score} PTS</span>
+              <span className="sc-olst">{snake.length}T | {R.current.eaten} APPLES | MAX {maxCombo}X</span>
             </div>
           )}
         </div>
       </div>
 
       {/* D-Pad */}
-      <div className="sc-dpad">
-        <div className="sc-drow"><button className="sc-dbtn" type="button" onClick={() => changeDir('up')} aria-label="up">▲</button></div>
-        <div className="sc-drow">
-          <button className="sc-dbtn" type="button" onClick={() => changeDir('left')} aria-label="left">◀</button>
-          <div className="sc-dcenter">{dirEmoji(direction)}</div>
-          <button className="sc-dbtn" type="button" onClick={() => changeDir('right')} aria-label="right">▶</button>
+      <div className="sc-dp">
+        <div className="sc-dr"><button className="sc-db" type="button" onClick={() => chDir('up')} aria-label="up">&#9650;</button></div>
+        <div className="sc-dr">
+          <button className="sc-db" type="button" onClick={() => chDir('left')} aria-label="left">&#9664;</button>
+          <div className="sc-dc">{dir === 'up' ? '▲' : dir === 'down' ? '▼' : dir === 'left' ? '◀' : '▶'}</div>
+          <button className="sc-db" type="button" onClick={() => chDir('right')} aria-label="right">&#9654;</button>
         </div>
-        <div className="sc-drow"><button className="sc-dbtn" type="button" onClick={() => changeDir('down')} aria-label="down">▼</button></div>
+        <div className="sc-dr"><button className="sc-db" type="button" onClick={() => chDir('down')} aria-label="down">&#9660;</button></div>
       </div>
 
       {/* Actions */}
-      <div className="sc-acts">
-        <button className="sc-abtn" type="button" onClick={() => {
-          if (!overR.current) { overR.current = true; setGameOver(true); sfx('crash', 0.5, 1); effects.triggerShake(6); finish() }
+      <div className="sc-ac">
+        <button className="sc-ab" type="button" onClick={() => {
+          if (!R.current.over) { R.current.over = true; setGameOver(true); sfx('crash', 0.5, 1); fx.triggerShake(6); finish() }
         }}>FINISH</button>
-        <button className="sc-abtn ghost" type="button" onClick={onExit}>EXIT</button>
+        <button className="sc-ab gh" type="button" onClick={onExit}>EXIT</button>
       </div>
     </section>
   )
@@ -606,11 +656,11 @@ export const snakeClassicModule: MiniGameModule = {
   manifest: {
     id: 'snake-classic',
     title: 'Snake Classic',
-    description: 'Eat apples, dodge obstacles, chain combos & trigger FEVER!',
+    description: 'Retro dot snake! Eat apples, dodge blocks, chain combos & trigger FEVER!',
     unlockCost: 30,
     baseReward: 12,
     scoreRewardMultiplier: 1.1,
-    accentColor: '#22c55e',
+    accentColor: '#33ff33',
   },
   Component: SnakeClassicGame,
 }

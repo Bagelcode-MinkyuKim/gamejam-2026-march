@@ -3,6 +3,14 @@ import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
 
+import handRockImg from '../../../assets/images/generated/rock-scissors/hand-rock.png'
+import handScissorsImg from '../../../assets/images/generated/rock-scissors/hand-scissors.png'
+import handPaperImg from '../../../assets/images/generated/rock-scissors/hand-paper.png'
+import aiCharImg from '../../../assets/images/generated/rock-scissors/ai-character.png'
+import playerCharImg from '../../../assets/images/generated/rock-scissors/player-character.png'
+import questionMarkImg from '../../../assets/images/generated/rock-scissors/question-mark.png'
+import vsEmblemImg from '../../../assets/images/generated/rock-scissors/vs-emblem.png'
+
 import shakeSfx from '../../../assets/sounds/rock-scissors-shake.mp3'
 import winSfx from '../../../assets/sounds/rock-scissors-win.mp3'
 import loseSfx from '../../../assets/sounds/rock-scissors-lose.mp3'
@@ -11,35 +19,44 @@ import comboSfx from '../../../assets/sounds/rock-scissors-combo.mp3'
 import feverSfx from '../../../assets/sounds/rock-scissors-fever.mp3'
 import tickSfx from '../../../assets/sounds/rock-scissors-tick.mp3'
 import perfectSfx from '../../../assets/sounds/rock-scissors-perfect.mp3'
+import criticalSfx from '../../../assets/sounds/rock-scissors-critical.mp3'
+import speedupSfx from '../../../assets/sounds/rock-scissors-speedup.mp3'
+import timebonusSfx from '../../../assets/sounds/rock-scissors-timebonus.mp3'
+import tauntSfx from '../../../assets/sounds/rock-scissors-taunt.mp3'
+import roundStartSfx from '../../../assets/sounds/rock-scissors-round-start.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 
-const ROUND_DURATION_MS = 120000
-const LOW_TIME_THRESHOLD_MS = 5000
-const REVEAL_DURATION_MS = 700
-const SHAKE_DURATION_MS = 450
-const FLASH_DURATION_MS = 350
+const ROUND_DURATION_MS = 90000
+const LOW_TIME_THRESHOLD_MS = 10000
+const REVEAL_DURATION_MS = 650
+const SHAKE_DURATION_MS = 400
+const FLASH_DURATION_MS = 300
 
 const SCORE_WIN = 3
 const SCORE_DRAW = 1
 const SCORE_LOSE = -1
+const CRITICAL_CHANCE = 0.15
+const CRITICAL_MULTIPLIER = 2
 const MIND_READER_THRESHOLD = 5
 const MIND_READER_BONUS = 10
 const FEVER_COMBO_THRESHOLD = 8
 const FEVER_MULTIPLIER = 3
 const SPEED_UP_PER_10_SCORE = 50
-const PERFECT_TIMING_WINDOW_MS = 150
+const PERFECT_TIMING_WINDOW_MS = 200
 const PERFECT_TIMING_BONUS = 5
 const STREAK_MILESTONE_BONUS = 15
 const STREAK_MILESTONES = [10, 20, 30, 50]
+const TIME_BONUS_MS = 5000
+const TIME_BONUS_STREAKS = [5, 15, 25, 40]
 
 type Hand = 'rock' | 'scissors' | 'paper'
 type RoundResult = 'win' | 'lose' | 'draw'
 type GamePhase = 'choosing' | 'shaking' | 'revealing'
 
-const HAND_EMOJI: Record<Hand, string> = {
-  rock: '\u270A',
-  scissors: '\u270C\uFE0F',
-  paper: '\u270B',
+const HAND_IMAGES: Record<Hand, string> = {
+  rock: handRockImg,
+  scissors: handScissorsImg,
+  paper: handPaperImg,
 }
 
 const HAND_LABEL: Record<Hand, string> = {
@@ -56,6 +73,18 @@ const WINS_AGAINST: Record<Hand, Hand> = {
   paper: 'rock',
 }
 
+const AI_TAUNTS = [
+  '\uB0B4\uAC00 \uC774\uACA8\uBC84\uB838\uC9C0!',
+  '\uB108\uBB34 \uC27D\uB124~',
+  '\uB610 \uC9C0\uB294\uAC70\uC57C?',
+  '\uB0B4 \uC2B9\uB9AC!',
+  'GG EZ',
+  '\uB2E4\uC74C\uC5D4 \uC798\uD574\uBD10~',
+]
+
+const AI_WIN_REACTIONS = ['\uD83D\uDE0F', '\uD83E\uDD16', '\uD83D\uDCAA']
+const AI_LOSE_REACTIONS = ['\uD83D\uDE31', '\uD83E\uDD2F', '\uD83D\uDE25']
+
 function determineResult(player: Hand, ai: Hand): RoundResult {
   if (player === ai) return 'draw'
   if (WINS_AGAINST[player] === ai) return 'win'
@@ -64,13 +93,11 @@ function determineResult(player: Hand, ai: Hand): RoundResult {
 
 function pickAiHand(history: Hand[], difficulty: number): Hand {
   const historyLength = history.length
-
   if (historyLength < 2) {
     return ALL_HANDS[Math.floor(Math.random() * ALL_HANDS.length)]
   }
 
   const lastTwo = [history[historyLength - 2], history[historyLength - 1]]
-
   if (lastTwo[0] === lastTwo[1] && Math.random() < 0.3 + difficulty * 0.1) {
     const predictedHand = lastTwo[0]
     const counterHand = ALL_HANDS.find((h) => WINS_AGAINST[h] === predictedHand)
@@ -78,7 +105,6 @@ function pickAiHand(history: Hand[], difficulty: number): Hand {
   }
 
   const weights: Record<Hand, number> = { rock: 1, scissors: 1, paper: 1 }
-
   const lastHand = history[historyLength - 1]
   weights[lastHand] += 0.6
 
@@ -90,9 +116,7 @@ function pickAiHand(history: Hand[], difficulty: number): Hand {
     }
     const maxCount = Math.max(counts.rock, counts.scissors, counts.paper)
     for (const hand of ALL_HANDS) {
-      if (counts[hand] === maxCount) {
-        weights[hand] += 0.4
-      }
+      if (counts[hand] === maxCount) weights[hand] += 0.4
     }
   }
 
@@ -103,7 +127,6 @@ function pickAiHand(history: Hand[], difficulty: number): Hand {
     cumulative += weights[hand]
     if (roll <= cumulative) return hand
   }
-
   return ALL_HANDS[Math.floor(Math.random() * ALL_HANDS.length)]
 }
 
@@ -111,16 +134,18 @@ function getPatternHint(history: Hand[]): string | null {
   if (history.length < 4) return null
   const last3 = history.slice(-3)
   if (last3[0] === last3[1] && last3[1] === last3[2]) {
-    return `AI\uAC00 ${HAND_LABEL[last3[0]]}\uC744 \uC5F0\uC18D \uC0AC\uC6A9 \uC911!`
+    return `\uD83D\uDCA1 AI\uAC00 ${HAND_LABEL[last3[0]]}\uC744 \uC5F0\uC18D \uC0AC\uC6A9 \uC911!`
   }
   if (history.length >= 6) {
     const l6 = history.slice(-6)
     if (l6[0] === l6[3] && l6[1] === l6[4] && l6[2] === l6[5]) {
-      return 'AI \uD328\uD134 \uBC1C\uACAC!'
+      return '\uD83D\uDCA1 AI \uD328\uD134 \uBC1C\uACAC!'
     }
   }
   return null
 }
+
+type AudioRefMap = Record<string, React.MutableRefObject<HTMLAudioElement | null>>
 
 function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
   const effects = useGameEffects()
@@ -139,9 +164,14 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [scorePopup, setScorePopup] = useState<string | null>(null)
   const [patternHint, setPatternHint] = useState<string | null>(null)
   const [isPerfect, setIsPerfect] = useState(false)
+  const [isCritical, setIsCritical] = useState(false)
   const [streakAnnounce, setStreakAnnounce] = useState<string | null>(null)
+  const [timeBonusMsg, setTimeBonusMsg] = useState<string | null>(null)
+  const [aiTaunt, setAiTaunt] = useState<string | null>(null)
+  const [aiReaction, setAiReaction] = useState<string | null>(null)
   const [maxCombo, setMaxCombo] = useState(0)
   const [feverActive, setFeverActive] = useState(false)
+  const [recentHistory, setRecentHistory] = useState<{ player: Hand; ai: Hand; result: RoundResult }[]>([])
   const feverActiveRef = useRef(false)
 
   const scoreRef = useRef(0)
@@ -161,18 +191,24 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const flashTimerRef = useRef<number | null>(null)
   const popupTimerRef = useRef<number | null>(null)
   const lowTimeSecondRef = useRef<number | null>(null)
-  const lastChooseTimeRef = useRef<number>(0)
   const revealStartRef = useRef<number>(0)
 
-  const shakeAudioRef = useRef<HTMLAudioElement | null>(null)
-  const winAudioRef = useRef<HTMLAudioElement | null>(null)
-  const loseAudioRef = useRef<HTMLAudioElement | null>(null)
-  const drawAudioRef = useRef<HTMLAudioElement | null>(null)
-  const comboAudioRef = useRef<HTMLAudioElement | null>(null)
-  const feverAudioRef = useRef<HTMLAudioElement | null>(null)
-  const tickAudioRef = useRef<HTMLAudioElement | null>(null)
-  const perfectAudioRef = useRef<HTMLAudioElement | null>(null)
-  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audioRefs: AudioRefMap = {
+    shake: useRef<HTMLAudioElement | null>(null),
+    win: useRef<HTMLAudioElement | null>(null),
+    lose: useRef<HTMLAudioElement | null>(null),
+    draw: useRef<HTMLAudioElement | null>(null),
+    combo: useRef<HTMLAudioElement | null>(null),
+    fever: useRef<HTMLAudioElement | null>(null),
+    tick: useRef<HTMLAudioElement | null>(null),
+    perfect: useRef<HTMLAudioElement | null>(null),
+    critical: useRef<HTMLAudioElement | null>(null),
+    speedup: useRef<HTMLAudioElement | null>(null),
+    timebonus: useRef<HTMLAudioElement | null>(null),
+    taunt: useRef<HTMLAudioElement | null>(null),
+    roundStart: useRef<HTMLAudioElement | null>(null),
+    gameOver: useRef<HTMLAudioElement | null>(null),
+  }
 
   const clearTimeoutSafe = (timerRef: { current: number | null }) => {
     if (timerRef.current !== null) {
@@ -182,9 +218,9 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   }
 
   const playAudio = useCallback(
-    (audioRef: { current: HTMLAudioElement | null }, volume: number, playbackRate = 1) => {
-      const audio = audioRef.current
-      if (audio === null) return
+    (key: string, volume: number, playbackRate = 1) => {
+      const audio = audioRefs[key]?.current
+      if (!audio) return
       audio.currentTime = 0
       audio.volume = Math.min(1, Math.max(0, volume))
       audio.playbackRate = playbackRate
@@ -200,7 +236,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
     clearTimeoutSafe(flashTimerRef)
     clearTimeoutSafe(popupTimerRef)
 
-    playAudio(gameOverAudioRef, 0.6, 0.95)
+    playAudio('gameOver', 0.6, 0.95)
 
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     onFinish({
@@ -229,17 +265,22 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       setFlashClass('')
       setScorePopup(null)
       setIsPerfect(false)
+      setIsCritical(false)
       setStreakAnnounce(null)
-      lastChooseTimeRef.current = now
+      setTimeBonusMsg(null)
+      setAiTaunt(null)
+      setAiReaction(null)
 
-      playAudio(shakeAudioRef, 0.5, 1)
+      playAudio('shake', 0.5, 1)
 
-      const speedReduction = Math.min(300, Math.floor(scoreRef.current / 10) * SPEED_UP_PER_10_SCORE / 10)
-      const currentShakeDuration = Math.max(180, SHAKE_DURATION_MS - speedReduction)
+      const speedReduction = Math.min(250, Math.floor(scoreRef.current / 10) * SPEED_UP_PER_10_SCORE / 10)
+      const currentShakeDuration = Math.max(150, SHAKE_DURATION_MS - speedReduction)
 
       phaseTimerRef.current = window.setTimeout(() => {
         phaseTimerRef.current = null
         if (finishedRef.current) return
+
+        playAudio('roundStart', 0.3, 1.1)
 
         const aiChoice = pickAiHand(aiHistoryRef.current, getDifficulty())
         aiHistoryRef.current = [...aiHistoryRef.current, aiChoice]
@@ -248,18 +289,31 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         roundsRef.current += 1
         setRounds(roundsRef.current)
 
+        setRecentHistory((prev) => {
+          const next = [...prev, { player: chosen, ai: aiChoice, result }]
+          return next.length > 6 ? next.slice(-6) : next
+        })
+
         let scoreDelta = 0
         let nextCombo = comboRef.current
+        const rolledCritical = Math.random() < CRITICAL_CHANCE
 
         if (result === 'win') {
           nextCombo += 1
           const comboMultiplier = Math.min(nextCombo, 5)
           scoreDelta = SCORE_WIN * comboMultiplier
 
+          if (rolledCritical) {
+            scoreDelta *= CRITICAL_MULTIPLIER
+            setIsCritical(true)
+            playAudio('critical', 0.6, 1)
+            effects.spawnParticles(8, 200, 250)
+          }
+
           if (isPerfectTiming) {
             scoreDelta += PERFECT_TIMING_BONUS
             setIsPerfect(true)
-            playAudio(perfectAudioRef, 0.5, 1.2)
+            playAudio('perfect', 0.5, 1.2)
           }
 
           if (nextCombo === MIND_READER_THRESHOLD) {
@@ -270,7 +324,7 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             if (!feverActiveRef.current) {
               feverActiveRef.current = true
               setFeverActive(true)
-              playAudio(feverAudioRef, 0.55, 1)
+              playAudio('fever', 0.55, 1)
             }
           }
 
@@ -279,34 +333,48 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
             setStreakAnnounce(`${nextCombo}\uC5F0\uC2B9! +${STREAK_MILESTONE_BONUS}`)
           }
 
-          if (nextCombo >= 3) {
-            playAudio(comboAudioRef, 0.45, 1 + nextCombo * 0.03)
-          } else {
-            playAudio(winAudioRef, 0.5, 1 + nextCombo * 0.04)
+          if (TIME_BONUS_STREAKS.includes(nextCombo)) {
+            remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + TIME_BONUS_MS)
+            setTimeBonusMsg(`+${TIME_BONUS_MS / 1000}s TIME!`)
+            playAudio('timebonus', 0.5, 1)
+          }
+
+          if (nextCombo >= 3 && !rolledCritical) {
+            playAudio('combo', 0.45, 1 + nextCombo * 0.03)
+          } else if (!rolledCritical) {
+            playAudio('win', 0.5, 1 + nextCombo * 0.04)
           }
 
           winsRef.current += 1
           setWins(winsRef.current)
-          setFlashClass('rock-scissors-flash-win')
+          setFlashClass('rps-flash-win')
+          setAiReaction(AI_LOSE_REACTIONS[Math.floor(Math.random() * AI_LOSE_REACTIONS.length)])
           effects.triggerFlash()
-          effects.spawnParticles(3 + Math.min(nextCombo, 8), 200, 250)
+          effects.spawnParticles(3 + Math.min(nextCombo, 6), 200, 250)
         } else if (result === 'draw') {
           scoreDelta = SCORE_DRAW
           drawsRef.current += 1
           setDraws(drawsRef.current)
-          setFlashClass('rock-scissors-flash-draw')
-          playAudio(drawAudioRef, 0.4, 0.95)
+          setFlashClass('rps-flash-draw')
+          playAudio('draw', 0.4, 0.95)
         } else {
           nextCombo = 0
           scoreDelta = SCORE_LOSE
           lossesRef.current += 1
           setLosses(lossesRef.current)
-          setFlashClass('rock-scissors-flash-lose')
+          setFlashClass('rps-flash-lose')
           feverActiveRef.current = false
           setFeverActive(false)
-          effects.triggerShake(5)
-          effects.triggerFlash('rgba(239,68,68,0.45)')
-          playAudio(loseAudioRef, 0.5, 0.85)
+          effects.triggerShake(6)
+          effects.triggerFlash('rgba(239,68,68,0.5)')
+          playAudio('lose', 0.5, 0.85)
+          setAiReaction(AI_WIN_REACTIONS[Math.floor(Math.random() * AI_WIN_REACTIONS.length)])
+
+          if (Math.random() < 0.4) {
+            const taunt = AI_TAUNTS[Math.floor(Math.random() * AI_TAUNTS.length)]
+            setAiTaunt(taunt)
+            playAudio('taunt', 0.35, 1)
+          }
         }
 
         if (nextCombo > maxComboRef.current) {
@@ -353,34 +421,29 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
           setAiHand(null)
           setLastResult(null)
           setIsPerfect(false)
+          setIsCritical(false)
           setStreakAnnounce(null)
+          setTimeBonusMsg(null)
+          setAiTaunt(null)
+          setAiReaction(null)
         }, REVEAL_DURATION_MS)
       }, currentShakeDuration)
     },
     [playAudio, getDifficulty],
   )
 
-  const handleExit = useCallback(() => {
-    onExit()
-  }, [onExit])
-
   useEffect(() => {
-    const audioConfigs = [
-      { ref: shakeAudioRef, src: shakeSfx },
-      { ref: winAudioRef, src: winSfx },
-      { ref: loseAudioRef, src: loseSfx },
-      { ref: drawAudioRef, src: drawSfx },
-      { ref: comboAudioRef, src: comboSfx },
-      { ref: feverAudioRef, src: feverSfx },
-      { ref: tickAudioRef, src: tickSfx },
-      { ref: perfectAudioRef, src: perfectSfx },
-      { ref: gameOverAudioRef, src: gameOverHitSfx },
-    ] as const
+    const sfxMap: Record<string, string> = {
+      shake: shakeSfx, win: winSfx, lose: loseSfx, draw: drawSfx,
+      combo: comboSfx, fever: feverSfx, tick: tickSfx, perfect: perfectSfx,
+      critical: criticalSfx, speedup: speedupSfx, timebonus: timebonusSfx,
+      taunt: tauntSfx, roundStart: roundStartSfx, gameOver: gameOverHitSfx,
+    }
 
-    for (const { ref, src } of audioConfigs) {
+    for (const [key, src] of Object.entries(sfxMap)) {
       const audio = new Audio(src)
       audio.preload = 'auto'
-      ;(ref as React.MutableRefObject<HTMLAudioElement | null>).current = audio
+      if (audioRefs[key]) audioRefs[key].current = audio
     }
 
     revealStartRef.current = performance.now()
@@ -390,19 +453,15 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       clearTimeoutSafe(flashTimerRef)
       clearTimeoutSafe(popupTimerRef)
       effects.cleanup()
-      for (const { ref } of audioConfigs) {
-        ;(ref as React.MutableRefObject<HTMLAudioElement | null>).current = null
+      for (const key of Object.keys(sfxMap)) {
+        if (audioRefs[key]) audioRefs[key].current = null
       }
     }
   }, [])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        handleExit()
-        return
-      }
+      if (event.code === 'Escape') { event.preventDefault(); onExit(); return }
       if (phase === 'choosing') {
         if (event.code === 'Digit1' || event.code === 'KeyA') handleChoose('rock')
         else if (event.code === 'Digit2' || event.code === 'KeyS') handleChoose('scissors')
@@ -410,21 +469,14 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       }
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [handleExit, handleChoose, phase])
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onExit, handleChoose, phase])
 
   useEffect(() => {
     const step = (now: number) => {
-      if (finishedRef.current) {
-        animationFrameRef.current = null
-        return
-      }
+      if (finishedRef.current) { animationFrameRef.current = null; return }
 
-      if (lastFrameAtRef.current === null) {
-        lastFrameAtRef.current = now
-      }
+      if (lastFrameAtRef.current === null) lastFrameAtRef.current = now
 
       const deltaMs = Math.min(now - lastFrameAtRef.current, MAX_FRAME_DELTA_MS)
       lastFrameAtRef.current = now
@@ -436,24 +488,19 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         const nextLowTimeSecond = Math.ceil(remainingMsRef.current / 1000)
         if (lowTimeSecondRef.current !== nextLowTimeSecond) {
           lowTimeSecondRef.current = nextLowTimeSecond
-          playAudio(tickAudioRef, 0.3, 1.1 + (LOW_TIME_THRESHOLD_MS - remainingMsRef.current) / 10000)
+          playAudio('tick', 0.25, 1.1 + (LOW_TIME_THRESHOLD_MS - remainingMsRef.current) / 12000)
         }
       } else {
         lowTimeSecondRef.current = null
       }
 
-      if (remainingMsRef.current <= 0) {
-        finishGame()
-        animationFrameRef.current = null
-        return
-      }
+      if (remainingMsRef.current <= 0) { finishGame(); animationFrameRef.current = null; return }
 
       effects.updateParticles()
       animationFrameRef.current = window.requestAnimationFrame(step)
     }
 
     animationFrameRef.current = window.requestAnimationFrame(step)
-
     return () => {
       if (animationFrameRef.current !== null) {
         window.cancelAnimationFrame(animationFrameRef.current)
@@ -470,157 +517,138 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const winRate = rounds > 0 ? Math.round((wins / rounds) * 100) : 0
 
   const resultLabel =
-    lastResult === 'win'
-      ? '\uC2B9\uB9AC!'
-      : lastResult === 'lose'
-        ? '\uD328\uBC30...'
-        : lastResult === 'draw'
-          ? '\uBB34\uC2B9\uBD80'
-          : ''
-
-  const aiDisplayHand: string =
-    phase === 'shaking'
-      ? '\u2753'
-      : aiHand !== null
-        ? HAND_EMOJI[aiHand]
-        : '\u2753'
-
-  const playerDisplayHand: string =
-    phase === 'shaking'
-      ? HAND_EMOJI[playerHand!]
-      : playerHand !== null
-        ? HAND_EMOJI[playerHand]
-        : ''
+    lastResult === 'win' ? 'WIN!' : lastResult === 'lose' ? 'LOSE' : lastResult === 'draw' ? 'DRAW' : ''
 
   return (
-    <section className="mini-game-panel rock-scissors-panel" aria-label="rock-scissors-game" style={{ position: 'relative', maxWidth: '432px', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}>
+    <section
+      className={`mini-game-panel rps-panel ${feverActive ? 'rps-fever-bg' : ''}`}
+      aria-label="rock-scissors-game"
+      style={{ position: 'relative', maxWidth: '432px', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}
+    >
       {/* Timer Bar */}
-      <div className="rock-scissors-timer-bar">
-        <div
-          className={`rock-scissors-timer-fill ${isLowTime ? 'low-time' : ''}`}
-          style={{ width: `${timerProgress * 100}%` }}
-        />
+      <div className="rps-timer-bar">
+        <div className={`rps-timer-fill ${isLowTime ? 'low-time' : ''}`} style={{ width: `${timerProgress * 100}%` }} />
       </div>
 
       {/* Score Header */}
-      <div className="rock-scissors-score-strip">
-        <div className="rock-scissors-score-col">
-          <p className="rock-scissors-score">{Math.max(0, score).toLocaleString()}</p>
-          <p className="rock-scissors-best">BEST {displayedBestScore.toLocaleString()}</p>
+      <div className="rps-header">
+        <div className="rps-header-left">
+          <p className="rps-score">{Math.max(0, score).toLocaleString()}</p>
+          <p className="rps-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
-        <div className="rock-scissors-time-col">
-          <p className={`rock-scissors-time ${isLowTime ? 'low-time' : ''}`}>
-            {(remainingMs / 1000).toFixed(1)}s
-          </p>
-          <p className="rock-scissors-round-count">R{rounds}</p>
+        <div className="rps-header-center">
+          {combo >= 2 && (
+            <p className={`rps-combo-badge ${combo >= FEVER_COMBO_THRESHOLD ? 'fever' : ''}`}>
+              {comboLabel} COMBO
+            </p>
+          )}
+        </div>
+        <div className="rps-header-right">
+          <p className={`rps-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
+          <p className="rps-round-num">R{rounds}</p>
         </div>
       </div>
 
-      {/* Stats Row */}
-      <div className="rock-scissors-meta-row">
-        <p className="rock-scissors-stat">
-          <span className="rock-scissors-stat-icon win-icon" /> {wins}W
-        </p>
-        <p className="rock-scissors-stat">
-          <span className="rock-scissors-stat-icon draw-icon" /> {draws}D
-        </p>
-        <p className="rock-scissors-stat">
-          <span className="rock-scissors-stat-icon lose-icon" /> {losses}L
-        </p>
-        <p className="rock-scissors-stat win-rate">{winRate}%</p>
-        {combo >= 2 && (
-          <p className={`rock-scissors-combo ${combo >= FEVER_COMBO_THRESHOLD ? 'fever' : ''}`}>
-            COMBO <strong>{comboLabel}</strong>
-          </p>
-        )}
+      {/* Stats */}
+      <div className="rps-stats">
+        <span className="rps-stat-item win">{wins}W</span>
+        <span className="rps-stat-item draw">{draws}D</span>
+        <span className="rps-stat-item lose">{losses}L</span>
+        <span className="rps-stat-item rate">{winRate}%</span>
       </div>
 
       {/* Pattern Hint */}
       {patternHint && phase === 'choosing' && (
-        <div className="rock-scissors-hint">{patternHint}</div>
+        <div className="rps-hint">{patternHint}</div>
       )}
 
       {/* Arena */}
-      <div className={`rock-scissors-arena ${flashClass}`}>
-        <div className="rock-scissors-hands-row">
-          <div className="rock-scissors-hand-container">
-            <p className="rock-scissors-hand-label">YOU</p>
-            <div className={`rock-scissors-hand player ${phase === 'shaking' ? 'shaking' : ''} ${lastResult === 'win' ? 'pulse-win' : ''}`}>
-              {playerDisplayHand || '\u270A'}
-            </div>
-          </div>
-
-          <div className="rock-scissors-vs">
-            {scorePopup !== null && (
-              <span
-                className={`rock-scissors-score-popup ${
-                  lastResult === 'win' ? 'popup-win' : lastResult === 'lose' ? 'popup-lose' : 'popup-draw'
-                }`}
-              >
-                {scorePopup}
-              </span>
-            )}
-            {isPerfect && (
-              <span className="rock-scissors-perfect-badge">PERFECT!</span>
-            )}
-            {lastResult !== null ? (
-              <span
-                className={`rock-scissors-result-text ${
-                  lastResult === 'win' ? 'result-win' : lastResult === 'lose' ? 'result-lose' : 'result-draw'
-                }`}
-              >
-                {resultLabel}
-              </span>
+      <div className={`rps-arena ${flashClass}`}>
+        {/* Player Side */}
+        <div className="rps-fighter-col">
+          <img src={playerCharImg} alt="Player" className="rps-char-icon" />
+          <div className={`rps-hand-frame player-frame ${phase === 'shaking' ? 'rps-shaking' : ''} ${lastResult === 'win' ? 'rps-pulse-win' : ''}`}>
+            {playerHand ? (
+              <img src={HAND_IMAGES[playerHand]} alt={playerHand} className="rps-hand-img" />
             ) : (
-              <span className="rock-scissors-result-text result-idle">VS</span>
+              <img src={questionMarkImg} alt="?" className="rps-hand-img rps-qmark" />
             )}
           </div>
+        </div>
 
-          <div className="rock-scissors-hand-container">
-            <p className="rock-scissors-hand-label">AI</p>
-            <div className={`rock-scissors-hand ai ${phase === 'shaking' ? 'shaking' : ''} ${lastResult === 'lose' ? 'pulse-win' : ''}`}>
-              {aiDisplayHand}
-            </div>
+        {/* VS Center */}
+        <div className="rps-center-col">
+          {scorePopup !== null && (
+            <span className={`rps-score-pop ${lastResult === 'win' ? 'pop-win' : lastResult === 'lose' ? 'pop-lose' : 'pop-draw'}`}>
+              {scorePopup}
+            </span>
+          )}
+          {isCritical && <span className="rps-critical-badge">CRITICAL!</span>}
+          {isPerfect && <span className="rps-perfect-badge">PERFECT!</span>}
+          {lastResult !== null ? (
+            <span className={`rps-result-label result-${lastResult}`}>{resultLabel}</span>
+          ) : (
+            <img src={vsEmblemImg} alt="VS" className="rps-vs-img" />
+          )}
+          {aiReaction && <span className="rps-ai-reaction">{aiReaction}</span>}
+        </div>
+
+        {/* AI Side */}
+        <div className="rps-fighter-col">
+          <img src={aiCharImg} alt="AI" className="rps-char-icon" />
+          <div className={`rps-hand-frame ai-frame ${phase === 'shaking' ? 'rps-shaking' : ''} ${lastResult === 'lose' ? 'rps-pulse-win' : ''}`}>
+            {phase === 'revealing' && aiHand ? (
+              <img src={HAND_IMAGES[aiHand]} alt={aiHand} className="rps-hand-img" />
+            ) : (
+              <img src={questionMarkImg} alt="?" className="rps-hand-img rps-qmark" />
+            )}
           </div>
         </div>
       </div>
 
-      {/* Fever / Streak Announcements */}
-      {feverActive && combo >= FEVER_COMBO_THRESHOLD && (
-        <div className="rock-scissors-fever-banner">
-          FEVER MODE x{FEVER_MULTIPLIER}
+      {/* Announcements */}
+      <div className="rps-announcements">
+        {feverActive && combo >= FEVER_COMBO_THRESHOLD && (
+          <div className="rps-fever-text">FEVER x{FEVER_MULTIPLIER}</div>
+        )}
+        {streakAnnounce && <div className="rps-streak-text">{streakAnnounce}</div>}
+        {timeBonusMsg && <div className="rps-timebonus-text">{timeBonusMsg}</div>}
+        {combo === MIND_READER_THRESHOLD && lastResult === 'win' && (
+          <div className="rps-mindreader-text">MIND READER! +{MIND_READER_BONUS}</div>
+        )}
+        {aiTaunt && <div className="rps-taunt-text">{aiTaunt}</div>}
+      </div>
+
+      {/* Recent History */}
+      {recentHistory.length > 0 && (
+        <div className="rps-history">
+          {recentHistory.map((h, i) => (
+            <div key={i} className={`rps-history-dot ${h.result}`} />
+          ))}
         </div>
       )}
-      {streakAnnounce && (
-        <div className="rock-scissors-streak-announce">{streakAnnounce}</div>
-      )}
-      {combo === MIND_READER_THRESHOLD && lastResult === 'win' && (
-        <div className="rock-scissors-mind-reader">MIND READER! +{MIND_READER_BONUS}</div>
-      )}
 
-      {/* Max Combo Display */}
-      {maxCombo >= 3 && (
-        <div className="rock-scissors-max-combo">MAX COMBO: {maxCombo}</div>
-      )}
+      {/* Max Combo */}
+      {maxCombo >= 3 && <div className="rps-max-combo">MAX {maxCombo}</div>}
 
       {/* Choice Buttons */}
-      <div className="rock-scissors-button-row">
+      <div className="rps-buttons">
         {ALL_HANDS.map((hand) => (
           <button
-            className={`rock-scissors-choice-button ${phase === 'choosing' ? 'ready' : ''}`}
+            className={`rps-btn ${phase === 'choosing' ? 'ready' : ''}`}
             key={hand}
             type="button"
             disabled={phase !== 'choosing'}
             onClick={() => handleChoose(hand)}
           >
-            <span className="rock-scissors-choice-emoji">{HAND_EMOJI[hand]}</span>
-            <span className="rock-scissors-choice-label">{HAND_LABEL[hand]}</span>
+            <img src={HAND_IMAGES[hand]} alt={hand} className="rps-btn-img" />
+            <span className="rps-btn-label">{HAND_LABEL[hand]}</span>
           </button>
         ))}
       </div>
 
       <style>{GAME_EFFECTS_CSS}</style>
-      <style>{ROCK_SCISSORS_ANIMATIONS_CSS}</style>
+      <style>{RPS_CSS}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
       <ScorePopupRenderer popups={effects.scorePopups} />
@@ -628,45 +656,68 @@ function RockScissorsGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   )
 }
 
-const ROCK_SCISSORS_ANIMATIONS_CSS = `
-@keyframes rock-scissors-fever {
-  from { opacity: 0.7; transform: scale(1); }
-  to { opacity: 1; transform: scale(1.08); }
+const RPS_CSS = `
+@keyframes rps-shake-anim {
+  0% { transform: translateX(-5px) rotate(-6deg); }
+  25% { transform: translateX(5px) rotate(6deg); }
+  50% { transform: translateX(-4px) rotate(-4deg); }
+  75% { transform: translateX(4px) rotate(4deg); }
+  100% { transform: translateX(-5px) rotate(-6deg); }
 }
-@keyframes rock-scissors-shake {
-  0% { transform: translateX(-4px) rotate(-5deg); }
-  25% { transform: translateX(4px) rotate(5deg); }
-  50% { transform: translateX(-3px) rotate(-3deg); }
-  75% { transform: translateX(3px) rotate(3deg); }
-  100% { transform: translateX(-4px) rotate(-5deg); }
-}
-@keyframes rock-scissors-pulse {
+@keyframes rps-pulse-anim {
   0% { transform: scale(1); }
-  40% { transform: scale(1.35); }
+  35% { transform: scale(1.25); }
   100% { transform: scale(1); }
 }
-@keyframes rock-scissors-popup-float {
+@keyframes rps-pop-float {
   0% { opacity: 1; transform: translateY(0) scale(1); }
-  50% { opacity: 0.8; transform: translateY(-14px) scale(1.15); }
-  100% { opacity: 0; transform: translateY(-28px) scale(0.8); }
+  50% { opacity: 0.9; transform: translateY(-16px) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-32px) scale(0.7); }
 }
-@keyframes rock-scissors-perfect-flash {
+@keyframes rps-critical-flash {
+  0% { opacity: 0; transform: scale(0.3) rotate(-10deg); }
+  30% { opacity: 1; transform: scale(1.3) rotate(5deg); }
+  60% { opacity: 1; transform: scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: scale(1.5) rotate(10deg); }
+}
+@keyframes rps-perfect-flash {
   0% { opacity: 0; transform: scale(0.5); }
-  30% { opacity: 1; transform: scale(1.2); }
-  100% { opacity: 0; transform: scale(1.5); }
+  30% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.4); }
 }
-@keyframes rock-scissors-streak-pop {
-  0% { opacity: 0; transform: translateY(10px) scale(0.8); }
-  40% { opacity: 1; transform: translateY(-5px) scale(1.1); }
-  100% { opacity: 0; transform: translateY(-15px) scale(0.9); }
+@keyframes rps-fever-pulse {
+  from { opacity: 0.7; transform: scale(1); text-shadow: 0 0 8px #f59e0b; }
+  to { opacity: 1; transform: scale(1.06); text-shadow: 0 0 16px #ef4444; }
 }
-@keyframes rock-scissors-ready-pulse {
-  0%, 100% { box-shadow: 3px 3px 0 #9ca3af; }
-  50% { box-shadow: 3px 3px 0 #9ca3af, 0 0 12px rgba(59,130,246,0.3); }
+@keyframes rps-streak-pop {
+  0% { opacity: 0; transform: translateY(8px) scale(0.8); }
+  40% { opacity: 1; transform: translateY(-3px) scale(1.1); }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.85); }
 }
-@keyframes rock-scissors-timer-pulse {
+@keyframes rps-ready-glow {
+  0%, 100% { box-shadow: 3px 3px 0 #6b7280; }
+  50% { box-shadow: 3px 3px 0 #6b7280, 0 0 14px rgba(59,130,246,0.4); }
+}
+@keyframes rps-timer-danger {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
+}
+@keyframes rps-taunt-slide {
+  0% { opacity: 0; transform: translateX(20px); }
+  20% { opacity: 1; transform: translateX(0); }
+  80% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(-20px); }
+}
+@keyframes rps-timebonus-pop {
+  0% { opacity: 0; transform: scale(0.5); }
+  30% { opacity: 1; transform: scale(1.2); }
+  70% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.8); }
+}
+@keyframes rps-reaction-pop {
+  0% { opacity: 0; transform: scale(0) rotate(-20deg); }
+  40% { opacity: 1; transform: scale(1.3) rotate(5deg); }
+  100% { opacity: 0; transform: scale(0.5) translateY(-20px); }
 }
 `
 

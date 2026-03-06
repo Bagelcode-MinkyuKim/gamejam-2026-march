@@ -85,7 +85,7 @@ function toComboMultiplier(combo: number): number {
   return 2 ** Math.floor(combo / 10)
 }
 
-function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+function ComboFormulaGame({ onFinish, onExit: _onExit, bestScore = 0 }: MiniGameSessionProps) {
   const [score, setScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [combo, setCombo] = useState(0)
@@ -354,11 +354,6 @@ function ComboFormulaGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
     syncRecipeByScoreAndMode(nextScore, feverRemainingRef.current > 0, now)
   }, [playAudio, syncRecipeByScoreAndMode, triggerClearPulse, triggerOkLockedShake])
-
-  const handleExit = useCallback(() => {
-    playAudio(exitAudioRef, 0.42, 1.02)
-    onExit()
-  }, [onExit, playAudio])
 
   useEffect(() => {
     for (const token of CHARACTER_POOL) {

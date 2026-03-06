@@ -14,6 +14,11 @@ import hookShootSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-hook-shoo
 import jumpSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-jump.mp3'
 import coinSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-coin.mp3'
 import hitSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-hit.mp3'
+import springSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-spring.mp3'
+import boostSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-boost.mp3'
+import iceSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-ice.mp3'
+import crumbleSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-crumble.mp3'
+import fallSfx from '../../../assets/sounds/gogunbuntu/gogunbuntu-fall.mp3'
 import bgmLoop from '../../../assets/sounds/gogunbuntu/gogunbuntu-bgm-loop.mp3'
 
 const STAGE_VIEW_WIDTH = 360
@@ -61,8 +66,8 @@ const OBSTACLE_MAX_HEIGHT = 230
 const OBSTACLE_SIZE = 58
 const OBSTACLE_COLLIDER_RADIUS = 20
 
-const COIN_RADIUS = 16
-const COIN_SIZE = 36
+const COIN_RADIUS = 26
+const COIN_SIZE = 56
 
 const CAMERA_LEAD_X = 132
 const WORLD_AHEAD_PADDING = 1160
@@ -81,10 +86,12 @@ const GOGUNBUNTU_PLAYER_SKINS = [
   {
     name: 'Kim Yeonja',
     imageSrc: kimYeonjaDotCharacter,
+    flipX: true,
   },
   {
     name: 'Park Sangmin',
     imageSrc: parkSangminDotCharacter,
+    flipX: false,
   },
 ] as const
 
@@ -180,6 +187,9 @@ interface WorldModel {
   jumpCutRequested: boolean
   jumpQueued: boolean
   jumpStartMs: number
+  doubleJumpAvailable: boolean
+  magnetActiveUntil: number
+  shieldActiveUntil: number
   hookQueued: boolean
   hookTargetX: number | null
   hookTargetY: number | null
@@ -320,6 +330,9 @@ function createInitialModel(): WorldModel {
     jumpCutRequested: false,
     jumpQueued: false,
     jumpStartMs: 0,
+    doubleJumpAvailable: false,
+    magnetActiveUntil: 0,
+    shieldActiveUntil: 0,
     hookQueued: false,
     hookTargetX: null,
     hookTargetY: null,
@@ -599,6 +612,13 @@ function trimWorld(model: WorldModel): void {
 function performJump(model: WorldModel): boolean {
   const canJump = model.grounded || model.coyoteMs > 0
   if (!canJump) {
+    if (model.doubleJumpAvailable) {
+      model.doubleJumpAvailable = false
+      model.playerVy = JUMP_VELOCITY * 0.85
+      model.jumpStartMs = model.elapsedMs
+      model.jumpBufferMs = 0
+      return true
+    }
     return false
   }
 
@@ -607,7 +627,6 @@ function performJump(model: WorldModel): boolean {
   model.coyoteMs = 0
   model.jumpStartMs = model.elapsedMs
   model.jumpBufferMs = 0
-  model.statusText = 'Jump!'
   return true
 }
 
@@ -736,6 +755,11 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const jumpAudioRef = useRef<HTMLAudioElement | null>(null)
   const coinAudioRef = useRef<HTMLAudioElement | null>(null)
   const hitAudioRef = useRef<HTMLAudioElement | null>(null)
+  const springAudioRef = useRef<HTMLAudioElement | null>(null)
+  const boostAudioRef = useRef<HTMLAudioElement | null>(null)
+  const iceAudioRef = useRef<HTMLAudioElement | null>(null)
+  const crumbleAudioRef = useRef<HTMLAudioElement | null>(null)
+  const fallAudioRef = useRef<HTMLAudioElement | null>(null)
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
   const isAudioUnlockedRef = useRef(false)
 
@@ -896,6 +920,26 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     hitAudio.preload = 'auto'
     hitAudioRef.current = hitAudio
 
+    const springAudio = new Audio(springSfx)
+    springAudio.preload = 'auto'
+    springAudioRef.current = springAudio
+
+    const boostAudio = new Audio(boostSfx)
+    boostAudio.preload = 'auto'
+    boostAudioRef.current = boostAudio
+
+    const iceAudio = new Audio(iceSfx)
+    iceAudio.preload = 'auto'
+    iceAudioRef.current = iceAudio
+
+    const crumbleAudio = new Audio(crumbleSfx)
+    crumbleAudio.preload = 'auto'
+    crumbleAudioRef.current = crumbleAudio
+
+    const fallAudio = new Audio(fallSfx)
+    fallAudio.preload = 'auto'
+    fallAudioRef.current = fallAudio
+
     const bgmAudio = new Audio(bgmLoop)
     bgmAudio.preload = 'auto'
     bgmAudio.loop = true
@@ -903,7 +947,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     bgmAudioRef.current = bgmAudio
 
     return () => {
-      for (const audio of [hookShootAudio, jumpAudio, coinAudio, hitAudio, bgmAudio]) {
+      for (const audio of [hookShootAudio, jumpAudio, coinAudio, hitAudio, springAudio, boostAudio, iceAudio, crumbleAudio, fallAudio, bgmAudio]) {
         audio.pause()
         audio.currentTime = 0
       }
@@ -1094,15 +1138,15 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
                     targetGround.crumbleActive = true
                     currentModel.grounded = false
                     currentModel.coyoteMs = 0
-                    currentModel.statusText = 'Platform collapse!'
+                    playSfx(crumbleAudioRef.current, 0.5)
                   }
                   break
                 case 'spring':
                   currentModel.playerVy = SPRING_BOOST
                   currentModel.grounded = false
                   currentModel.coyoteMs = 0
-                  currentModel.statusText = 'Spring!'
                   pushBurst(currentModel, 'spark', currentModel.playerX, currentModel.playerY)
+                  playSfx(springAudioRef.current, 0.5)
                   break
                 case 'ice':
                   currentModel.playerVx = Math.max(currentModel.playerVx * ICE_DRAG, currentModel.speed * 0.6)
@@ -1117,6 +1161,9 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
                   break
                 }
                 case 'boost':
+                  if (currentModel.playerVx < currentModel.speed + BOOST_SPEED_BONUS) {
+                    playSfx(boostAudioRef.current, 0.45)
+                  }
                   currentModel.playerVx = Math.max(currentModel.playerVx, currentModel.speed + BOOST_SPEED_BONUS)
                   break
                 case 'gravity':
@@ -1185,6 +1232,7 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             currentModel.playerY = landingY
             currentModel.playerVy = 0
             currentModel.grounded = true
+            currentModel.doubleJumpAvailable = true
             currentModel.coyoteMs = COYOTE_TIME_MS
             if (!previousGrounded) {
               currentModel.comboChain = 0
@@ -1213,12 +1261,14 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           pushBurst(currentModel, 'smoke', currentModel.playerX - 18, currentModel.playerY + 8)
         }
 
+        const isMagnetActive = currentModel.elapsedMs < currentModel.magnetActiveUntil
+        const collectRadius = isMagnetActive ? PLAYER_COLLIDER_RADIUS + 80 : PLAYER_COLLIDER_RADIUS
         let didCollectCoin = false
         currentModel.coins = currentModel.coins.filter((coin) => {
           const isHit = collideCircles(
             currentModel.playerX,
             currentModel.playerY + 14,
-            PLAYER_COLLIDER_RADIUS,
+            collectRadius,
             coin.x,
             coin.y,
             COIN_RADIUS,
@@ -1226,9 +1276,18 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
           if (isHit) {
             currentModel.coinsCollected += 1
-            currentModel.statusText = `Coin collected +${SCORE_COIN_BONUS}`
             pushBurst(currentModel, 'spark', coin.x, coin.y)
             didCollectCoin = true
+            if (currentModel.coinsCollected % 8 === 0) {
+              const powerRoll = Math.random()
+              if (powerRoll < 0.4) {
+                currentModel.magnetActiveUntil = currentModel.elapsedMs + 5000
+              } else if (powerRoll < 0.7) {
+                currentModel.shieldActiveUntil = currentModel.elapsedMs + 6000
+              } else {
+                currentModel.doubleJumpAvailable = true
+              }
+            }
             return false
           }
 
@@ -1262,12 +1321,18 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         })
 
         if (isObstacleHit) {
-          finishRound('Obstacle hit!', true)
-          animationFrameRef.current = null
-          return
+          if (currentModel.elapsedMs < currentModel.shieldActiveUntil) {
+            currentModel.shieldActiveUntil = 0
+            pushBurst(currentModel, 'spark', currentModel.playerX, currentModel.playerY + 20)
+          } else {
+            finishRound('Obstacle hit!', true)
+            animationFrameRef.current = null
+            return
+          }
         }
 
         if (currentModel.playerY < -GROUND_SCREEN_OFFSET - PLAYER_HEIGHT) {
+          playSfx(fallAudioRef.current, 0.6)
           finishRound('Fell off the platform!', true)
           animationFrameRef.current = null
           return
@@ -1347,18 +1412,33 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         onPointerCancel={handleStagePointerCancel}
         role="presentation"
       >
+        <div className="gogunbuntu-bg-sky" />
         <div
-          className="gogunbuntu-bg-layer far"
+          className="gogunbuntu-bg-layer depth-1"
           style={{
             backgroundImage: `url(${gogunbuntuBg})`,
-            backgroundPositionX: `${-renderState.cameraX * 0.16 * viewportScale}px`,
+            backgroundPositionX: `${-renderState.cameraX * 0.06 * viewportScale}px`,
           }}
         />
         <div
-          className="gogunbuntu-bg-layer near"
+          className="gogunbuntu-bg-layer depth-2"
           style={{
             backgroundImage: `url(${gogunbuntuBg})`,
-            backgroundPositionX: `${-renderState.cameraX * 0.34 * viewportScale}px`,
+            backgroundPositionX: `${-renderState.cameraX * 0.15 * viewportScale}px`,
+          }}
+        />
+        <div
+          className="gogunbuntu-bg-layer depth-3"
+          style={{
+            backgroundImage: `url(${gogunbuntuBg})`,
+            backgroundPositionX: `${-renderState.cameraX * 0.3 * viewportScale}px`,
+          }}
+        />
+        <div className="gogunbuntu-bg-particles" />
+        <div
+          className="gogunbuntu-bg-ground-streak"
+          style={{
+            backgroundPositionX: `${-renderState.cameraX * 0.85 * viewportScale}px`,
           }}
         />
 
@@ -1538,12 +1618,12 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             top: playerScreen.top,
             width: playerRenderWidth,
             height: playerRenderHeight,
-            transform: `rotate(${clampNumber(
+            transform: `${selectedPlayerSkin.flipX ? 'scaleX(-1) ' : ''}rotate(${clampNumber(
               renderState.rope.active
-                ? Math.atan2(-renderState.playerVy, renderState.playerVx) * (180 / Math.PI) * 0.35
+                ? Math.atan2(selectedPlayerSkin.flipX ? renderState.playerVy : -renderState.playerVy, renderState.playerVx) * (180 / Math.PI) * 0.35
                 : renderState.grounded
                   ? 0
-                  : renderState.playerVy * -0.005,
+                  : renderState.playerVy * (selectedPlayerSkin.flipX ? 0.005 : -0.005),
               -20, 20,
             ).toFixed(1)}deg)`,
           }}
