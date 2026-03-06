@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
 import { GameHubUseCases } from '../application/game-hub-use-cases'
-import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
+import { AUDIO_ENABLED, HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
 import { miniGameManifests, miniGameModuleById } from '../minigames/registry'
 import { LocalStorageProgressStore } from '../infrastructure/local-storage-progress-store'
@@ -19,6 +19,7 @@ import gameOverHitSfx from '../../assets/sounds/game-over-hit.mp3'
 import newRecordFanfareSfx from '../../assets/sounds/new-record-fanfare.mp3'
 import uiButtonPopSfx from '../../assets/sounds/ui-button-pop.mp3'
 import resultCoinRollSfx from '../../assets/sounds/result-coin-roll.mp3'
+import loadingGameImage from '../../Pixel Image/Game.png'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
 const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
@@ -37,7 +38,7 @@ const COUNTDOWN_GUIDE_BY_GAME_ID: Record<MiniGameId, string> = {
   'timing-shot': '타이밍에 맞춰 정확하게 탭해서 높은 점수를 노리세요.',
   'lane-dodge': '레인을 바꿔 장애물을 피하고 오래 버틸수록 점수가 올라갑니다.',
   'run-run': '좌우 전환 타이밍을 맞춰 코스 밖으로 벗어나지 않게 달리세요.',
-  'same-character': '같은 캐릭터를 빠르게 찾아 선택하면 콤보가 쌓입니다.',
+  'same-character': 'Pick the matching character quickly to build your combo.',
 }
 
 interface RoundSettlement {
@@ -82,6 +83,7 @@ export function GameHubApp() {
   const [error, setError] = useState<string | null>(null)
   const [countdownStepIndex, setCountdownStepIndex] = useState<number | null>(null)
   const [isAudioReady, setAudioReady] = useState(false)
+  const isAudioMuted = false
 
   useEffect(() => {
     void reload(useCases, DEFAULT_SELECTED_GAME_ID, null, setSnapshot, setError)
@@ -135,13 +137,13 @@ export function GameHubApp() {
     resultRollAnimationFrameRef.current = window.requestAnimationFrame(animate)
 
     if (isAudioReady) {
-      playOneShotAudio(resultCoinRollSfx, 0.58)
+      playOneShotAudio(resultCoinRollSfx, 0.58, isAudioMuted)
     }
 
     if (settlement.newBestScore) {
       setIsNewBestEffectActive(true)
       if (isAudioReady) {
-        playOneShotAudio(newRecordFanfareSfx, 0.8)
+        playOneShotAudio(newRecordFanfareSfx, 0.8, isAudioMuted)
       }
       newBestEffectTimerRef.current = window.setTimeout(() => {
         setIsNewBestEffectActive(false)
@@ -155,7 +157,7 @@ export function GameHubApp() {
       clearAnimationFrame(resultRollAnimationFrameRef)
       clearTimeoutSafe(newBestEffectTimerRef)
     }
-  }, [isAudioReady, resultGameId, settlement])
+  }, [isAudioMuted, isAudioReady, resultGameId, settlement])
 
   useEffect(() => {
     if (activeGameId === null || countdownStepIndex === null) {
@@ -186,23 +188,25 @@ export function GameHubApp() {
   }, [activeGameId, countdownStepIndex])
 
   useEffect(() => {
-    if (!isAudioReady) {
+    if (!AUDIO_ENABLED || !isAudioReady || isAudioMuted) {
+      stopBackgroundAudio(bgmAudioRef, bgmTrackRef)
       return
     }
 
-    const isTapDashLivePlay = activeGameId === 'tap-dash' && countdownStepIndex === null
-    if (isTapDashLivePlay) {
+    const isModuleOwnedBgmLivePlay =
+      countdownStepIndex === null && (activeGameId === 'tap-dash' || activeGameId === 'same-character')
+    if (isModuleOwnedBgmLivePlay) {
       stopBackgroundAudio(bgmAudioRef, bgmTrackRef)
       return
     }
 
     const nextTrack = activeGameId !== null ? gameplayBgmLoop : resultGameId !== null ? resultBgmLoop : defaultBgmLoop
     const nextVolume = activeGameId !== null ? 0.26 : resultGameId !== null ? 0.32 : 0.3
-    playBackgroundAudio(nextTrack, nextVolume, bgmAudioRef, bgmTrackRef)
-  }, [activeGameId, countdownStepIndex, isAudioReady, resultGameId])
+    playBackgroundAudio(nextTrack, nextVolume, bgmAudioRef, bgmTrackRef, isAudioMuted)
+  }, [activeGameId, countdownStepIndex, isAudioMuted, isAudioReady, resultGameId])
 
   useEffect(() => {
-    if (!isAudioReady || activeGameId === null || countdownStepIndex === null) {
+    if (!AUDIO_ENABLED || !isAudioReady || isAudioMuted || activeGameId === null || countdownStepIndex === null) {
       lastCountdownSoundStepRef.current = null
       return
     }
@@ -213,31 +217,31 @@ export function GameHubApp() {
     lastCountdownSoundStepRef.current = countdownStepIndex
 
     const isStartStep = countdownStepIndex === GAME_START_COUNTDOWN_LABELS.length - 1
-    playOneShotAudio(isStartStep ? countdownStartSfx : countdownTickSfx, isStartStep ? 0.72 : 0.54)
-  }, [activeGameId, countdownStepIndex, isAudioReady])
+    playOneShotAudio(isStartStep ? countdownStartSfx : countdownTickSfx, isStartStep ? 0.72 : 0.54, isAudioMuted)
+  }, [activeGameId, countdownStepIndex, isAudioMuted, isAudioReady])
 
   useEffect(() => {
-    if (!isAudioReady || gameOverOverlay === null) {
+    if (!AUDIO_ENABLED || !isAudioReady || isAudioMuted || gameOverOverlay === null) {
       return
     }
-    playOneShotAudio(gameOverHitSfx, 0.76)
-  }, [gameOverOverlay, isAudioReady])
+    playOneShotAudio(gameOverHitSfx, 0.76, isAudioMuted)
+  }, [gameOverOverlay, isAudioMuted, isAudioReady])
 
   const uiModel = snapshot ? projectHubUi(snapshot) : null
   const selectedCard = snapshot?.cards.find((card) => card.manifest.id === selectedGameId) ?? null
   const isInGameView = activeGameId !== null
 
   const activateAudio = () => {
-    if (!isAudioReady) {
+    if (AUDIO_ENABLED && !isAudioReady) {
       setAudioReady(true)
     }
   }
 
   const playUiClickSfx = () => {
-    if (!isAudioReady) {
+    if (!isAudioReady || isAudioMuted) {
       return
     }
-    playOneShotAudio(uiButtonPopSfx, 0.64)
+    playOneShotAudio(uiButtonPopSfx, 0.64, isAudioMuted)
   }
 
   const selectGame = async (gameId: MiniGameId) => {
@@ -394,7 +398,7 @@ export function GameHubApp() {
   return (
     <main className={`game-shell ${isInGameView ? 'game-immersive' : ''}`}>
       <section className={`hub-frame ${isInGameView ? 'game-immersive' : ''}`} aria-label="mini-game-hub">
-        {isInGameView ? null : (
+        {isInGameView || snapshot === null ? null : (
           <header className="hub-header">
             <div>
               <p className="eyebrow">MINI HEAVEN</p>
@@ -409,7 +413,11 @@ export function GameHubApp() {
         ) : null}
         {error !== null && !isInGameView ? <p className="error-toast">{error}</p> : null}
 
-        {activeGameId !== null && activeModule ? (
+        {snapshot === null ? (
+          <section className="hub-loading-panel" aria-label="game-loading-screen">
+            <img className="hub-loading-image" src={loadingGameImage} alt="Game" />
+          </section>
+        ) : activeGameId !== null && activeModule ? (
           <section className="game-live-shell" aria-label="mini-game-live-shell">
             {isCountdownActive && countdownLabel !== null ? (
               <section
@@ -427,6 +435,7 @@ export function GameHubApp() {
                 onFinish={finishMiniGame}
                 onExit={exitMiniGame}
                 bestScore={activeCard?.bestScore ?? 0}
+                isAudioMuted={isAudioMuted}
               />
             )}
             {gameOverOverlay !== null ? (
@@ -544,7 +553,10 @@ export function GameHubApp() {
   )
 }
 
-function playOneShotAudio(src: string, volume: number): void {
+function playOneShotAudio(src: string, volume: number, isAudioMuted: boolean): void {
+  if (!AUDIO_ENABLED || isAudioMuted) {
+    return
+  }
   const sound = new Audio(src)
   sound.preload = 'auto'
   sound.volume = volume
@@ -556,7 +568,13 @@ function playBackgroundAudio(
   volume: number,
   audioRef: MutableRefObject<HTMLAudioElement | null>,
   trackRef: MutableRefObject<string | null>,
+  isAudioMuted: boolean,
 ): void {
+  if (!AUDIO_ENABLED || isAudioMuted) {
+    stopBackgroundAudio(audioRef, trackRef)
+    return
+  }
+
   if (trackRef.current === src && audioRef.current !== null) {
     audioRef.current.volume = volume
     return

@@ -5,6 +5,7 @@ export interface MiniGameSessionProps {
   readonly onFinish: (result: MiniGameResult) => void
   readonly onExit: () => void
   readonly bestScore?: number
+  readonly isAudioMuted?: boolean
 }
 
 export interface MiniGameModule {

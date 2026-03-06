@@ -11,6 +11,8 @@ export const MINI_GAME_STAGE_HEIGHT = 420
 export const DEFAULT_GAME_FPS = 60
 export const DEFAULT_FRAME_MS = 1000 / DEFAULT_GAME_FPS
 export const MAX_FRAME_DELTA_MS = DEFAULT_FRAME_MS * 4
+export const AUDIO_ENABLED = true
+export const AUDIO_MUTE_STORAGE_KEY = 'bagel-miniheaven-audio-muted-v1'
 
 export const HUB_BOOTSTRAP_CONFIG = {
   initialCoins: 30,

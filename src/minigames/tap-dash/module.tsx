@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
-import { MAX_FRAME_DELTA_MS } from '../../primitives/constants'
+import { AUDIO_ENABLED, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import kimYeonjaSprite from '../../../assets/images/same-character/kim-yeonja.png'
 import parkSangminSprite from '../../../assets/images/same-character/park-sangmin.png'
 import parkWankyuSprite from '../../../assets/images/same-character/park-wankyu.png'
@@ -190,7 +190,7 @@ function createHeartPickup(heartId: number): HeartPickup {
   }
 }
 
-function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+function TapDashGame({ onFinish, onExit, bestScore = 0, isAudioMuted = false }: MiniGameSessionProps) {
   const [effectPresetId, setEffectPresetId] = useState<EffectPresetId>('medium')
   const [currentScore, setCurrentScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
@@ -234,6 +234,7 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   const superFeverEndsAtRef = useRef(0)
   const nextSuperFeverComboRef = useRef(SUPER_FEVER_INITIAL_TRIGGER_COMBO)
   const lastLowTimeAlertSecondRef = useRef<number | null>(null)
+  const isAudioMutedRef = useRef(isAudioMuted)
   const tapHitAudioRef = useRef<HTMLAudioElement | null>(null)
   const tapHitStrongAudioRef = useRef<HTMLAudioElement | null>(null)
   const feverBoostAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -251,6 +252,10 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
       image.decoding = 'sync'
       image.src = src
       void image.decode?.().catch(() => {})
+    }
+
+    if (!AUDIO_ENABLED) {
+      return
     }
 
     const tapAudio = new Audio(tapHitSfx)
@@ -306,6 +311,10 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
     superFeverBgmAudioRef.current = superFeverBgmAudio
   }, [])
 
+  useEffect(() => {
+    isAudioMutedRef.current = isAudioMuted
+  }, [isAudioMuted])
+
   const clearHeartSpawnTimer = useCallback(() => {
     if (heartSpawnTimerRef.current !== null) {
       window.clearTimeout(heartSpawnTimerRef.current)
@@ -339,6 +348,10 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
       source: HTMLAudioElement | null,
       options?: Readonly<{ volumeScale?: number; playbackRateMin?: number; playbackRateMax?: number }>,
     ) => {
+      if (!AUDIO_ENABLED || isAudioMutedRef.current) {
+        return
+      }
+
       if (source === null) {
         return
       }
@@ -401,6 +414,10 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   }, [])
 
   const playGameplayBgm = useCallback(() => {
+    if (!AUDIO_ENABLED || isAudioMutedRef.current) {
+      return
+    }
+
     const source = gameplayBgmAudioRef.current
     if (source === null) {
       return
@@ -424,6 +441,10 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
   }, [])
 
   const playSuperFeverBgm = useCallback(() => {
+    if (!AUDIO_ENABLED || isAudioMutedRef.current) {
+      return
+    }
+
     const source = superFeverBgmAudioRef.current
     if (source === null) {
       return
@@ -432,6 +453,25 @@ function TapDashGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
     source.currentTime = 0
     void source.play().catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (isAudioMuted) {
+      stopGameplayBgm()
+      stopSuperFeverBgm()
+      return
+    }
+
+    if (!AUDIO_ENABLED || finishedRef.current) {
+      return
+    }
+
+    if (superFeverActiveRef.current) {
+      playSuperFeverBgm()
+      return
+    }
+
+    playGameplayBgm()
+  }, [isAudioMuted, playGameplayBgm, playSuperFeverBgm, stopGameplayBgm, stopSuperFeverBgm])
 
   const triggerTimeBoostFeedback = useCallback(
     (label: string) => {
