@@ -10,6 +10,7 @@ import { cannonShotModule } from './module'
 class FakeAudio {
   static instances: FakeAudio[] = []
 
+  src: string
   preload = ''
   loop = false
   volume = 1
@@ -17,7 +18,8 @@ class FakeAudio {
   playbackRate = 1
   paused = true
 
-  constructor(readonly src = '') {
+  constructor(src = '') {
+    this.src = src
     FakeAudio.instances.push(this)
   }
 

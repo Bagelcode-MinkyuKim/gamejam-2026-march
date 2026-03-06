@@ -101,8 +101,6 @@ const ERUPT_W = 44
 // ─── Fire bat enemy ───
 const BAT_SIZE = 20
 const BAT_SPEED_BASE = 50
-const BAT_SPAWN_AFTER = 12000
-
 // ─── Sink platform ───
 const SINK_SPEED = 18 // px/s sinking
 
@@ -324,7 +322,7 @@ function PixelBat({ bat, t }: { bat: FireBat; t: number }) {
 // ═══════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════
-function LavaFloorGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
+function LavaFloorGame({ onFinish, onExit: _onExit, bestScore = 0 }: MiniGameSessionProps) {
   const effects = useGameEffects()
   const [score, setScore] = useState(0)
   const [platforms, setPlatforms] = useState<Platform[]>([])

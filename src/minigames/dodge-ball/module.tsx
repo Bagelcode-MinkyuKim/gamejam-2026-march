@@ -624,7 +624,7 @@ function DodgeBallGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         .db-hud { display:flex; justify-content:space-between; align-items:flex-start; width:100%; padding:10px 12px; background:${PAL.bg1}; border-bottom:3px solid ${PAL.dark}; z-index:10; flex-shrink:0; gap:6px; }
         .db-hud-col { display:flex; flex-direction:column; align-items:center; gap:3px; }
 
-        .db-score { font-size:36px; color:${PAL.yellow}; margin:0; line-height:1.2; text-shadow: 3px 3px ${PAL.black}; }
+        .db-score { font-size:28px; color:${PAL.yellow}; margin:0; line-height:1.2; text-shadow: 3px 3px ${PAL.black}; }
         .db-best { font-size:9px; color:${PAL.mid}; margin:0; }
         .db-time { font-size:22px; color:${PAL.white}; margin:0; text-shadow: 2px 2px ${PAL.black}; }
         .db-stage-label { font-size:12px; color:${PAL.cyan}; margin:0; text-shadow: 1px 1px ${PAL.black}; }
@@ -668,8 +668,8 @@ function DodgeBallGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       {/* ── HUD ── */}
       <div className="db-hud">
         <div className="db-hud-col">
-          <p className="db-score">{String(score).padStart(6, '0')}</p>
-          <p className="db-best">HI {String(displayedBest).padStart(6, '0')}</p>
+          <p className="db-score">{score}</p>
+          <p className="db-best">HI {displayedBest}</p>
           {hasScoreMult && <p className="db-mult">x2 {(scoreMultTimerMs / 1000).toFixed(0)}s</p>}
         </div>
         <div className="db-hud-col">

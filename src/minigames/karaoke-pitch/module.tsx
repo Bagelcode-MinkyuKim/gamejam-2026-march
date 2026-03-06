@@ -22,12 +22,6 @@ import slideSfx from '../../../assets/sounds/karaoke-slide.mp3'
 const ROUND_DURATION_MS = 45000
 const LOW_TIME_THRESHOLD_MS = 7000
 
-// Life system
-const MAX_LIVES = 5
-const MISS_LIFE_PENALTY = 1
-const ACCURACY_MISS_DRAIN_PER_SEC = 0.8
-const LIFE_REGEN_PER_PERFECT_SEC = 0.15
-
 // Accuracy thresholds (distance between player & target, 0~1 range)
 const ACCURACY_PERFECT_THRESHOLD = 0.06
 const ACCURACY_GOOD_THRESHOLD = 0.15
@@ -62,14 +56,8 @@ const SINE_SECONDARY_PERIOD_RATIO = 2.73
 
 // Note lanes (notes scroll from right to left) — difficulty scales these
 const BASE_NOTE_SPAWN_INTERVAL_MS = 2400
-const MIN_NOTE_SPAWN_INTERVAL_MS = 800
 const BASE_NOTE_SPEED = 0.00032
-const MAX_NOTE_SPEED = 0.00065
 const NOTE_HIT_ZONE = 0.14 // x position range for hitting (wider for bigger notes)
-
-// Difficulty scaling
-const DIFFICULTY_RAMP_START_MS = 5000
-const DIFFICULTY_RAMP_FULL_MS = 120000 // full difficulty at 2 min
 
 // Bonus items
 const BONUS_INTERVAL_MS = 4000
@@ -84,10 +72,6 @@ const POWERUP_EFFECT_DURATION_MS = 5000
 type PowerUpType = 'double' | 'shield' | 'magnet'
 const POWERUP_ICONS: Record<PowerUpType, string> = { double: '2x', shield: '[]', magnet: '<>' }
 const POWERUP_COLORS: Record<PowerUpType, string> = { double: '#facc15', shield: '#38bdf8', magnet: '#a855f7' }
-
-// Bomb notes (new feature)
-const BOMB_CHANCE_BASE = 0.05 // 5% at start
-const BOMB_CHANCE_MAX = 0.20 // 20% at max difficulty
 
 // Retro pixel palette
 const PIXEL_BG_DARK = '#0a0a18'

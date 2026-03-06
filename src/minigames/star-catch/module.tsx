@@ -70,6 +70,9 @@ const STAR_SHOWER_COUNT = 8
 
 const WAVE_INTERVAL_MS = 10000
 
+const ROUND_DURATION_MS = 60000
+const LOW_TIME_THRESHOLD_MS = 10000
+
 const CATCH_FLASH_DURATION_MS = 180
 const MISS_FLASH_DURATION_MS = 250
 
@@ -193,7 +196,8 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
   const [wave, setWave] = useState(0)
-  const [lives, setLives] = useState(MAX_LIVES)
+  const [_lives, _setLives] = useState(MAX_LIVES)
+  const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [basketX, setBasketX] = useState(ARENA_WIDTH / 2)
   const [items, setItems] = useState<FallingItem[]>([])
   const [catchFlash, setCatchFlash] = useState<'good' | 'great' | 'bad' | 'power' | null>(null)
@@ -210,7 +214,6 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const comboRef = useRef(0)
   const maxComboRef = useRef(0)
   const waveRef = useRef(0)
-  const livesRef = useRef(MAX_LIVES)
   const elapsedMsRef = useRef(0)
   const basketXRef = useRef(ARENA_WIDTH / 2)
   const itemsRef = useRef<FallingItem[]>([])
@@ -236,6 +239,8 @@ function StarCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const bgStarsRef = useRef(bgStars)
   const pixelExplosionsRef = useRef<PixelExplosion[]>([])
   const globalTimeRef = useRef(0)
+  const remainingMsRef = useRef(ROUND_DURATION_MS)
+  const lowTimeSecondRef = useRef<number | null>(null)
 
   // Audio refs
   const catchAudioRef = useRef<HTMLAudioElement | null>(null)

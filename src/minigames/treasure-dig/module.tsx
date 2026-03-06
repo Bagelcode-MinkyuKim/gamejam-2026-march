@@ -29,8 +29,6 @@ import shieldItemImg from '../../../assets/images/treasure-dig/shield.png'
 import mapItemImg from '../../../assets/images/treasure-dig/map.png'
 import chainImg from '../../../assets/images/treasure-dig/chain.png'
 import luckyImg from '../../../assets/images/treasure-dig/lucky.png'
-import lobbyIconImg from '../../../assets/images/treasure-dig/lobby-icon.png'
-
 // ─── Pixel Art Emoji fallbacks (for particles/bonus text) ───
 const PIXEL_PICKAXE = '\u{26CF}\uFE0F'
 const PIXEL_GEM = '\u{1F48E}'

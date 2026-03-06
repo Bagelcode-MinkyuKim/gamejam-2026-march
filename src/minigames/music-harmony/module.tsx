@@ -325,7 +325,7 @@ function MusicHarmonyGame({ onFinish, onExit: _onExit, bestScore: _bestScore = 0
       if (perfectStreakRef.current >= 3) playSfx(streakSfxSrc, 0.4)
     } else { perfectStreakRef.current = 0; setPerfectStreak(0) }
     scoreRef.current += tp; setScore(scoreRef.current); setLastScoreGain(tp)
-    effects.spawnParticles(50, 50, NOTES[currentChordRef.current[0]].color)
+    effects.spawnParticles(10, 50, 50, [NOTES[currentChordRef.current[0]].pixel])
     effects.showScorePopup(tp, 50, 35)
     if (hb) effects.triggerFlash('#ffd700')
     try { play8bitJingle(getAc(), true) } catch { /* */ }

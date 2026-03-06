@@ -114,7 +114,6 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const [orderRemainingMs, setOrderRemainingMs] = useState(ORDER_TIMER_BASE_MS)
   const [isFever, setIsFever] = useState(false)
   const [feverMs, setFeverMs] = useState(0)
-  const [perfectCount, setPerfectCount] = useState(0)
   const [lastDishText, setLastDishText] = useState('')
   const [activePowerUp, setActivePowerUp] = useState<PowerUpType | null>(null)
   const [powerUpMs, setPowerUpMs] = useState(0)
@@ -361,7 +360,6 @@ function CookingRushGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           let perfectBonus = 0
           if (isPerfect) {
             perfectCountRef.current += 1
-            setPerfectCount(perfectCountRef.current)
             perfectBonus = PERFECT_BONUS
           }
 
