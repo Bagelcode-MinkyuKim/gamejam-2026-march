@@ -379,11 +379,6 @@ function MusicHarmonyGame({ onFinish, onExit: _onExit, bestScore: _bestScore = 0
     if (tgt.size === sel.size && [...tgt].every(n => sel.has(n))) handleCorrect(); else handleWrong()
   }, [handleCorrect, handleWrong])
 
-  const handleReplay = useCallback(() => {
-    if (phaseRef.current !== 'select' || finishedRef.current) return
-    try { playChord(getAc(), currentChordRef.current, TONE_DURATION_S, TONE_VOLUME) } catch { /* */ }
-  }, [getAc])
-
   const handleHint = useCallback(() => {
     if (phaseRef.current !== 'select' || finishedRef.current || hintsLeftRef.current <= 0) return
     hintsLeftRef.current -= 1; setHintsLeft(hintsLeftRef.current)
@@ -474,7 +469,6 @@ function MusicHarmonyGame({ onFinish, onExit: _onExit, bestScore: _bestScore = 0
           })}
         </div>
         <div className="mh-bottom-row">
-          <button className="mh-btn replay" disabled={!canPlay} onPointerDown={handleReplay}>REPLAY</button>
           <button className="mh-btn hint" disabled={!canPlay || hintsLeft <= 0} onPointerDown={handleHint}>HINT({hintsLeft})</button>
           <button className="mh-btn confirm" disabled={!canPlay || selectedNotes.size === 0} onPointerDown={handleSubmit}>OK {selectedNotes.size}/{currentChord.length}</button>
         </div>
