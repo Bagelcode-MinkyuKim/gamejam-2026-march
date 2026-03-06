@@ -637,7 +637,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
   const isLowTime = remainingMs <= LOW_TIME_THRESHOLD_MS
   const displayedBestScore = useMemo(() => Math.max(bestScore, score), [bestScore, score])
   const timerPercent = remainingMs / ROUND_DURATION_MS
-  const hintReady = hintCooldownMs <= 0
+  void hintCooldownMs
 
   const getCellClass = (cell: Cell, index: number): string => {
     const cls = ['td-cell']
@@ -704,14 +704,12 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       {/* Header */}
       <div className="td-hdr">
-        <div className="td-hdr-left">
-          <p className="td-pts">{score.toLocaleString()}</p>
-          <p className="td-best">BEST {displayedBestScore.toLocaleString()}</p>
-        </div>
-        <div className="td-hdr-right">
+        <div className="td-hdr-top">
           <span className="td-depth-badge">D{depth}</span>
+          <p className="td-pts">{score.toLocaleString()}</p>
           <span className="td-gem-count">{PIXEL_GEM}{treasuresFound}</span>
         </div>
+        <p className="td-best">BEST {displayedBestScore.toLocaleString()}</p>
       </div>
 
       {/* Active buffs */}
@@ -774,19 +772,12 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
 
       {/* Bottom */}
       <div className="td-bot">
-        <button
-          className={`td-hint-btn ${hintReady ? '' : 'td-hint-cd'}`}
-          type="button" onClick={activateHint} disabled={!hintReady}
-        >
-          {hintReady ? '\u{1F4A1}HINT' : `${(hintCooldownMs / 1000).toFixed(0)}s`}
-        </button>
         <div className="td-legend">
           <span>{PIXEL_GEM}+{BASE_TREASURE_SCORE}</span>
           <span>{PIXEL_CROWN}+{GOLDEN_TREASURE_SCORE}</span>
           <span>{PIXEL_BOMB}-{BOMB_PENALTY}</span>
           <span>{PIXEL_CLOCK}+{(TIME_GEM_BONUS_MS / 1000).toFixed(0)}s</span>
         </div>
-        <button className="td-exit" type="button" onClick={handleExit}>EXIT</button>
       </div>
 
       <style>{`
@@ -799,7 +790,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           flex-direction: column;
           align-items: center;
           max-width: 432px;
-          aspect-ratio: 9/16;
+          height: 100%;
           margin: 0 auto;
           overflow: hidden;
           position: relative;
@@ -857,7 +848,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         /* ── Timer bar ── */
         .td-tbar-wrap {
           width: 100%;
-          height: 20px;
+          height: 28px;
           background: #1a0f06;
           border-bottom: 2px solid #5c3a1e;
           position: relative;
@@ -881,7 +872,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           right: 6px;
           top: 50%;
           transform: translateY(-50%);
-          font-size: 11px;
+          font-size: 14px;
           font-weight: 900;
           color: #fef3c7;
           text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
@@ -891,46 +882,50 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         /* ── Header ── */
         .td-hdr {
           display: flex;
+          flex-direction: column;
           align-items: center;
-          justify-content: space-between;
           width: 100%;
-          padding: 6px 12px 4px;
+          padding: 8px 12px 6px;
           flex-shrink: 0;
           border-bottom: 2px solid #5c3a1e;
           background: rgba(0,0,0,0.2);
         }
+        .td-hdr-top {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          width: 100%;
+        }
         .td-pts {
-          font-size: clamp(28px, 8vw, 40px);
+          font-size: clamp(36px, 11vw, 56px);
           font-weight: 900;
           color: #fbbf24;
           margin: 0;
-          text-shadow: 2px 2px 0 #78350f, 0 0 12px rgba(251,191,36,0.5);
+          text-shadow: 3px 3px 0 #78350f, 0 0 16px rgba(251,191,36,0.5);
           line-height: 1;
-          letter-spacing: 2px;
+          letter-spacing: 3px;
+          text-align: center;
         }
         .td-best {
-          font-size: 9px;
+          font-size: 11px;
           font-weight: 700;
           color: #92400e;
-          margin: 0;
+          margin: 2px 0 0;
           letter-spacing: 1px;
-        }
-        .td-hdr-right {
-          display: flex;
-          align-items: center;
-          gap: 8px;
+          text-align: center;
         }
         .td-depth-badge {
           background: #7c3aed;
           color: white;
-          font-size: 13px;
+          font-size: 16px;
           font-weight: 900;
-          padding: 2px 8px;
+          padding: 4px 10px;
           border: 2px solid #a855f7;
           letter-spacing: 1px;
         }
         .td-gem-count {
-          font-size: 15px;
+          font-size: 18px;
           font-weight: 900;
           color: #fbbf24;
           text-shadow: 1px 1px 0 #000;
@@ -946,9 +941,9 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           flex-shrink: 0;
         }
         .td-buff {
-          font-size: 10px;
+          font-size: 13px;
           font-weight: 900;
-          padding: 1px 6px;
+          padding: 3px 8px;
           border: 2px solid;
           background: rgba(0,0,0,0.3);
           animation: td-buff-pulse 0.5s steps(2) infinite;
@@ -968,7 +963,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           flex-shrink: 0;
         }
         .td-combo {
-          font-size: 13px;
+          font-size: 16px;
           font-weight: 900;
           color: #fbbf24;
           text-shadow: 1px 1px 0 #000;
@@ -979,7 +974,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           0% { transform: scale(1.6); } 100% { transform: scale(1); }
         }
         .td-fever-label {
-          font-size: 13px;
+          font-size: 16px;
           font-weight: 900;
           color: #ef4444;
           text-shadow: 0 0 8px rgba(239,68,68,0.8), 1px 1px 0 #000;
@@ -1032,9 +1027,9 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           to { transform: scale(1.04); filter: brightness(1.2); }
         }
         .td-item-btn:active { transform: scale(0.92) !important; }
-        .td-item-icon { font-size: 18px; }
-        .td-item-name { font-size: 14px; font-weight: 900; letter-spacing: 2px; }
-        .td-item-tap { font-size: 10px; font-weight: 700; opacity: 0.7; }
+        .td-item-icon { font-size: 22px; }
+        .td-item-name { font-size: 16px; font-weight: 900; letter-spacing: 2px; }
+        .td-item-tap { font-size: 12px; font-weight: 700; opacity: 0.7; }
 
         /* ── Grid ── */
         .td-grid {
@@ -1063,7 +1058,7 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
           justify-content: center;
           border: none;
           cursor: pointer;
-          font-size: clamp(18px, 5vw, 26px);
+          font-size: clamp(22px, 6vw, 32px);
           font-weight: 900;
           font-family: inherit;
           aspect-ratio: 1;
@@ -1233,53 +1228,23 @@ function TreasureDigGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPro
         .td-bot {
           display: flex;
           align-items: center;
-          justify-content: space-between;
+          justify-content: center;
           width: 100%;
-          padding: 6px 10px 8px;
-          gap: 6px;
+          padding: 10px 12px 12px;
+          gap: 8px;
           flex-shrink: 0;
           background: rgba(0,0,0,0.3);
           border-top: 2px solid #5c3a1e;
         }
-        .td-hint-btn {
-          font-family: inherit;
-          font-size: 11px;
-          font-weight: 900;
-          padding: 5px 10px;
-          border: 2px solid #d97706;
-          background: #92400e;
-          color: #fbbf24;
-          cursor: pointer;
-          letter-spacing: 1px;
-          transition: transform 0.1s;
-        }
-        .td-hint-btn:active:not(:disabled) { transform: scale(0.9); }
-        .td-hint-cd {
-          background: #3a302a;
-          border-color: #57534e;
-          color: #78716c;
-          cursor: default;
-        }
         .td-legend {
           display: flex;
-          gap: 6px;
-          font-size: 10px;
+          gap: 10px;
+          font-size: 14px;
           font-weight: 700;
           color: #a8a29e;
           flex-wrap: wrap;
           justify-content: center;
           letter-spacing: 0.5px;
-        }
-        .td-exit {
-          font-family: inherit;
-          font-size: 11px;
-          font-weight: 900;
-          padding: 5px 10px;
-          border: 2px solid #57534e;
-          background: #3a302a;
-          color: #d6d3d1;
-          cursor: pointer;
-          letter-spacing: 1px;
         }
         .td-exit:active { transform: scale(0.9); background: #57534e; }
 

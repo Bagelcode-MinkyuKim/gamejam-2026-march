@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { DEFAULT_FRAME_MS, MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS } from '../shared/game-effects'
-import characterImg from '../../../assets/images/same-character/seo-taiji.png'
+import bgStudioImg from '../../../assets/images/paint-mix/bg-studio.png'
+import iconPaletteImg from '../../../assets/images/paint-mix/icon-palette.png'
 import splashSfx from '../../../assets/sounds/paint-mix-splash.mp3'
 import perfectSfx from '../../../assets/sounds/paint-mix-perfect.mp3'
 import slideSfx from '../../../assets/sounds/paint-mix-slide.mp3'
@@ -25,6 +26,7 @@ const FEVER_DURATION_MS = 10000
 const FEVER_MULTIPLIER = 2
 const PERFECT_THRESHOLD = 90
 const PERFECT_BONUS = 15
+const MIN_ACCURACY_FOR_SCORE = 40
 
 // --- Feature constants ---
 const GOLDEN_COLOR_CHANCE = 0.12
@@ -146,6 +148,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
   const [isGoldenRound, setIsGoldenRound] = useState(false)
   const [isRainbowRound, setIsRainbowRound] = useState(false)
   const [hintAvailable, setHintAvailable] = useState(true)
+  const [sliderTouched, setSliderTouched] = useState(false)
   const [showHints, setShowHints] = useState(false)
   const [screenFlashColor, setScreenFlashColor] = useState('')
   const [lastAccuracyLabel, setLastAccuracyLabel] = useState('')
@@ -335,7 +338,9 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     // Rainbow round bonus
     const rainbowBonus = isRainbowRound && basePoints >= 80 ? RAINBOW_BONUS : 0
 
-    const totalPoints = Math.round((basePoints + speedBonus + perfBonus + rainbowBonus) * comboMult * feverMult * goldenMult)
+    const totalPoints = !sliderTouched || basePoints < MIN_ACCURACY_FOR_SCORE
+      ? 0
+      : Math.round((basePoints + speedBonus + perfBonus + rainbowBonus) * comboMult * feverMult * goldenMult)
 
     const nextScore = scoreRef.current + totalPoints
     scoreRef.current = nextScore
@@ -400,10 +405,11 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
     setSliderB(128)
     colorStartAtRef.current = performance.now()
     setShowHints(false)
+    setSliderTouched(false)
 
     setIsGoldenRound(Math.random() < GOLDEN_COLOR_CHANCE)
     setIsRainbowRound(nextMatched > 0 && nextMatched % RAINBOW_ROUND_INTERVAL === 0)
-  }, [targetIndex, sliderR, sliderG, sliderB, playAudio, isGoldenRound, isRainbowRound, triggerScreenFlash, triggerPixelFill])
+  }, [targetIndex, sliderR, sliderG, sliderB, sliderTouched, playAudio, isGoldenRound, isRainbowRound, triggerScreenFlash, triggerPixelFill])
 
   const handleExit = useCallback(() => {
     onExit()
@@ -518,6 +524,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
   return (
     <section className="mini-game-panel pm-panel" aria-label="paint-mix-game" style={{ position: 'relative', maxWidth: '432px', width: '100%', height: '100%', margin: '0 auto', overflow: 'hidden', ...effects.getShakeStyle() }}>
+      <div className="pm-bg-blur" style={{ backgroundImage: `url(${bgStudioImg})` }} />
       <style>{GAME_EFFECTS_CSS}</style>
       <FlashOverlay isFlashing={effects.isFlashing} flashColor={effects.flashColor} />
       <ParticleRenderer particles={effects.particles} />
@@ -529,7 +536,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
 
       {/* === PIXEL HEADER === */}
       <div className="pm-header">
-        <img className="pm-avatar" src={characterImg} alt="Artist" />
+        <img className="pm-avatar" src={iconPaletteImg} alt="Palette" />
         <div className="pm-header-info">
           <p className="pm-score">{score.toLocaleString()}</p>
           <p className="pm-best">BEST {displayedBestScore.toLocaleString()}</p>
@@ -547,6 +554,9 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         <span className="pm-pixel-stat">{'\u{2B50}'}{perfectCount}</span>
         <span className="pm-pixel-stat">LV{colorPoolSize}</span>
       </div>
+
+      {/* === GAME BODY (centered in remaining space) === */}
+      <div className="pm-game-body">
 
       {/* === BANNERS === */}
       {isFever && (
@@ -642,6 +652,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
                 value={value}
                 onChange={(e) => {
                   setter(Number(e.target.value))
+                  if (!sliderTouched) setSliderTouched(true)
                   playAudio(slideAudioRef, 0.1, 0.8 + Number(e.target.value) / 500)
                 }}
               />
@@ -678,10 +689,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         </div>
       )}
 
-      {/* === FOOTER === */}
-      <button className="pm-pixel-btn pm-hub-btn" type="button" onClick={handleExit}>
-        Hub
-      </button>
+      </div>{/* end pm-game-body */}
 
       <style>{`
         /* ==================== PIXEL ART THEME ==================== */
@@ -695,11 +703,24 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
           -webkit-user-select: none;
           touch-action: manipulation;
           overflow: hidden;
-          background:
-            repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.02) 3px, rgba(0,0,0,0.02) 4px),
-            linear-gradient(180deg, #2d1b69 0%, #4c1d95 8%, #f5f4ef 28%, #ede9df 100%);
           image-rendering: pixelated;
           font-family: 'Courier New', 'Monaco', monospace;
+        }
+
+        .pm-bg-blur {
+          position: absolute;
+          inset: 0;
+          background-size: cover;
+          background-position: center;
+          filter: blur(6px) brightness(0.7);
+          z-index: 0;
+          pointer-events: none;
+          image-rendering: pixelated;
+        }
+
+        .pm-panel > *:not(.pm-bg-blur) {
+          position: relative;
+          z-index: 1;
         }
 
         .pm-screen-flash {
@@ -742,7 +763,7 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         }
 
         .pm-score {
-          font-size: clamp(28px, 7vw, 38px);
+          font-size: clamp(36px, 9vw, 52px);
           font-weight: 900;
           color: #faf5ff;
           margin: 0;
@@ -779,6 +800,18 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         @keyframes pm-blink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
+        }
+
+        /* ---- GAME BODY (centered in remaining space) ---- */
+        .pm-game-body {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          width: 100%;
+          overflow: hidden;
         }
 
         /* ---- STATS BAR ---- */
@@ -1159,15 +1192,6 @@ function PaintMixGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps)
         .pm-feedback-text.good { color: #eab308; }
         .pm-feedback-text.poor { color: #ef4444; }
 
-        /* ---- FOOTER ---- */
-        .pm-hub-btn {
-          font-size: 12px;
-          padding: 8px 20px;
-          background: #f5f4ef;
-          color: #7c3aed;
-          margin-top: auto;
-          margin-bottom: 8px;
-        }
       `}</style>
     </section>
   )

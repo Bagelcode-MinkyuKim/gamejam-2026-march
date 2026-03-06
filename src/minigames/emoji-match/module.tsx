@@ -37,15 +37,28 @@ const FEVER_COMBO_THRESHOLD = 8
 const FEVER_DURATION_MS = 6000
 const FEVER_MULTIPLIER = 3
 
+// Lives
+const INITIAL_LIVES = 3
+const LIFE_EMOJI = '\u{2764}\u{FE0F}'
+const LIFE_EMPTY_EMOJI = '\u{1F5A4}'
+
 // Special items
-const BOMB_CHANCE = 0.07
-const MYSTERY_CHANCE = 0.06
-const FREEZE_CHANCE = 0.05
+const BOMB_CHANCE = 0.06
+const MYSTERY_CHANCE = 0.05
+const FREEZE_CHANCE = 0.04
+const SHIELD_CHANCE = 0.04
+const GOLDEN_CHANCE = 0.03
 const BOMB_EMOJI = '\u{1F4A3}'
 const MYSTERY_EMOJI = '\u{2753}'
 const FREEZE_EMOJI = '\u{2744}\u{FE0F}'
+const SHIELD_EMOJI = '\u{1F6E1}\u{FE0F}'
+const GOLDEN_EMOJI = '\u{1F31F}'
 const FREEZE_DURATION_MS = 3000
+const SHIELD_DURATION_MS = 5000
+const GOLDEN_DURATION_MS = 4000
+const GOLDEN_MULTIPLIER = 5
 
+const COMBO_KEEP_DURATION_MS = 3000
 const COMBO_MILESTONES = [5, 10, 15, 25, 40] as const
 
 // Pixel art item pool — retro game sprites as styled emoji
@@ -55,7 +68,7 @@ const ITEM_POOL = [
   { emoji: '\u{1F48E}', label: 'GEM', color: '#3b82f6' },
   { emoji: '\u{1F451}', label: 'CROWN', color: '#f59e0b' },
   { emoji: '\u{1F525}', label: 'FIRE', color: '#f97316' },
-  { emoji: '\u{26A1}', label: 'BOLT', color: '#facc15' },
+  { emoji: '\u{26A1}\u{FE0F}', label: 'BOLT', color: '#facc15' },
   { emoji: '\u{1F31F}', label: 'GLOW', color: '#a855f7' },
   { emoji: '\u{1F480}', label: 'SKULL', color: '#9ca3af' },
   { emoji: '\u{1F47E}', label: 'ALIEN', color: '#22c55e' },
@@ -94,12 +107,18 @@ function buildGrid(targetIdx: number, poolSize: number): number[] {
       cells.push(targetIdx)
     } else {
       const rand = Math.random()
-      if (rand < BOMB_CHANCE) {
+      let cumulative = 0
+      cumulative += BOMB_CHANCE
+      if (rand < cumulative) {
         cells.push(-1) // bomb
-      } else if (rand < BOMB_CHANCE + MYSTERY_CHANCE) {
+      } else if (rand < (cumulative += MYSTERY_CHANCE)) {
         cells.push(-2) // mystery
-      } else if (rand < BOMB_CHANCE + MYSTERY_CHANCE + FREEZE_CHANCE) {
+      } else if (rand < (cumulative += FREEZE_CHANCE)) {
         cells.push(-3) // freeze
+      } else if (rand < (cumulative += SHIELD_CHANCE)) {
+        cells.push(-4) // shield
+      } else if (rand < (cumulative += GOLDEN_CHANCE)) {
+        cells.push(-5) // golden time
       } else {
         let distractor = Math.floor(Math.random() * poolSize)
         while (distractor === targetIdx) {
@@ -157,7 +176,7 @@ interface FloatText {
   readonly createdAt: number
 }
 
-type CellFB = { index: number; kind: 'correct' | 'wrong' | 'bomb' | 'mystery' | 'freeze' }
+type CellFB = { index: number; kind: 'correct' | 'wrong' | 'bomb' | 'mystery' | 'freeze' | 'shield' | 'golden' }
 
 // Mystery block rewards
 type MysteryReward = 'points' | 'time' | 'fever' | 'doubleNext'
@@ -178,6 +197,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [maxCombo, setMaxCombo] = useState(0)
   const [round, setRound] = useState(1)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
+  const [lives, setLives] = useState(INITIAL_LIVES)
   const [targetIdx, setTargetIdx] = useState(() => Math.floor(Math.random() * INITIAL_POOL_SIZE))
   const [grid, setGrid] = useState<number[]>(() => buildGrid(targetIdx, INITIAL_POOL_SIZE))
   const [cellFB, setCellFB] = useState<CellFB | null>(null)
@@ -186,6 +206,10 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [feverMs, setFeverMs] = useState(0)
   const [isFrozen, setIsFrozen] = useState(false)
   const [frozenMs, setFrozenMs] = useState(0)
+  const [isShielded, setIsShielded] = useState(false)
+  const [shieldMs, setShieldMs] = useState(0)
+  const [isGolden, setIsGolden] = useState(false)
+  const [goldenMs, setGoldenMs] = useState(0)
   const [isDoubleNext, setIsDoubleNext] = useState(false)
   const [particles, setParticles] = useState<PixelParticle[]>([])
   const [floats, setFloats] = useState<FloatText[]>([])
@@ -199,11 +223,13 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [perfectRounds, setPerfectRounds] = useState(0)
   const [, setWrongInRound] = useState(false)
   const [, setDangerPlayed] = useState(false)
-  const [isNewRecord, setIsNewRecord] = useState(false)
   const [crtFlicker, setCrtFlicker] = useState(false)
+  const [comboKeepMs, setComboKeepMs] = useState(0)
+  const [displayScore, setDisplayScore] = useState(0)
 
   // Refs
   const scoreRef = useRef(0)
+  const displayScoreRef = useRef(0)
   const comboRef = useRef(0)
   const maxComboRef = useRef(0)
   const roundRef = useRef(1)
@@ -217,8 +243,14 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const feverMsRef = useRef(0)
   const isFrozenRef = useRef(false)
   const frozenMsRef = useRef(0)
+  const isShieldedRef = useRef(false)
+  const shieldMsRef = useRef(0)
+  const isGoldenRef = useRef(false)
+  const goldenMsRef = useRef(0)
+  const livesRef = useRef(INITIAL_LIVES)
   const isDoubleNextRef = useRef(false)
   const lastCorrectRef = useRef(0)
+  const comboKeepMsRef = useRef(0)
   const pIdRef = useRef(0)
   const particlesRef = useRef<PixelParticle[]>([])
   const ftIdRef = useRef(0)
@@ -341,18 +373,22 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     setWrongInRound(false)
     wrongInRoundRef.current = false
 
-    // Bonus every 5 rounds
+    // Bonus every 5 rounds — escalating sfx
     if (nextRound % 5 === 0) {
       const bonusTime = 2000
       const bonusScore = 10 * nextRound
       remainingMsRef.current = Math.min(ROUND_DURATION_MS, remainingMsRef.current + bonusTime)
       scoreRef.current += bonusScore
       setScore(scoreRef.current)
-      playA(comboARef, 0.6, 1.3)
+      const stagePitch = 1.0 + Math.min(0.6, (nextRound / 5 - 1) * 0.1)
+      playA(comboARef, 0.6, stagePitch)
+      playA(perfectARef, 0.4, stagePitch * 0.9)
+      if (nextRound >= 15) playA(feverARef, 0.35, stagePitch * 1.1)
       showMilestone(`STAGE ${nextRound}`)
       spawnFloat(`+${bonusScore} +${bonusTime / 1000}s`, 150, 180, '#ffcc00', 26)
-      spawnPixels(14, 200, 250, ['#ffcc00', '#ff6600', '#ff0080'])
-      shake(10)
+      const pxCount = 14 + Math.floor(nextRound / 5) * 2
+      spawnPixels(pxCount, 200, 250, ['#ffcc00', '#ff6600', '#ff0080', '#00ff88'])
+      shake(10 + Math.floor(nextRound / 10))
       flash('rgba(255,204,0,0.3)', 150)
       triggerCrtFlicker()
     }
@@ -379,9 +415,6 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     playA(gameOverARef, 0.64, 0.95)
     triggerCrtFlicker()
 
-    if (scoreRef.current > bestScore) {
-      setTimeout(() => setIsNewRecord(true), 800)
-    }
 
     const elapsedMs = Math.round(Math.max(DEFAULT_FRAME_MS, ROUND_DURATION_MS - remainingMsRef.current))
     onFinish({ score: scoreRef.current, durationMs: elapsedMs })
@@ -399,18 +432,27 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
     // --- Bomb ---
     if (cellVal === -1) {
-      playA(comboARef, 0.5, 0.8)
-      shake(14)
-      flash('rgba(255,100,0,0.5)', 150)
-      spawnPixels(18, px, py, ['#ff6600', '#ff0000', '#ffcc00', '#ff3333'])
-      const bombScore = 15 * (isFeverRef.current ? FEVER_MULTIPLIER : 1) * (isDoubleNextRef.current ? 2 : 1)
-      if (isDoubleNextRef.current) { isDoubleNextRef.current = false; setIsDoubleNext(false) }
-      scoreRef.current += bombScore
-      setScore(scoreRef.current)
-      spawnFloat(`BOOM +${bombScore}`, px - 30, py - 30, '#ff6600', 24)
-      triggerCrtFlicker()
-      setCellFB({ index: cellIndex, kind: 'bomb' })
-      clrTimer(fbTimerRef)
+      if (isShieldedRef.current) {
+        isShieldedRef.current = false; shieldMsRef.current = 0; setIsShielded(false); setShieldMs(0)
+        playA(comboARef, 0.5, 1.5)
+        spawnFloat('BLOCKED!', px - 30, py - 30, '#3b82f6', 26)
+        spawnPixels(12, px, py, ['#3b82f6', '#60a5fa', '#ffffff'])
+        flash('rgba(59,130,246,0.4)', 150)
+        shake(6)
+      } else {
+        livesRef.current = Math.max(0, livesRef.current - 1); setLives(livesRef.current)
+        playA(comboARef, 0.5, 0.8); shake(14); flash('rgba(255,100,0,0.5)', 150)
+        spawnPixels(18, px, py, ['#ff6600', '#ff0000', '#ffcc00', '#ff3333'])
+        spawnFloat('BOOM! -1', px - 30, py - 30, '#ff6600', 24)
+        triggerCrtFlicker()
+        comboRef.current = 0; setCombo(0); comboKeepMsRef.current = 0; setComboKeepMs(0)
+        if (livesRef.current <= 0) {
+          setCellFB({ index: cellIndex, kind: 'bomb' }); clrTimer(fbTimerRef)
+          fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); finishGame() }, FEEDBACK_DURATION_MS + 200)
+          return
+        }
+      }
+      setCellFB({ index: cellIndex, kind: 'bomb' }); clrTimer(fbTimerRef)
       fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); advanceRound() }, FEEDBACK_DURATION_MS)
       return
     }
@@ -485,6 +527,42 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       return
     }
 
+    // --- Shield ---
+    if (cellVal === -4) {
+      playA(comboARef, 0.5, 1.2)
+      flash('rgba(59,130,246,0.4)', 200)
+      spawnPixels(10, px, py, ['#3b82f6', '#60a5fa', '#00ff88'])
+      spawnFloat('SHIELD!', px - 30, py - 30, '#3b82f6', 24)
+      isShieldedRef.current = true
+      shieldMsRef.current = SHIELD_DURATION_MS
+      setIsShielded(true)
+      setShieldMs(SHIELD_DURATION_MS)
+
+      setCellFB({ index: cellIndex, kind: 'shield' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null) }, FEEDBACK_DURATION_MS)
+      return
+    }
+
+    // --- Golden Time ---
+    if (cellVal === -5) {
+      playA(feverARef, 0.5, 1.3)
+      flash('rgba(255,204,0,0.5)', 200)
+      spawnPixels(16, px, py, ['#ffcc00', '#ffd700', '#ff6600', '#00ff88'])
+      spawnFloat(`GOLDEN x${GOLDEN_MULTIPLIER}!`, px - 40, py - 30, '#ffd700', 26)
+      isGoldenRef.current = true
+      goldenMsRef.current = GOLDEN_DURATION_MS
+      setIsGolden(true)
+      setGoldenMs(GOLDEN_DURATION_MS)
+      shake(8)
+      triggerCrtFlicker()
+
+      setCellFB({ index: cellIndex, kind: 'golden' })
+      clrTimer(fbTimerRef)
+      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null) }, FEEDBACK_DURATION_MS)
+      return
+    }
+
     // --- Correct ---
     const isCorrect = cellVal === targetIdxRef.current
     if (isCorrect) {
@@ -495,16 +573,19 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       const nextCombo = comboRef.current + 1
       comboRef.current = nextCombo
       setCombo(nextCombo)
+      comboKeepMsRef.current = COMBO_KEEP_DURATION_MS
+      setComboKeepMs(COMBO_KEEP_DURATION_MS)
       if (nextCombo > maxComboRef.current) { maxComboRef.current = nextCombo; setMaxCombo(nextCombo) }
       correctCountRef.current++
       setCorrectCount(correctCountRef.current)
 
       const comboMult = 1 + nextCombo * COMBO_MULTIPLIER_STEP
       const feverMult = isFeverRef.current ? FEVER_MULTIPLIER : 1
+      const goldenMult = isGoldenRef.current ? GOLDEN_MULTIPLIER : 1
       const doubleMult = isDoubleNextRef.current ? 2 : 1
       const isSpeed = timeSinceLast > 0 && timeSinceLast < SPEED_BONUS_THRESHOLD_MS
       const speedBonus = isSpeed ? SPEED_BONUS_POINTS : 0
-      const totalPts = Math.round((SCORE_CORRECT + speedBonus) * comboMult * feverMult * doubleMult)
+      const totalPts = Math.round((SCORE_CORRECT + speedBonus) * comboMult * feverMult * goldenMult * doubleMult)
 
       if (isDoubleNextRef.current) { isDoubleNextRef.current = false; setIsDoubleNext(false) }
 
@@ -525,13 +606,22 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         triggerCrtFlicker()
       }
 
-      // Combo milestones
+      // Combo milestones — each milestone gets unique pitch/volume
       for (const ms of COMBO_MILESTONES) {
         if (nextCombo === ms && lastMsRef.current < ms) {
           lastMsRef.current = ms
-          playA(comboARef, 0.6, 0.8 + ms * 0.01)
+          // Escalating pitch & volume per milestone
+          const mIdx = COMBO_MILESTONES.indexOf(ms)
+          const pitch = 0.9 + mIdx * 0.15
+          const vol = 0.5 + mIdx * 0.08
+          playA(comboARef, Math.min(vol, 0.9), pitch)
+          // Also play fever sfx for big milestones
+          if (ms >= 15) playA(feverARef, 0.4, 1.2 + mIdx * 0.1)
+          if (ms >= 25) playA(perfectARef, 0.4, 0.8 + mIdx * 0.05)
           showMilestone(`${ms} COMBO!`)
-          spawnPixels(14, 200, 300, ['#ffcc00', '#ff0080', '#00ff88'])
+          const pxCount = 10 + mIdx * 4
+          spawnPixels(pxCount, 200, 300, ['#ffcc00', '#ff0080', '#00ff88', '#00ccff'])
+          shake(6 + mIdx * 2)
           triggerCrtFlicker()
           break
         }
@@ -557,27 +647,34 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); advanceRound() }, FEEDBACK_DURATION_MS)
     } else {
       // --- Wrong ---
-      comboRef.current = 0
-      setCombo(0)
+      comboRef.current = 0; setCombo(0)
+      comboKeepMsRef.current = 0; setComboKeepMs(0)
       lastMsRef.current = 0
-      wrongInRoundRef.current = true
-      setWrongInRound(true)
+      wrongInRoundRef.current = true; setWrongInRound(true)
 
-      scoreRef.current = Math.max(0, scoreRef.current + SCORE_WRONG)
-      setScore(scoreRef.current)
+      if (isShieldedRef.current) {
+        isShieldedRef.current = false; shieldMsRef.current = 0; setIsShielded(false); setShieldMs(0)
+        playA(comboARef, 0.4, 1.4)
+        spawnFloat('SHIELD!', px, py - 20, '#3b82f6', 20)
+        spawnPixels(6, px, py, ['#3b82f6', '#60a5fa'])
+        flash('rgba(59,130,246,0.3)')
+      } else {
+        livesRef.current = Math.max(0, livesRef.current - 1); setLives(livesRef.current)
+        scoreRef.current = Math.max(0, scoreRef.current + SCORE_WRONG); setScore(scoreRef.current)
+        playA(wrongARef, 0.45, 0.85); shake(8); flash('rgba(255,0,0,0.4)')
+        spawnFloat(`-${Math.abs(SCORE_WRONG)}`, px, py - 20, '#ff3333', 18)
+        spawnPixels(4, px, py, ['#ff3333', '#ff0000'])
+        triggerCrtFlicker()
+      }
 
-      playA(wrongARef, 0.45, 0.85)
-      shake(8)
-      flash('rgba(255,0,0,0.4)')
-      spawnFloat(`-${Math.abs(SCORE_WRONG)}`, px, py - 20, '#ff3333', 18)
-      spawnPixels(4, px, py, ['#ff3333', '#ff0000'])
-      triggerCrtFlicker()
-
-      setCellFB({ index: cellIndex, kind: 'wrong' })
-      clrTimer(fbTimerRef)
-      fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null) }, FEEDBACK_DURATION_MS)
+      setCellFB({ index: cellIndex, kind: 'wrong' }); clrTimer(fbTimerRef)
+      if (livesRef.current <= 0) {
+        fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null); finishGame() }, FEEDBACK_DURATION_MS + 200)
+      } else {
+        fbTimerRef.current = window.setTimeout(() => { fbTimerRef.current = null; setCellFB(null) }, FEEDBACK_DURATION_MS)
+      }
     }
-  }, [isShuffling, cellFB, phase, playA, advanceRound, spawnPixels, spawnFloat, shake, flash, showMilestone, triggerCrtFlicker])
+  }, [isShuffling, cellFB, phase, playA, advanceRound, finishGame, spawnPixels, spawnFloat, shake, flash, showMilestone, triggerCrtFlicker])
 
   // Key handler
   useEffect(() => {
@@ -637,6 +734,39 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         feverMsRef.current = Math.max(0, feverMsRef.current - dt)
         setFeverMs(feverMsRef.current)
         if (feverMsRef.current <= 0) { isFeverRef.current = false; setIsFever(false) }
+      }
+
+      // Shield
+      if (isShieldedRef.current) {
+        shieldMsRef.current = Math.max(0, shieldMsRef.current - dt)
+        setShieldMs(shieldMsRef.current)
+        if (shieldMsRef.current <= 0) { isShieldedRef.current = false; setIsShielded(false) }
+      }
+
+      // Golden
+      if (isGoldenRef.current) {
+        goldenMsRef.current = Math.max(0, goldenMsRef.current - dt)
+        setGoldenMs(goldenMsRef.current)
+        if (goldenMsRef.current <= 0) { isGoldenRef.current = false; setIsGolden(false) }
+      }
+
+      // Combo keep timer
+      if (comboRef.current > 0 && comboKeepMsRef.current > 0) {
+        comboKeepMsRef.current = Math.max(0, comboKeepMsRef.current - dt)
+        setComboKeepMs(comboKeepMsRef.current)
+        if (comboKeepMsRef.current <= 0) {
+          comboRef.current = 0
+          setCombo(0)
+          lastMsRef.current = 0
+        }
+      }
+
+      // Score rolling
+      if (displayScoreRef.current < scoreRef.current) {
+        const diff = scoreRef.current - displayScoreRef.current
+        const step2 = Math.max(1, Math.ceil(diff * 0.15))
+        displayScoreRef.current = Math.min(scoreRef.current, displayScoreRef.current + step2)
+        setDisplayScore(displayScoreRef.current)
       }
 
       // Cleanup particles
@@ -716,43 +846,46 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .em-hdr {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 8px 10px 6px;
+          gap: 12px;
+          padding: 12px 14px 10px;
           background: linear-gradient(180deg, rgba(0,255,136,0.15), rgba(0,0,0,0));
           border-bottom: 2px solid #00ff88;
           flex-shrink: 0;
         }
 
         .em-avatar {
-          width: 36px;
-          height: 36px;
-          border-radius: 4px;
+          width: 52px;
+          height: 52px;
+          border-radius: 6px;
           border: 2px solid #00ff88;
           image-rendering: pixelated;
           box-shadow: 0 0 8px rgba(0,255,136,0.4);
         }
 
-        .em-sc { flex: 1; }
+        .em-sc { flex: 1; text-align: center; }
 
         .em-sc-val {
           margin: 0;
-          font-size: clamp(14px, 4vw, 18px);
+          font-size: clamp(52px, 16vw, 72px);
           font-weight: 400;
           color: #00ff88;
-          text-shadow: 0 0 8px rgba(0,255,136,0.6);
+          text-shadow: 0 0 12px rgba(0,255,136,0.6);
+          text-align: center;
         }
 
-        .em-sc-val.fever { color: #ff0080; text-shadow: 0 0 12px rgba(255,0,128,0.8); }
+        .em-sc-val.fever { color: #ff0080; text-shadow: 0 0 16px rgba(255,0,128,0.8); }
+        .em-sc-val.golden { color: #ffd700; text-shadow: 0 0 16px rgba(255,215,0,0.8); animation: em-glow 0.3s infinite alternate; }
 
         .em-sc-best {
           margin: 0;
-          font-size: 7px;
+          font-size: 16px;
+          text-align: center;
           color: #4a5568;
         }
 
         .em-timer {
           margin: 0;
-          font-size: clamp(12px, 3.5vw, 16px);
+          font-size: clamp(32px, 10vw, 44px);
           color: #00ccff;
           text-shadow: 0 0 6px rgba(0,204,255,0.5);
           text-align: right;
@@ -761,9 +894,16 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .em-timer.low { color: #ff3333; animation: em-blink 0.3s infinite alternate; text-shadow: 0 0 10px rgba(255,51,51,0.8); }
         .em-timer.frozen { color: #00ccff; text-shadow: 0 0 12px rgba(0,204,255,0.8); }
 
+        .em-lives {
+          margin: 2px 0 0;
+          font-size: 20px;
+          text-align: right;
+          letter-spacing: 2px;
+        }
+
         /* Progress bar */
         .em-pbar {
-          height: 4px;
+          height: 6px;
           background: #1a1a3a;
           flex-shrink: 0;
         }
@@ -778,23 +918,23 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           display: flex;
           justify-content: center;
           align-items: center;
-          gap: 8px;
-          padding: 4px 10px;
-          min-height: 24px;
+          gap: 10px;
+          padding: 6px 14px;
+          min-height: 32px;
           flex-shrink: 0;
           flex-wrap: wrap;
         }
 
         .em-combo-text {
-          font-size: 8px;
+          font-size: 18px;
           color: #6b7280;
           margin: 0;
         }
 
-        .em-combo-text strong { font-size: 12px; color: #ffcc00; }
+        .em-combo-text strong { font-size: 28px; color: #ffcc00; }
 
         .em-combo-lbl {
-          font-size: 10px;
+          font-size: 22px;
           font-weight: 400;
           margin: 0;
           animation: em-pop 0.3s ease-out;
@@ -802,7 +942,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         }
 
         .em-fever-lbl {
-          font-size: 9px;
+          font-size: 20px;
           color: #ff0080;
           margin: 0;
           animation: em-blink 0.2s infinite alternate;
@@ -810,26 +950,57 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         }
 
         .em-frozen-lbl {
-          font-size: 9px;
+          font-size: 20px;
           color: #00ccff;
           margin: 0;
           animation: em-glow 0.4s infinite alternate;
           text-shadow: 0 0 10px rgba(0,204,255,0.6);
         }
 
+        .em-shield-lbl {
+          font-size: 20px;
+          color: #3b82f6;
+          margin: 0;
+          animation: em-glow 0.4s infinite alternate;
+          text-shadow: 0 0 10px rgba(59,130,246,0.6);
+        }
+
+        .em-golden-lbl {
+          font-size: 20px;
+          color: #ffd700;
+          margin: 0;
+          animation: em-blink 0.3s infinite alternate;
+          text-shadow: 0 0 12px rgba(255,215,0,0.8);
+        }
+
         .em-double-lbl {
-          font-size: 8px;
+          font-size: 18px;
           color: #cc00ff;
           margin: 0;
           animation: em-glow 0.5s infinite alternate;
         }
 
-        .em-rd { font-size: 7px; color: #4a5568; margin: 0; }
+        .em-rd { font-size: 16px; color: #4a5568; margin: 0; }
+
+        /* Combo keep timer */
+        .em-combo-keep {
+          height: 6px;
+          margin: 0 14px 2px;
+          background: #1a1a3a;
+          border: 1px solid #333;
+          flex-shrink: 0;
+          overflow: hidden;
+        }
+
+        .em-combo-keep-fill {
+          height: 100%;
+          transition: width 0.1s linear;
+        }
 
         /* Fever gauge */
         .em-fgauge {
-          height: 8px;
-          margin: 0 10px 2px;
+          height: 12px;
+          margin: 0 14px 2px;
           background: #1a1a3a;
           border: 1px solid #333;
           flex-shrink: 0;
@@ -848,7 +1019,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 5px;
+          font-size: 10px;
           color: #aaa;
           letter-spacing: 1px;
         }
@@ -858,30 +1029,33 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 12px;
-          padding: 8px 14px;
-          margin: 4px 10px;
+          gap: 16px;
+          padding: 10px 18px;
+          margin: 10px 14px 6px;
           background: rgba(0,255,136,0.05);
-          border: 2px solid #00ff88;
-          box-shadow: 0 0 12px rgba(0,255,136,0.2), inset 0 0 20px rgba(0,255,136,0.05);
+          border: 3px solid #00ff88;
+          box-shadow: 0 0 16px rgba(0,255,136,0.2), inset 0 0 24px rgba(0,255,136,0.05);
           flex-shrink: 0;
         }
 
-        .em-target.fever-t { border-color: #ff0080; box-shadow: 0 0 16px rgba(255,0,128,0.3); }
-        .em-target.frozen-t { border-color: #00ccff; box-shadow: 0 0 16px rgba(0,204,255,0.3); }
+        .em-target.fever-t { border-color: #ff0080; box-shadow: 0 0 20px rgba(255,0,128,0.3); }
+        .em-target.frozen-t { border-color: #00ccff; box-shadow: 0 0 20px rgba(0,204,255,0.3); }
+        .em-target.golden-t { border-color: #ffd700; box-shadow: 0 0 20px rgba(255,215,0,0.4); }
 
         .em-target-lbl {
           margin: 0;
-          font-size: 10px;
+          font-size: 24px;
           color: #00ff88;
           letter-spacing: 3px;
         }
 
         .em-target-icon {
           margin: 0;
-          font-size: clamp(36px, 10vw, 48px);
-          filter: drop-shadow(0 0 8px currentColor);
+          font-size: clamp(56px, 16vw, 76px);
+          filter: drop-shadow(0 0 10px currentColor);
           animation: em-pop 0.3s ease-out;
+          line-height: 1;
+          transform: translateY(-6px);
         }
 
         /* Grid */
@@ -890,16 +1064,16 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 6px 10px;
+          padding: 8px 14px;
           min-height: 0;
         }
 
         .em-grid {
           display: grid;
           grid-template-columns: repeat(${GRID_SIZE}, 1fr);
-          gap: clamp(5px, 1.5vw, 8px);
+          gap: clamp(6px, 2vw, 10px);
           width: 100%;
-          max-width: 380px;
+          max-width: 420px;
           transition: opacity 0.12s, transform 0.12s;
         }
 
@@ -913,11 +1087,12 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           align-items: center;
           justify-content: center;
           aspect-ratio: 1;
-          border: 2px solid #333;
+          border: 3px solid #333;
+          border-radius: 4px;
           background: #0f0f2e;
           cursor: pointer;
           transition: all 0.06s;
-          box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
+          box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
           padding: 0;
           touch-action: manipulation;
           position: relative;
@@ -960,28 +1135,43 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .em-cell-freeze {
           background: rgba(0,204,255,0.15) !important;
           border-color: #00ccff !important;
-          box-shadow: 0 0 20px rgba(0,204,255,0.5) !important;
+          box-shadow: 0 0 24px rgba(0,204,255,0.5) !important;
+        }
+
+        .em-cell-shield {
+          background: rgba(59,130,246,0.2) !important;
+          border-color: #3b82f6 !important;
+          box-shadow: 0 0 24px rgba(59,130,246,0.5) !important;
+          animation: em-pop 0.3s ease-out;
+        }
+
+        .em-cell-golden {
+          background: rgba(255,215,0,0.2) !important;
+          border-color: #ffd700 !important;
+          box-shadow: 0 0 28px rgba(255,215,0,0.6) !important;
+          animation: em-pop 0.3s ease-out;
         }
 
         .em-item {
-          font-size: clamp(26px, 7vw, 36px);
+          font-size: clamp(44px, 13vw, 64px);
           pointer-events: none;
-          filter: drop-shadow(0 0 4px rgba(255,255,255,0.3));
+          filter: drop-shadow(0 0 6px rgba(255,255,255,0.3));
           image-rendering: auto;
         }
 
         .em-special-dot {
           position: absolute;
-          top: 3px;
-          right: 3px;
-          width: 6px;
-          height: 6px;
+          top: 4px;
+          right: 4px;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
           animation: em-blink 0.5s infinite alternate;
         }
 
         /* Footer */
         .em-foot {
-          padding: 4px 10px 8px;
+          padding: 6px 14px 10px;
           text-align: center;
           flex-shrink: 0;
           border-top: 1px solid #222;
@@ -990,7 +1180,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .em-foot-stats {
           display: flex;
           justify-content: space-around;
-          font-size: 7px;
+          font-size: 16px;
           color: #4a5568;
           margin-bottom: 4px;
         }
@@ -1018,7 +1208,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         }
 
         .em-ms-text {
-          font-size: clamp(18px, 6vw, 28px);
+          font-size: clamp(36px, 12vw, 56px);
           color: #ffcc00;
           text-shadow: 0 0 30px rgba(255,204,0,0.8), 0 0 60px rgba(255,0,128,0.4);
           animation: em-ms-pop 0.5s ease-out;
@@ -1038,10 +1228,10 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           gap: 8px;
         }
 
-        .em-fin-label { font-size: 10px; color: #6b7280; margin: 0; }
+        .em-fin-label { font-size: 20px; color: #6b7280; margin: 0; }
 
         .em-fin-score {
-          font-size: clamp(24px, 8vw, 36px);
+          font-size: clamp(48px, 16vw, 72px);
           color: #00ff88;
           text-shadow: 0 0 20px rgba(0,255,136,0.8);
           margin: 0;
@@ -1049,7 +1239,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         }
 
         .em-fin-record {
-          font-size: clamp(14px, 5vw, 20px);
+          font-size: clamp(28px, 10vw, 40px);
           color: #ffcc00;
           text-shadow: 0 0 20px rgba(255,204,0,0.8);
           animation: em-pop 0.6s ease-out, em-blink 0.4s 0.6s infinite alternate;
@@ -1120,12 +1310,15 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       <div className="em-hdr">
         <img className="em-avatar" src={characterImg} alt="avatar" />
         <div className="em-sc">
-          <p className={`em-sc-val ${isFever ? 'fever' : ''}`}>{score.toLocaleString()}</p>
+          <p className={`em-sc-val ${isFever ? 'fever' : ''} ${isGolden ? 'golden' : ''}`}>{displayScore.toLocaleString()}</p>
           <p className="em-sc-best">BEST {displayBest.toLocaleString()}</p>
         </div>
         <div>
           <p className={`em-timer ${isLow ? 'low' : ''} ${isFrozen ? 'frozen' : ''}`}>
             {isFrozen ? '\u2744' : ''}{timerSec}s
+          </p>
+          <p className="em-lives">
+            {Array.from({ length: INITIAL_LIVES }, (_, i) => i < lives ? LIFE_EMOJI : LIFE_EMPTY_EMOJI).join('')}
           </p>
         </div>
       </div>
@@ -1143,12 +1336,25 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       <div className="em-status">
         <p className="em-combo-text">COMBO <strong>{combo}</strong></p>
         {comboLabel && <p className="em-combo-lbl" key={combo} style={{ color: combo >= 15 ? '#ff0080' : '#ffcc00' }}>{comboLabel}</p>}
-        {comboMult > 1.25 && <p style={{ margin: 0, fontSize: '8px', color: '#ff0080' }}>x{comboMult.toFixed(1)}</p>}
+        {comboMult > 1.25 && <p style={{ margin: 0, fontSize: '16px', color: '#ff0080' }}>x{comboMult.toFixed(1)}</p>}
         {isFever && <p className="em-fever-lbl">{'\u{1F525}'} FEVER x{FEVER_MULTIPLIER} {(feverMs / 1000).toFixed(1)}s</p>}
         {isFrozen && <p className="em-frozen-lbl">{'\u2744'} FREEZE {(frozenMs / 1000).toFixed(1)}s</p>}
+        {isShielded && <p className="em-shield-lbl">{SHIELD_EMOJI} SHIELD {(shieldMs / 1000).toFixed(1)}s</p>}
+        {isGolden && <p className="em-golden-lbl">{GOLDEN_EMOJI} GOLDEN x{GOLDEN_MULTIPLIER} {(goldenMs / 1000).toFixed(1)}s</p>}
         {isDoubleNext && <p className="em-double-lbl">x2 NEXT</p>}
         <p className="em-rd">RD{round}</p>
       </div>
+
+      {/* Combo keep timer */}
+      {combo > 0 && comboKeepMs > 0 && (
+        <div className="em-combo-keep">
+          <div className="em-combo-keep-fill" style={{
+            width: `${(comboKeepMs / COMBO_KEEP_DURATION_MS) * 100}%`,
+            background: comboKeepMs < 1000 ? '#ff3333' : '#ffcc00',
+            boxShadow: comboKeepMs < 1000 ? '0 0 8px rgba(255,51,51,0.6)' : undefined,
+          }} />
+        </div>
+      )}
 
       {/* Fever gauge */}
       {!isFever && combo > 0 && (
@@ -1167,7 +1373,7 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       )}
 
       {/* Target */}
-      <div className={`em-target ${isFever ? 'fever-t' : ''} ${isFrozen ? 'frozen-t' : ''}`}>
+      <div className={`em-target ${isFever ? 'fever-t' : ''} ${isFrozen ? 'frozen-t' : ''} ${isGolden ? 'golden-t' : ''}`}>
         <p className="em-target-lbl">FIND</p>
         <p className="em-target-icon" key={targetIdx} style={{ color: targetItem?.color }}>
           {targetItem?.emoji}
@@ -1187,6 +1393,8 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
                 case 'bomb': fbClass = 'em-cell-bomb'; break
                 case 'mystery': fbClass = 'em-cell-mystery'; break
                 case 'freeze': fbClass = 'em-cell-freeze'; break
+                case 'shield': fbClass = 'em-cell-shield'; break
+                case 'golden': fbClass = 'em-cell-golden'; break
               }
             }
 
@@ -1195,6 +1403,8 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             if (val === -1) { emoji = BOMB_EMOJI; specialColor = '#ff6600' }
             else if (val === -2) { emoji = MYSTERY_EMOJI; specialColor = '#cc00ff' }
             else if (val === -3) { emoji = FREEZE_EMOJI; specialColor = '#00ccff' }
+            else if (val === -4) { emoji = SHIELD_EMOJI; specialColor = '#3b82f6' }
+            else if (val === -5) { emoji = GOLDEN_EMOJI; specialColor = '#ffd700' }
             else { emoji = ITEM_POOL[val]?.emoji ?? '?' }
             const isSpecial = val < 0
 
@@ -1221,9 +1431,6 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           <p>MAX {maxCombo}</p>
           <p>PERF {perfectRounds}</p>
         </div>
-        <button className="text-button" type="button" onClick={onExit} style={{ fontFamily: "'Press Start 2P', monospace", fontSize: '8px' }}>
-          HUB
-        </button>
       </div>
 
       {/* Flash */}
@@ -1237,8 +1444,9 @@ function EmojiMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <div className="em-fin-ov">
           <p className="em-fin-label">GAME OVER</p>
           <p className="em-fin-score">{score.toLocaleString()}</p>
-          {isNewRecord && <p className="em-fin-record">NEW RECORD!</p>}
+          {score > bestScore && <p className="em-fin-record">NEW RECORD!</p>}
           <p className="em-fin-label">{correctCount} HIT / MAX COMBO {maxCombo} / PERFECT {perfectRounds}</p>
+          <p className="em-fin-label" style={{ color: '#ff3333' }}>{LIFE_EMOJI.repeat(lives)} {lives === 0 ? 'NO LIVES LEFT' : ''}</p>
         </div>
       )}
 

@@ -39,6 +39,9 @@ const HISTORY_MAX = 6
 const TIME_BONUS_STREAK = 3
 const TIME_BONUS_MS = 400
 const PERFECT_THRESHOLD_MS = 500
+const INITIAL_LIVES = 3
+const LIFE_EMOJI = '\u{2764}\u{FE0F}'
+const LIFE_EMPTY = '\u{1F5A4}'
 
 const CARD_LABELS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'] as const
 const SUIT_SYMBOLS = ['\u2660', '\u2665', '\u2666', '\u2663'] as const
@@ -110,6 +113,7 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
   const [showCardBack, setShowCardBack] = useState(false)
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([])
   const [perfectCount, setPerfectCount] = useState(0)
+  const [lives, setLives] = useState(INITIAL_LIVES)
   const [scanlineVisible, setScanlineVisible] = useState(true)
 
   const scoreRef = useRef(0)
@@ -128,6 +132,7 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
   const isDoubleDownRef = useRef(false)
   const doubleDownCooldownRef = useRef(0)
   const consecutiveCorrectRef = useRef(0)
+  const livesRef = useRef(INITIAL_LIVES)
   const levelUpTimerRef = useRef<number | null>(null)
   const prevLevelRef = useRef(1)
   const floatIdRef = useRef(0)
@@ -282,8 +287,10 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
           const penalty = Math.round(WRONG_PENALTY * ddMult)
           nextScore = Math.max(0, nextScore - penalty)
           nextCombo = 0
+          livesRef.current = Math.max(0, livesRef.current - 1)
+          setLives(livesRef.current)
           playAudio(wrongAudioRef, 0.5, 0.8)
-          spawnFloat(`-${penalty}`, '#ef4444')
+          spawnFloat(`-${penalty} ${LIFE_EMOJI}`, '#ef4444')
           effects.triggerShake(8)
           effects.triggerFlash('rgba(239,68,68,0.5)')
           consecutiveCorrectRef.current = 0
@@ -335,6 +342,20 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         setCombo(nextCombo)
         setComboGauge(Math.min(COMBO_GAUGE_MAX, nextCombo))
         setFlashResult(result)
+
+        // Check lives - game over if 0
+        if (livesRef.current <= 0) {
+          currentCardRef.current = next.isJoker ? currentCardRef.current : next
+          if (!next.isJoker) setCurrentCard(next)
+          setNextCard(null)
+          setIsFlipping(false)
+          setShowCardBack(false)
+          isFlippingRef.current = false
+          clearTimerSafe(flashTimerRef)
+          flashTimerRef.current = window.setTimeout(() => { flashTimerRef.current = null; setFlashResult(null) }, FLASH_DURATION_MS)
+          setTimeout(() => finishGame(), 400)
+          return
+        }
 
         cardsPlayedRef.current += 1
 
@@ -502,6 +523,9 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         </div>
         <div className="cfs-time-block">
           <p className={`cfs-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}</p>
+          <p className="cfs-lives">
+            {Array.from({ length: INITIAL_LIVES }, (_, i) => i < lives ? LIFE_EMOJI : LIFE_EMPTY).join('')}
+          </p>
           <p className="cfs-level">LV.{level}</p>
         </div>
       </div>
@@ -693,21 +717,21 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         }
         .cfs-score-block { text-align: left; }
         .cfs-score {
-          font-size: clamp(14px, 4.5vw, 20px);
+          font-size: clamp(28px, 9vw, 40px);
           color: #fbbf24;
           margin: 0;
           text-shadow: 2px 2px 0 #92400e;
           line-height: 1.3;
         }
         .cfs-best {
-          font-size: 7px;
+          font-size: 12px;
           color: #64748b;
           margin: 0;
           margin-top: 2px;
         }
         .cfs-time-block { text-align: right; }
         .cfs-time {
-          font-size: clamp(12px, 4vw, 18px);
+          font-size: clamp(24px, 8vw, 36px);
           color: #4ade80;
           margin: 0;
           font-variant-numeric: tabular-nums;
@@ -720,10 +744,16 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
           animation: cfs-blink 0.5s steps(2) infinite;
         }
         .cfs-level {
-          font-size: 7px;
+          font-size: 12px;
           color: #64748b;
           margin: 0;
           margin-top: 2px;
+        }
+        .cfs-lives {
+          font-size: 16px;
+          text-align: right;
+          margin: 2px 0 0;
+          letter-spacing: 2px;
         }
 
         /* Combo gauge - pixel blocks */
@@ -758,7 +788,7 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
           animation: cfs-cell-flash 0.2s steps(2) infinite alternate;
         }
         .cfs-combo-label {
-          font-size: 7px;
+          font-size: 12px;
           color: #fbbf24;
           white-space: nowrap;
           min-width: 50px;
@@ -768,7 +798,7 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
 
         /* Fever */
         .cfs-fever-banner {
-          font-size: 9px;
+          font-size: 14px;
           color: #fbbf24;
           letter-spacing: 2px;
           text-align: center;
@@ -812,7 +842,7 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         /* Floating text */
         .cfs-float {
           position: absolute;
-          font-size: 9px;
+          font-size: 14px;
           font-family: 'Press Start 2P', monospace;
           font-weight: 900;
           pointer-events: none;
@@ -837,8 +867,8 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
           display: flex;
           align-items: center;
           justify-content: center;
-          width: clamp(160px, 46vw, 200px);
-          height: clamp(230px, 50vh, 290px);
+          width: clamp(220px, 55vw, 300px);
+          height: clamp(300px, 55vh, 400px);
           border: 3px solid #475569;
           background: #f1f5f9;
           perspective: 800px;
@@ -888,24 +918,24 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         }
         .cfs-suit-tl {
           position: absolute;
-          top: 10px;
-          left: 12px;
-          font-size: clamp(14px, 4vw, 20px);
+          top: 14px;
+          left: 16px;
+          font-size: clamp(20px, 6vw, 28px);
         }
         .cfs-value {
-          font-size: clamp(40px, 14vw, 64px);
+          font-size: clamp(56px, 18vw, 84px);
           line-height: 1;
           text-shadow: 3px 3px 0 rgba(0,0,0,0.1);
         }
         .cfs-suit-big {
-          font-size: clamp(24px, 8vw, 36px);
-          margin-top: 2px;
+          font-size: clamp(32px, 10vw, 48px);
+          margin-top: 4px;
         }
         .cfs-suit-br {
           position: absolute;
-          bottom: 10px;
-          right: 12px;
-          font-size: clamp(14px, 4vw, 20px);
+          bottom: 14px;
+          right: 16px;
+          font-size: clamp(20px, 6vw, 28px);
           transform: rotate(180deg);
         }
 
@@ -951,8 +981,8 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
           animation: cfs-pop 0.2s steps(4);
         }
         .cfs-tag {
-          padding: 4px 12px;
-          font-size: 9px;
+          padding: 6px 16px;
+          font-size: 14px;
           font-family: 'Press Start 2P', monospace;
           white-space: nowrap;
           color: #fff;
@@ -1026,9 +1056,9 @@ function CardFlipSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionP
         }
         .cfs-btn {
           flex: 1;
-          padding: clamp(12px, 3.5vw, 18px) 0;
+          padding: clamp(16px, 5vw, 24px) 0;
           border: 3px solid;
-          font-size: clamp(12px, 3.5vw, 16px);
+          font-size: clamp(16px, 5vw, 22px);
           font-family: 'Press Start 2P', monospace;
           cursor: pointer;
           display: flex;

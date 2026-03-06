@@ -715,7 +715,7 @@ export function GameHubApp() {
             ) : null}
           </section>
         ) : isResultActionView ? (
-          <>
+          <div className="post-game-result-wrapper">
             {settlement ? (
               <section
                 className={`post-game-summary-panel ${settlement.newBestScore ? 'new-best' : ''}`}
@@ -744,7 +744,7 @@ export function GameHubApp() {
                 MAIN MENU
               </button>
             </section>
-          </>
+          </div>
         ) : (
           <>
             <div className="lobby-marquee" aria-hidden>

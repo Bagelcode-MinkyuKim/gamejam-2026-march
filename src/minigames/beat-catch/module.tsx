@@ -11,6 +11,10 @@ import levelupSfx from '../../../assets/sounds/beat-catch-levelup.mp3'
 import doubleSfx from '../../../assets/sounds/beat-catch-double.mp3'
 import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
+import noteNormalImg from '../../../assets/images/beat-catch/note-normal.png'
+import noteGoldenImg from '../../../assets/images/beat-catch/note-golden.png'
+import noteDoubleImg from '../../../assets/images/beat-catch/note-double.png'
+import noteHoldImg from '../../../assets/images/beat-catch/note-hold.png'
 
 // ─── Game Constants ─────────────────────────────────────────────────
 const ROUND_DURATION_MS = 45000
@@ -74,12 +78,11 @@ const LANE_COLORS = ['#f43f5e', '#8b5cf6', '#3b82f6'] as const
 const LANE_LABELS = ['LEFT', 'MID', 'RIGHT'] as const
 const LANE_KEYS = [['KeyA', 'ArrowLeft', 'Digit1'], ['KeyS', 'ArrowDown', 'Space', 'Digit2'], ['KeyD', 'ArrowRight', 'Digit3']] as const
 
-// Pixel art note symbols (dot art style unicode block chars)
-const NOTE_SYMBOLS: Record<NoteType, string> = {
-  normal: '\u25C6',  // ◆
-  golden: '\u2605',  // ★
-  double: '\u25C8',  // ◈
-  hold: '\u25BC',    // ▼
+const NOTE_IMAGES: Record<NoteType, string> = {
+  normal: noteNormalImg,
+  golden: noteGoldenImg,
+  double: noteDoubleImg,
+  hold: noteHoldImg,
 }
 
 interface Note {
@@ -786,44 +789,27 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
 
         .bc-note-normal {
-          background: #e11d48;
-          border: 3px solid #fb7185;
-          box-shadow: 0 0 8px rgba(244,63,94,0.6),
-                      inset 0 0 0 2px rgba(0,0,0,0.3),
-                      3px 3px 0 rgba(0,0,0,0.4);
+          filter: drop-shadow(0 0 6px rgba(244,63,94,0.7));
         }
 
         .bc-note-golden {
-          background: #f59e0b;
-          border: 3px solid #fde047;
-          box-shadow: 0 0 14px rgba(250,204,21,0.9),
-                      inset 0 0 0 2px rgba(0,0,0,0.2),
-                      3px 3px 0 rgba(0,0,0,0.4);
+          filter: drop-shadow(0 0 10px rgba(250,204,21,0.9));
           animation: bc-golden-pulse 0.3s steps(2) infinite alternate;
         }
 
         @keyframes bc-golden-pulse {
-          from { box-shadow: 0 0 14px rgba(250,204,21,0.9), inset 0 0 0 2px rgba(0,0,0,0.2), 3px 3px 0 rgba(0,0,0,0.4); }
-          to { box-shadow: 0 0 22px rgba(250,204,21,1), inset 0 0 0 2px rgba(255,255,255,0.2), 3px 3px 0 rgba(0,0,0,0.4); }
+          from { filter: drop-shadow(0 0 10px rgba(250,204,21,0.9)); }
+          to { filter: drop-shadow(0 0 18px rgba(250,204,21,1)) brightness(1.2); }
         }
 
         .bc-note-double {
-          background: #7c3aed;
-          border: 3px solid #c084fc;
-          box-shadow: 0 0 10px rgba(139,92,246,0.7),
-                      inset 0 0 0 2px rgba(0,0,0,0.3),
-                      3px 3px 0 rgba(0,0,0,0.4);
+          filter: drop-shadow(0 0 8px rgba(139,92,246,0.8));
         }
 
         .bc-note-hold {
-          background: #059669;
-          border: 3px solid #34d399;
-          box-shadow: 0 0 10px rgba(52,211,153,0.7),
-                      inset 0 0 0 2px rgba(0,0,0,0.3),
-                      3px 3px 0 rgba(0,0,0,0.4);
+          filter: drop-shadow(0 0 8px rgba(52,211,153,0.8));
           width: 32px;
           height: 48px;
-          border-radius: 4px;
         }
 
         .bc-note-hit {
@@ -841,12 +827,13 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           filter: grayscale(1);
         }
 
-        .bc-note-inner {
-          font-size: 14px;
-          line-height: 1;
+        .bc-note-img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
           pointer-events: none;
-          color: #fff;
-          text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
+          image-rendering: pixelated;
+          filter: drop-shadow(0 0 4px rgba(255,255,255,0.3));
         }
 
         /* ─── Hit effects ─── */
@@ -1098,7 +1085,6 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           const topPct = note.y * 100
 
           let typeClass = 'bc-note-normal'
-          const symbol = NOTE_SYMBOLS[note.type]
           if (note.type === 'golden') typeClass = 'bc-note-golden'
           else if (note.type === 'double') typeClass = 'bc-note-double'
           else if (note.type === 'hold') typeClass = 'bc-note-hold'
@@ -1111,7 +1097,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
               className={`bc-note ${typeClass} ${stateClass}`}
               style={{ left: `${laneCenter}%`, top: `${topPct}%` }}
             >
-              <span className="bc-note-inner">{symbol}</span>
+              <img src={NOTE_IMAGES[note.type]} alt="" className="bc-note-img" draggable={false} />
             </div>
           )
         })}
