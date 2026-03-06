@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, memo } from 'react'
 import type { MiniGameModule, MiniGameSessionProps } from '../contracts'
 import { MAX_FRAME_DELTA_MS } from '../../primitives/constants'
 import parkSangminSprite from '../../../assets/images/same-character/park-sangmin.png'
@@ -45,8 +45,8 @@ const CHARACTER_BOTTOM = TORNADO_RUN_CHARACTER_BOTTOM
 const OBSTACLE_VIS = 48
 const COIN_VIS = 40
 const ITEM_VIS = 44
-// Hitbox sizes (much smaller than visual for fair collision)
-const OBSTACLE_HIT = 20
+// Hitbox sizes for collision detection
+const OBSTACLE_HIT = 34
 const COIN_HIT = 36       // coins generous
 const ITEM_HIT = 40       // items generous
 
@@ -60,7 +60,7 @@ const SPAWN_INTERVAL_BASE_MS = 1400
 const SPAWN_INTERVAL_MIN_MS = 450
 const SPAWN_INTERVAL_DECAY = 0.94
 
-const PLAYER_HITBOX_SHRINK = 16
+const PLAYER_HITBOX_SHRINK = 8
 const ITEM_COLLECT_SIDE_PADDING = 16
 const ITEM_COLLECT_TOP_PADDING = 12
 const ITEM_COLLECT_BOTTOM_PADDING = 44
@@ -119,9 +119,9 @@ function visSize(t: ObsType) {
 }
 // Hitbox size (for collision)
 function hitSize(t: ObsType) {
-  if (t === 'gust') return 14
-  if (t === 'dark_cloud') return 18
-  if (t === 'lightning') return 18
+  if (t === 'gust') return 28
+  if (t === 'dark_cloud') return 36
+  if (t === 'lightning') return 30
   if (t === 'whirlwind') return OBSTACLE_HIT
   if (t === 'coin') return COIN_HIT
   return ITEM_HIT
@@ -218,26 +218,38 @@ const PIXEL_MAP: Record<string, [number, number, string][]> = {
   score_zone: STAR_PIXELS, magnet: MAGNET_PIXELS, slowmo: SLOW_PIXELS,
 }
 
-function PixelSprite({ type, size }: { type: ObsType; size: number }) {
+// Pre-compute boxShadow strings per type+size to avoid recalculating every frame
+const pixelShadowCache = new Map<string, string>()
+function getPixelShadow(type: ObsType, size: number): string {
+  const key = `${type}_${size}`
+  const cached = pixelShadowCache.get(key)
+  if (cached) return cached
   const pixels = PIXEL_MAP[type]
-  if (!pixels || type === 'lightning_warn') {
-    // Warning: flashing red X
+  if (!pixels) return ''
+  const scale = size / (10 * PX)
+  const shadow = pixels.map(([x, y, c]) => `${x * PX * scale}px ${y * PX * scale}px 0 0 ${c}`).join(',')
+  pixelShadowCache.set(key, shadow)
+  return shadow
+}
+
+const PixelSprite = memo(function PixelSprite({ type, size }: { type: ObsType; size: number }) {
+  if (!PIXEL_MAP[type] || type === 'lightning_warn') {
     return <div style={{ width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <span style={{ color: '#ef4444', fontSize: size * 0.6, fontWeight: 900, fontFamily: 'monospace' }}>!</span>
     </div>
   }
-  const scale = size / (10 * PX) // normalize to ~10-unit grid
+  const scale = size / (10 * PX)
   return (
     <div style={{ width: size, height: size, position: 'relative', imageRendering: 'pixelated' }}>
       <div style={{
         position: 'absolute',
         width: PX * scale, height: PX * scale,
-        boxShadow: pixels.map(([x, y, c]) => `${x * PX * scale}px ${y * PX * scale}px 0 0 ${c}`).join(','),
+        boxShadow: getPixelShadow(type, size),
         imageRendering: 'pixelated',
       }} />
     </div>
   )
-}
+})
 
 type ObstacleTone = 'danger' | 'reward' | 'item' | 'warning'
 
@@ -315,7 +327,7 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   const [score, setScore] = useState(0)
   const [coinCount, setCoinCount] = useState(0)
   const [distance, setDistance] = useState(0)
-  const [speed, setSpeed] = useState(START_SPEED)
+  const speedRef = useRef(START_SPEED)
   const [gameOver, setGameOver] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
   const [hasShield, setHasShield] = useState(false)
@@ -450,11 +462,11 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       const dt = Math.min(now - lastFrameRef.current, MAX_FRAME_DELTA_MS); lastFrameRef.current = now
       const ts = hasSlowmoRef.current ? SLOWMO_FACTOR : 1
       const gd = dt * ts
-      elapsedMsRef.current += dt; setElapsedMs(elapsedMsRef.current)
-      if (elapsedMsRef.current >= GAME_TIMEOUT_MS) { finishRound(); return }
+      const prevSec = Math.ceil((GAME_TIMEOUT_MS - elapsedMsRef.current) / 1000); elapsedMsRef.current += dt; const curSec = Math.ceil((GAME_TIMEOUT_MS - elapsedMsRef.current) / 1000); if (prevSec !== curSec) setElapsedMs(elapsedMsRef.current)
+      if (elapsedMsRef.current >= GAME_TIMEOUT_MS) { setDistance(distanceRef.current); finishRound(); return }
 
       const ut = (hr: {current:boolean}, mr: {current:number}, sh: (v:boolean)=>void, sm: (v:number)=>void) => {
-        if (hr.current) { mr.current = Math.max(0, mr.current - dt); sm(mr.current); if (mr.current <= 0) { hr.current = false; sh(false) } }
+        if (hr.current) { mr.current = Math.max(0, mr.current - dt); if (mr.current <= 0) { hr.current = false; sh(false); sm(0) } }
       }
       ut(hasShieldRef, shieldMsRef, setHasShield, setShieldRemainingMs)
       ut(hasScoreZoneRef, scoreZoneMsRef, setHasScoreZone, setScoreZoneRemainingMs)
@@ -462,7 +474,7 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       ut(hasMagnetRef, magnetMsRef, setHasMagnet, setMagnetRemainingMs)
       ut(hasSlowmoRef, slowmoMsRef, setHasSlowmo, setSlowmoRemainingMs)
       if (isDashingRef.current) { dashTimerRef.current = Math.max(0, dashTimerRef.current - dt); if (dashTimerRef.current <= 0) { isDashingRef.current = false; setIsDashing(false) } }
-      if (dashCooldownRef.current > 0) { dashCooldownRef.current = Math.max(0, dashCooldownRef.current - dt); setDashCooldown(dashCooldownRef.current) }
+      if (dashCooldownRef.current > 0) { const prev = dashCooldownRef.current; dashCooldownRef.current = Math.max(0, dashCooldownRef.current - dt); if (Math.floor(prev / 500) !== Math.floor(dashCooldownRef.current / 500) || dashCooldownRef.current <= 0) setDashCooldown(dashCooldownRef.current) }
       if (coinComboRef.current > 0 && (elapsedMsRef.current - lastCoinTimeRef.current) > COMBO_DECAY_MS) { coinComboRef.current = 0; setCoinCombo(0) }
 
       const sec = elapsedMsRef.current / 1000
@@ -477,9 +489,9 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         level: levelRef.current,
       })
       const spd = Math.min(MAX_SPEED, START_SPEED + sec * ACCEL_PER_SECOND) * difficultyBeforeMove.speedMult
-      setSpeed(spd)
+      speedRef.current = spd
       const moved = spd * (gd / 1000)
-      distanceRef.current += moved / 100; setDistance(distanceRef.current)
+      distanceRef.current += moved / 100
 
       const nl = Math.floor(distanceRef.current / LEVEL_DISTANCE) + 1
       if (nl > levelRef.current) {
@@ -644,7 +656,7 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       if (hit) {
         const endReason = getDeathReason(hitType)
         setDeathReason(endReason)
-        playSfx('crash', 0.7, 0.85); triggerShake(12); triggerFlash('rgba(239,68,68,0.6)'); setScreenShakeClass('tr-death-shake'); setTimeout(() => setScreenShakeClass(''), 500); obstaclesRef.current = obs; setObstacles(obs); finishRound(endReason ?? undefined); return
+        playSfx('crash', 0.7, 0.85); triggerShake(12); triggerFlash('rgba(239,68,68,0.6)'); setScreenShakeClass('tr-death-shake'); setTimeout(() => setScreenShakeClass(''), 500); setDistance(distanceRef.current); obstaclesRef.current = obs; setObstacles(obs); finishRound(endReason ?? undefined); return
       }
       obstaclesRef.current = surv; setObstacles(surv); updateParticles()
       animFrameRef.current = window.requestAnimationFrame(step)
@@ -712,7 +724,7 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
         <div className="tr-field" style={{ width: BOARD_WIDTH, height: boardHeight }}>
           <div className="tr-sky" />
-          <div className="tr-ground" style={{ backgroundPositionY: `${(elapsedMs * speed) / 3000 % 48}px` }} />
+          <div className="tr-ground" style={{ backgroundPositionY: `${(elapsedMs * speedRef.current) / 3000 % 48}px` }} />
           {stageAnnouncement && <div className="tr-stage-pop">{stageAnnouncement}</div>}
           {laneCues.map((cue) => (
             cue.kind === 'neutral'
@@ -728,7 +740,7 @@ function TornadoRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
               )
           ))}
           {Array.from({ length: LANE_COUNT - 1 }, (_, i) => <div key={i} className="tr-lane" style={{ left: (i + 1) * LANE_WIDTH }} />)}
-          {speed > 350 && <div className="tr-spd" style={{ opacity: Math.min(1, (speed - 350) / 200) }} />}
+          {speedRef.current > 350 && <div className="tr-spd" style={{ opacity: Math.min(1, (speedRef.current - 350) / 200) }} />}
           {isFever && <div className="tr-fever-ov" />}
 
           {obstacles.map(o => {
