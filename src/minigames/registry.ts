@@ -1,187 +1,732 @@
-import type { MiniGameId, MiniGameManifest } from '../primitives/types'
+import { MINI_GAME_IDS, type MiniGameId, type MiniGameManifest } from '../primitives/types'
 import type { MiniGameModule } from './contracts'
-import { tapDashModule } from './tap-dash/module'
-import { runRunModule } from './run-run/module'
-import { sameCharacterModule } from './same-character/module'
-import { gogunbuntuModule } from './gogunbuntu/module'
-import { comboFormulaModule } from './combo-formula/module'
-import { chamChamChamModule } from './cham-cham-cham/module'
-import { intenseCheerModule } from './intense-cheer/module'
-import { fierceCheerModule } from './fierce-cheer/module'
-import { speedTapModule } from './speed-tap/module'
-import { colorMatchModule } from './color-match/module'
-import { rhythmTapModule } from './rhythm-tap/module'
-import { bubblePopModule } from './bubble-pop/module'
-import { starCatchModule } from './star-catch/module'
-import { memoryFlipModule } from './memory-flip/module'
-import { numberSortModule } from './number-sort/module'
-import { patternLockModule } from './pattern-lock/module'
-import { colorFloodModule } from './color-flood/module'
-import { slidePuzzleModule } from './slide-puzzle/module'
-import { quickDrawModule } from './quick-draw/module'
-import { simonSaysModule } from './simon-says/module'
-import { reactionTestModule } from './reaction-test/module'
-import { speedSortModule } from './speed-sort/module'
-import { lightSpeedModule } from './light-speed/module'
-import { snakeClassicModule } from './snake-classic/module'
-import { breakoutMiniModule } from './breakout-mini/module'
-import { pongSoloModule } from './pong-solo/module'
-import { flappySingerModule } from './flappy-singer/module'
-import { spaceDodgeModule } from './space-dodge/module'
-import { mathBlitzModule } from './math-blitz/module'
-import { ticTacProModule } from './tic-tac-pro/module'
-import { mineSweepMiniModule } from './mine-sweep-mini/module'
-import { connectFourModule } from './connect-four/module'
-import { rockScissorsModule } from './rock-scissors/module'
-import { stackTowerModule } from './stack-tower/module'
-import { gravityFlipModule } from './gravity-flip/module'
-import { cannonShotModule } from './cannon-shot/module'
-import { ballBounceMiniModule } from './ball-bounce-mini/module'
-import { ropeSwingModule } from './rope-swing/module'
-import { wordChainModule } from './word-chain/module'
-import { spotDiffModule } from './spot-diff/module'
-import { mazeRunModule } from './maze-run/module'
-import { sequenceMasterModule } from './sequence-master/module'
-import { oddOneOutModule } from './odd-one-out/module'
-import { musicMemoryModule } from './music-memory/module'
-import { drumCircleModule } from './drum-circle/module'
-import { danceStepModule } from './dance-step/module'
-import { beatCatchModule } from './beat-catch/module'
-import { karaokePitchModule } from './karaoke-pitch/module'
-import { dodgeBallModule } from './dodge-ball/module'
-import { lavaFloorModule } from './lava-floor/module'
-import { iceSlideModule } from './ice-slide/module'
-import { tornadoRunModule } from './tornado-run/module'
-import { zombieRunModule } from './zombie-run/module'
-import { treasureDigModule } from './treasure-dig/module'
-import { cookingRushModule } from './cooking-rush/module'
-import { paintMixModule } from './paint-mix/module'
-import { cardFlipSpeedModule } from './card-flip-speed/module'
-import { emojiMatchModule } from './emoji-match/module'
-import { musicHarmonyModule } from './music-harmony/module'
 
-export const miniGameModules: MiniGameModule[] = [
-  tapDashModule,
-  gogunbuntuModule,
-  sameCharacterModule,
-  comboFormulaModule,
-  chamChamChamModule,
-  runRunModule,
-  intenseCheerModule,
-  fierceCheerModule,
-  speedTapModule,
-  colorMatchModule,
-  rhythmTapModule,
-  bubblePopModule,
-  starCatchModule,
-  memoryFlipModule,
-  numberSortModule,
-  patternLockModule,
-  colorFloodModule,
-  slidePuzzleModule,
-  quickDrawModule,
-  simonSaysModule,
-  reactionTestModule,
-  speedSortModule,
-  lightSpeedModule,
-  snakeClassicModule,
-  breakoutMiniModule,
-  pongSoloModule,
-  flappySingerModule,
-  spaceDodgeModule,
-  mathBlitzModule,
-  ticTacProModule,
-  mineSweepMiniModule,
-  connectFourModule,
-  rockScissorsModule,
-  stackTowerModule,
-  gravityFlipModule,
-  cannonShotModule,
-  ballBounceMiniModule,
-  ropeSwingModule,
-  wordChainModule,
-  spotDiffModule,
-  mazeRunModule,
-  sequenceMasterModule,
-  oddOneOutModule,
-  musicMemoryModule,
-  drumCircleModule,
-  danceStepModule,
-  beatCatchModule,
-  karaokePitchModule,
-  dodgeBallModule,
-  lavaFloorModule,
-  iceSlideModule,
-  tornadoRunModule,
-  zombieRunModule,
-  treasureDigModule,
-  cookingRushModule,
-  paintMixModule,
-  cardFlipSpeedModule,
-  emojiMatchModule,
-  musicHarmonyModule,
-]
+interface MiniGameRegistryEntry {
+  readonly manifest: MiniGameManifest
+  readonly loadModule: () => Promise<MiniGameModule>
+}
 
-export const miniGameManifests: MiniGameManifest[] = miniGameModules.map((module) => module.manifest)
+const miniGameRegistryById: Record<MiniGameId, MiniGameRegistryEntry> = {
+  'tap-dash': {
+    manifest: {
+      id: 'tap-dash',
+      title: 'Tap Dash',
+      description: 'Tap characters appearing at random targets to score in 30 seconds!',
+      unlockCost: 0,
+      baseReward: 8,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#ff8a00',
+    },
+    loadModule: async () => (await import('./tap-dash/module')).tapDashModule,
+  },
+  'run-run': {
+    manifest: {
+      id: 'run-run',
+      title: 'Run Run',
+      description: 'Tap to switch directions and zigzag as far as you can!',
+      unlockCost: 60,
+      baseReward: 14,
+      scoreRewardMultiplier: 0.7,
+      accentColor: '#ef4444',
+    },
+    loadModule: async () => (await import('./run-run/module')).runRunModule,
+  },
+  'same-character': {
+    manifest: {
+      id: 'same-character',
+      title: 'Same Side',
+      description: 'Pick the matching character from left or right to keep the combo going.',
+      unlockCost: 140,
+      baseReward: 24,
+      scoreRewardMultiplier: 0.7,
+      accentColor: '#f59e0b',
+    },
+    loadModule: async () => (await import('./same-character/module')).sameCharacterModule,
+  },
+  'gogunbuntu': {
+    manifest: {
+      id: 'gogunbuntu',
+      title: 'Gogunbuntu',
+      description: 'Action runner: jump and swing past obstacles for max score',
+      unlockCost: 0,
+      baseReward: 24,
+      scoreRewardMultiplier: 0.95,
+      accentColor: '#0ea5e9',
+    },
+    loadModule: async () => (await import('./gogunbuntu/module')).gogunbuntuModule,
+  },
+  'combo-formula': {
+    manifest: {
+      id: 'combo-formula',
+      title: 'Combine',
+      description: 'Enter character combos in order and press OK for fever chains',
+      unlockCost: 180,
+      baseReward: 26,
+      scoreRewardMultiplier: 0.85,
+      accentColor: '#06b6d4',
+    },
+    loadModule: async () => (await import('./combo-formula/module')).comboFormulaModule,
+  },
+  'cham-cham-cham': {
+    manifest: {
+      id: 'cham-cham-cham',
+      title: 'Cham-Cham-Cham',
+      description: 'Take turns: attack to match, defend to dodge. 0 HP = Game Over!',
+      unlockCost: 80,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.5,
+      accentColor: '#e11d48',
+    },
+    loadModule: async () => (await import('./cham-cham-cham/module')).chamChamChamModule,
+  },
+  'intense-cheer': {
+    manifest: {
+      id: 'intense-cheer',
+      title: 'Dunga-Dunga',
+      description: 'Pixel bounce! Tap L/R to float up through walls & spikes.',
+      unlockCost: 50,
+      baseReward: 12,
+      scoreRewardMultiplier: 0.6,
+      accentColor: '#2d1b69',
+    },
+    loadModule: async () => (await import('./intense-cheer/module')).intenseCheerModule,
+  },
+  'fierce-cheer': {
+    manifest: {
+      id: 'fierce-cheer',
+      title: 'Fierce Cheer',
+      description: 'Cheer the stage! Bounce stick off walls for max score in 20s!',
+      unlockCost: 120,
+      baseReward: 20,
+      scoreRewardMultiplier: 0.7,
+      accentColor: '#a855f7',
+    },
+    loadModule: async () => (await import('./fierce-cheer/module')).fierceCheerModule,
+  },
+  'speed-tap': {
+    manifest: {
+      id: 'speed-tap',
+      title: 'Speed Tap',
+      description: 'Tap like crazy for 10 seconds to get the highest score! Double points during RUSH TIME!',
+      unlockCost: 20,
+      baseReward: 10,
+      scoreRewardMultiplier: 1.0,
+      accentColor: '#ef4444',
+    },
+    loadModule: async () => (await import('./speed-tap/module')).speedTapModule,
+  },
+  'color-match': {
+    manifest: {
+      id: 'color-match',
+      title: 'Color Match',
+      description: 'Does the color name match the text color? Stroop test challenge!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#3b82f6',
+    },
+    loadModule: async () => (await import('./color-match/module')).colorMatchModule,
+  },
+  'rhythm-tap': {
+    manifest: {
+      id: 'rhythm-tap',
+      title: 'Rhythm Tap',
+      description: 'Tap shrinking circles on time! Miss and lose HP!',
+      unlockCost: 40,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#ec4899',
+    },
+    loadModule: async () => (await import('./rhythm-tap/module')).rhythmTapModule,
+  },
+  'bubble-pop': {
+    manifest: {
+      id: 'bubble-pop',
+      title: 'Bubble Pop',
+      description: 'Pop the bubbles! 3 bombs and it\'s game over! Gets harder as you score!',
+      unlockCost: 25,
+      baseReward: 11,
+      scoreRewardMultiplier: 1.05,
+      accentColor: '#06b6d4',
+    },
+    loadModule: async () => (await import('./bubble-pop/module')).bubblePopModule,
+  },
+  'star-catch': {
+    manifest: {
+      id: 'star-catch',
+      title: 'Star Catch',
+      description: 'Catch falling stars! Combo for Fever Mode!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#f59e0b',
+    },
+    loadModule: async () => (await import('./star-catch/module')).starCatchModule,
+  },
+  'memory-flip': {
+    manifest: {
+      id: 'memory-flip',
+      title: 'Memory Flip',
+      description: 'Flip cards to find pairs! Chain matches for combo bonus + extra time!',
+      unlockCost: 45,
+      baseReward: 15,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#8b5cf6',
+    },
+    loadModule: async () => (await import('./memory-flip/module')).memoryFlipModule,
+  },
+  'number-sort': {
+    manifest: {
+      id: 'number-sort',
+      title: 'Number Sort',
+      description: 'Tap numbers 1-N in order! Fast clear = time bonus!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#10b981',
+    },
+    loadModule: async () => (await import('./number-sort/module')).numberSortModule,
+  },
+  'pattern-lock': {
+    manifest: {
+      id: 'pattern-lock',
+      title: 'Pattern Lock',
+      description: 'Remember growing patterns and repeat!',
+      unlockCost: 50,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.3,
+      accentColor: '#6366f1',
+    },
+    loadModule: async () => (await import('./pattern-lock/module')).patternLockModule,
+  },
+  'color-flood': {
+    manifest: {
+      id: 'color-flood',
+      title: 'Color Flood',
+      description: 'Pick colors to fill the board! Fewer moves = higher score!',
+      unlockCost: 55,
+      baseReward: 18,
+      scoreRewardMultiplier: 1.25,
+      accentColor: '#14b8a6',
+    },
+    loadModule: async () => (await import('./color-flood/module')).colorFloodModule,
+  },
+  'slide-puzzle': {
+    manifest: {
+      id: 'slide-puzzle',
+      title: 'Slide Puzzle',
+      description: 'Slide tiles to sort numbers! Faster = higher score!',
+      unlockCost: 60,
+      baseReward: 20,
+      scoreRewardMultiplier: 1.3,
+      accentColor: '#0ea5e9',
+    },
+    loadModule: async () => (await import('./slide-puzzle/module')).slidePuzzleModule,
+  },
+  'quick-draw': {
+    manifest: {
+      id: 'quick-draw',
+      title: 'Quick Draw',
+      description: 'Be a gunslinger! Tap fastest on DRAW!',
+      unlockCost: 35,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#b45309',
+    },
+    loadModule: async () => (await import('./quick-draw/module')).quickDrawModule,
+  },
+  'simon-says': {
+    manifest: {
+      id: 'simon-says',
+      title: 'Simon Says',
+      description: 'RGBY! Remember color order and repeat!',
+      unlockCost: 40,
+      baseReward: 15,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#22c55e',
+    },
+    loadModule: async () => (await import('./simon-says/module')).simonSaysModule,
+  },
+  'reaction-test': {
+    manifest: {
+      id: 'reaction-test',
+      title: 'Reaction Test',
+      description: 'Tap when green! 10 rounds with fake-outs, life system & speed ramp!',
+      unlockCost: 20,
+      baseReward: 10,
+      scoreRewardMultiplier: 1.0,
+      accentColor: '#16a34a',
+    },
+    loadModule: async () => (await import('./reaction-test/module')).reactionTestModule,
+  },
+  'speed-sort': {
+    manifest: {
+      id: 'speed-sort',
+      title: 'Speed Sort',
+      description: 'Sort characters left/right by rule, fast!',
+      unlockCost: 45,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#f97316',
+    },
+    loadModule: async () => (await import('./speed-sort/module')).speedSortModule,
+  },
+  'light-speed': {
+    manifest: {
+      id: 'light-speed',
+      title: 'Light Speed',
+      description: 'Tap pixel blocks at lightning speed! Dodge bombs, smash bosses!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#f7e26b',
+    },
+    loadModule: async () => (await import('./light-speed/module')).lightSpeedModule,
+  },
+  'snake-classic': {
+    manifest: {
+      id: 'snake-classic',
+      title: 'Snake Classic',
+      description: 'Retro dot snake! Eat apples, dodge blocks, chain combos & trigger FEVER!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#33ff33',
+    },
+    loadModule: async () => (await import('./snake-classic/module')).snakeClassicModule,
+  },
+  'breakout-mini': {
+    manifest: {
+      id: 'breakout-mini',
+      title: 'Breakout',
+      description: 'Bounce ball with paddle to break all bricks!',
+      unlockCost: 50,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#ff5555',
+    },
+    loadModule: async () => (await import('./breakout-mini/module')).breakoutMiniModule,
+  },
+  'pong-solo': {
+    manifest: {
+      id: 'pong-solo',
+      title: 'Pong Solo',
+      description: 'Smash bricks, catch power-ups, survive waves!',
+      unlockCost: 25,
+      baseReward: 11,
+      scoreRewardMultiplier: 1.05,
+      accentColor: '#a858f8',
+    },
+    loadModule: async () => (await import('./pong-solo/module')).pongSoloModule,
+  },
+  'flappy-singer': {
+    manifest: {
+      id: 'flappy-singer',
+      title: 'Flappy Singer',
+      description: 'Tap to fly through pipes!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#0ea5e9',
+    },
+    loadModule: async () => (await import('./flappy-singer/module')).flappySingerModule,
+  },
+  'space-dodge': {
+    manifest: {
+      id: 'space-dodge',
+      title: 'Space Dodge',
+      description: 'Pixel art space survival with Relay Core overdrive, bosses, lasers, and warp gates.',
+      unlockCost: 40,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#1e3a5f',
+    },
+    loadModule: async () => (await import('./space-dodge/module')).spaceDodgeModule,
+  },
+  'math-blitz': {
+    manifest: {
+      id: 'math-blitz',
+      title: 'Math Blitz',
+      description: 'Solve math problems fast! Speed = high score!',
+      unlockCost: 25,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#6366f1',
+    },
+    loadModule: async () => (await import('./math-blitz/module')).mathBlitzModule,
+  },
+  'tic-tac-pro': {
+    manifest: {
+      id: 'tic-tac-pro',
+      title: 'Tic Tac Pro',
+      description: 'Pixel Tic-Tac-Toe vs AI! Win 30pts, Draw 10pts!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#0d9488',
+    },
+    loadModule: async () => (await import('./tic-tac-pro/module')).ticTacProModule,
+  },
+  'mine-sweep-mini': {
+    manifest: {
+      id: 'mine-sweep-mini',
+      title: 'Mine Sweep',
+      description: 'Open all safe tiles avoiding mines!',
+      unlockCost: 45,
+      baseReward: 15,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#64748b',
+    },
+    loadModule: async () => (await import('./mine-sweep-mini/module')).mineSweepMiniModule,
+  },
+  'connect-four': {
+    manifest: {
+      id: 'connect-four',
+      title: 'Connect Four',
+      description: 'Beat AI at Connect Four! First to connect 4 wins!',
+      unlockCost: 50,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.25,
+      accentColor: '#ff004d',
+    },
+    loadModule: async () => (await import('./connect-four/module')).connectFourModule,
+  },
+  'rock-scissors': {
+    manifest: {
+      id: 'rock-scissors',
+      title: 'Rock Scissors',
+      description: 'Rock Paper Scissors streak! Read AI patterns and win big!',
+      unlockCost: 20,
+      baseReward: 10,
+      scoreRewardMultiplier: 1.0,
+      accentColor: '#f43f5e',
+    },
+    loadModule: async () => (await import('./rock-scissors/module')).rockScissorsModule,
+  },
+  'stack-tower': {
+    manifest: {
+      id: 'stack-tower',
+      title: 'Stack Tower',
+      description: 'Stack blocks precisely! Perfect match = bonus!',
+      unlockCost: 40,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#f97316',
+    },
+    loadModule: async () => (await import('./stack-tower/module')).stackTowerModule,
+  },
+  'gravity-flip': {
+    manifest: {
+      id: 'gravity-flip',
+      title: 'Gravity Flip',
+      description: 'Flip gravity, dodge the red walls, and survive for 120 seconds. Collect coins and power-ups to boost your score.',
+      unlockCost: 45,
+      baseReward: 15,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#7c3aed',
+    },
+    loadModule: async () => (await import('./gravity-flip/module')).gravityFlipModule,
+  },
+  'cannon-shot': {
+    manifest: {
+      id: 'cannon-shot',
+      title: 'Cannon Shot',
+      description: 'Pixel cannon artillery with portals, wind jets, bonus targets, and bomb hazards.',
+      unlockCost: 50,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#dc2626',
+    },
+    loadModule: async () => (await import('./cannon-shot/module')).cannonShotModule,
+  },
+  'ball-bounce-mini': {
+    manifest: {
+      id: 'ball-bounce-mini',
+      title: 'Ball Bounce',
+      description: 'Tap ball to bounce! Floor = Game Over!',
+      unlockCost: 25,
+      baseReward: 11,
+      scoreRewardMultiplier: 1.05,
+      accentColor: '#e11d48',
+    },
+    loadModule: async () => (await import('./ball-bounce-mini/module')).ballBounceMiniModule,
+  },
+  'rope-swing': {
+    manifest: {
+      id: 'rope-swing',
+      title: 'Rope Swing',
+      description: 'Pixel adventure! Swing, collect, dodge and level up!',
+      unlockCost: 55,
+      baseReward: 17,
+      scoreRewardMultiplier: 1.25,
+      accentColor: '#059669',
+    },
+    loadModule: async () => (await import('./rope-swing/module')).ropeSwingModule,
+  },
+  'word-chain': {
+    manifest: {
+      id: 'word-chain',
+      title: 'Word Chain',
+      description: 'Word chain! Pick a word starting with the last letter!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#0891b2',
+    },
+    loadModule: async () => (await import('./word-chain/module')).wordChainModule,
+  },
+  'spot-diff': {
+    manifest: {
+      id: 'spot-diff',
+      title: 'Spot Diff',
+      description: 'Find the odd one while glitches, blackout, and shuffles pile on.',
+      unlockCost: 25,
+      baseReward: 11,
+      scoreRewardMultiplier: 1.05,
+      accentColor: '#6366f1',
+    },
+    loadModule: async () => (await import('./spot-diff/module')).spotDiffModule,
+  },
+  'maze-run': {
+    manifest: {
+      id: 'maze-run',
+      title: 'Maze Run',
+      description: 'Escape the maze fast! Collect keys and avoid ghosts!',
+      unlockCost: 40,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#5b21b6',
+    },
+    loadModule: async () => (await import('./maze-run/module')).mazeRunModule,
+  },
+  'sequence-master': {
+    manifest: {
+      id: 'sequence-master',
+      title: 'Sequence Master',
+      description: 'Read the number pattern, guess the next!',
+      unlockCost: 45,
+      baseReward: 15,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#2563eb',
+    },
+    loadModule: async () => (await import('./sequence-master/module')).sequenceMasterModule,
+  },
+  'odd-one-out': {
+    manifest: {
+      id: 'odd-one-out',
+      title: 'Odd One Out',
+      description: 'Find the odd pixel dot! Retro puzzle challenge!',
+      unlockCost: 20,
+      baseReward: 10,
+      scoreRewardMultiplier: 1.0,
+      accentColor: '#6abf4b',
+    },
+    loadModule: async () => (await import('./odd-one-out/module')).oddOneOutModule,
+  },
+  'music-memory': {
+    manifest: {
+      id: 'music-memory',
+      title: 'Music Memory',
+      description: 'Watch the notes light up, then repeat the melody in order! Dodge fake notes!',
+      unlockCost: 50,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.25,
+      accentColor: '#c026d3',
+    },
+    loadModule: async () => (await import('./music-memory/module')).musicMemoryModule,
+  },
+  'drum-circle': {
+    manifest: {
+      id: 'drum-circle',
+      title: 'Drum Circle',
+      description: 'Hit drums to the beat! Rhythm game!',
+      unlockCost: 55,
+      baseReward: 17,
+      scoreRewardMultiplier: 1.25,
+      accentColor: '#ff6600',
+    },
+    loadModule: async () => (await import('./drum-circle/module')).drumCircleModule,
+  },
+  'dance-step': {
+    manifest: {
+      id: 'dance-step',
+      title: 'Dance Step',
+      description: 'Tap arrows in order! DDR-style dance!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#ff3377',
+    },
+    loadModule: async () => (await import('./dance-step/module')).danceStepModule,
+  },
+  'beat-catch': {
+    manifest: {
+      id: 'beat-catch',
+      title: 'Beat Catch',
+      description: 'Catch falling beats in 3 lanes! Rhythm game!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#f43f5e',
+    },
+    loadModule: async () => (await import('./beat-catch/module')).beatCatchModule,
+  },
+  'karaoke-pitch': {
+    manifest: {
+      id: 'karaoke-pitch',
+      title: 'Karaoke Pitch',
+      description: 'Drag to match the moving TARGET! Catch notes for bonus!',
+      unlockCost: 40,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#d946ef',
+    },
+    loadModule: async () => (await import('./karaoke-pitch/module')).karaokePitchModule,
+  },
+  'dodge-ball': {
+    manifest: {
+      id: 'dodge-ball',
+      title: 'Dodge Ball',
+      description: 'Retro arcade dodge! Survive waves, collect coins, go FEVER!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#ff004d',
+    },
+    loadModule: async () => (await import('./dodge-ball/module')).dodgeBallModule,
+  },
+  'lava-floor': {
+    manifest: {
+      id: 'lava-floor',
+      title: 'Lava Floor',
+      description: 'The floor is lava! Jump to the platforms!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#f97316',
+    },
+    loadModule: async () => (await import('./lava-floor/module')).lavaFloorModule,
+  },
+  'ice-slide': {
+    manifest: {
+      id: 'ice-slide',
+      title: 'Ice Slide',
+      description: '8BIT ICE PUZZLE! CRACK, SPRING, TELEPORT, GEM!',
+      unlockCost: 50,
+      baseReward: 16,
+      scoreRewardMultiplier: 1.2,
+      accentColor: '#4a9eff',
+    },
+    loadModule: async () => (await import('./ice-slide/module')).iceSlideModule,
+  },
+  'tornado-run': {
+    manifest: {
+      id: 'tornado-run',
+      title: 'Tornado Run',
+      description: 'Dodge winds and collect coins!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#1a1a2e',
+    },
+    loadModule: async () => (await import('./tornado-run/module')).tornadoRunModule,
+  },
+  'zombie-run': {
+    manifest: {
+      id: 'zombie-run',
+      title: 'Zombie Run',
+      description: 'Zombies are coming! Tap like crazy to escape!',
+      unlockCost: 25,
+      baseReward: 11,
+      scoreRewardMultiplier: 1.05,
+      accentColor: '#15803d',
+    },
+    loadModule: async () => (await import('./zombie-run/module')).zombieRunModule,
+  },
+  'treasure-dig': {
+    manifest: {
+      id: 'treasure-dig',
+      title: 'Treasure Dig',
+      description: 'Dig the ground to find treasure! Watch out for bombs!',
+      unlockCost: 30,
+      baseReward: 12,
+      scoreRewardMultiplier: 1.1,
+      accentColor: '#a16207',
+    },
+    loadModule: async () => (await import('./treasure-dig/module')).treasureDigModule,
+  },
+  'cooking-rush': {
+    manifest: {
+      id: 'cooking-rush',
+      title: 'Cooking Rush',
+      description: 'Follow the recipe! Add ingredients in order to cook!',
+      unlockCost: 35,
+      baseReward: 13,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#ea580c',
+    },
+    loadModule: async () => (await import('./cooking-rush/module')).cookingRushModule,
+  },
+  'paint-mix': {
+    manifest: {
+      id: 'paint-mix',
+      title: 'Paint Mix',
+      description: 'Mix RGB paint to create the target color!',
+      unlockCost: 40,
+      baseReward: 14,
+      scoreRewardMultiplier: 1.15,
+      accentColor: '#7c3aed',
+    },
+    loadModule: async () => (await import('./paint-mix/module')).paintMixModule,
+  },
+  'card-flip-speed': {
+    manifest: {
+      id: 'card-flip-speed',
+      title: 'Card Flip',
+      description: 'Will the next card be higher or lower? Predict fast!',
+      unlockCost: 20,
+      baseReward: 10,
+      scoreRewardMultiplier: 1.0,
+      accentColor: '#1e40af',
+    },
+    loadModule: async () => (await import('./card-flip-speed/module')).cardFlipSpeedModule,
+  },
+  'emoji-match': {
+    manifest: {
+      id: 'emoji-match',
+      title: 'Pixel Match',
+      description: 'Retro dot style! Find and tap the target item!',
+      unlockCost: 20,
+      baseReward: 10,
+      scoreRewardMultiplier: 1.0,
+      accentColor: '#00ff88',
+    },
+    loadModule: async () => (await import('./emoji-match/module')).emojiMatchModule,
+  },
+  'music-harmony': {
+    manifest: {
+      id: 'music-harmony',
+      title: 'Music Harmony',
+      description: '8-bit chord matching! Listen and pick the notes. Boss rounds every 5 levels!',
+      unlockCost: 80,
+      baseReward: 25,
+      scoreRewardMultiplier: 0.04,
+      accentColor: '#7c3aed',
+    },
+    loadModule: async () => (await import('./music-harmony/module')).musicHarmonyModule,
+  },
+}
 
-export const miniGameModuleById: Record<MiniGameId, MiniGameModule> = {
-  'tap-dash': tapDashModule,
-  'run-run': runRunModule,
-  'same-character': sameCharacterModule,
-  'gogunbuntu': gogunbuntuModule,
-  'combo-formula': comboFormulaModule,
-  'cham-cham-cham': chamChamChamModule,
-  'intense-cheer': intenseCheerModule,
-  'fierce-cheer': fierceCheerModule,
-  'speed-tap': speedTapModule,
-  'color-match': colorMatchModule,
-  'rhythm-tap': rhythmTapModule,
-  'bubble-pop': bubblePopModule,
-  'star-catch': starCatchModule,
-  'memory-flip': memoryFlipModule,
-  'number-sort': numberSortModule,
-  'pattern-lock': patternLockModule,
-  'color-flood': colorFloodModule,
-  'slide-puzzle': slidePuzzleModule,
-  'quick-draw': quickDrawModule,
-  'simon-says': simonSaysModule,
-  'reaction-test': reactionTestModule,
-  'speed-sort': speedSortModule,
-  'light-speed': lightSpeedModule,
-  'snake-classic': snakeClassicModule,
-  'breakout-mini': breakoutMiniModule,
-  'pong-solo': pongSoloModule,
-  'flappy-singer': flappySingerModule,
-  'space-dodge': spaceDodgeModule,
-  'math-blitz': mathBlitzModule,
-  'tic-tac-pro': ticTacProModule,
-  'mine-sweep-mini': mineSweepMiniModule,
-  'connect-four': connectFourModule,
-  'rock-scissors': rockScissorsModule,
-  'stack-tower': stackTowerModule,
-  'gravity-flip': gravityFlipModule,
-  'cannon-shot': cannonShotModule,
-  'ball-bounce-mini': ballBounceMiniModule,
-  'rope-swing': ropeSwingModule,
-  'word-chain': wordChainModule,
-  'spot-diff': spotDiffModule,
-  'maze-run': mazeRunModule,
-  'sequence-master': sequenceMasterModule,
-  'odd-one-out': oddOneOutModule,
-  'music-memory': musicMemoryModule,
-  'drum-circle': drumCircleModule,
-  'dance-step': danceStepModule,
-  'beat-catch': beatCatchModule,
-  'karaoke-pitch': karaokePitchModule,
-  'dodge-ball': dodgeBallModule,
-  'lava-floor': lavaFloorModule,
-  'ice-slide': iceSlideModule,
-  'tornado-run': tornadoRunModule,
-  'zombie-run': zombieRunModule,
-  'treasure-dig': treasureDigModule,
-  'cooking-rush': cookingRushModule,
-  'paint-mix': paintMixModule,
-  'card-flip-speed': cardFlipSpeedModule,
-  'emoji-match': emojiMatchModule,
-  'music-harmony': musicHarmonyModule,
+export const miniGameManifestById: Record<MiniGameId, MiniGameManifest> = MINI_GAME_IDS.reduce(
+  (manifestById, id) => {
+    manifestById[id] = miniGameRegistryById[id].manifest
+    return manifestById
+  },
+  {} as Record<MiniGameId, MiniGameManifest>,
+)
+
+export const miniGameManifests: MiniGameManifest[] = MINI_GAME_IDS.map((id) => miniGameManifestById[id])
+
+export async function loadMiniGameModule(id: MiniGameId): Promise<MiniGameModule> {
+  return await miniGameRegistryById[id].loadModule()
 }

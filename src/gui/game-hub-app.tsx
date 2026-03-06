@@ -9,7 +9,8 @@ import attendanceBonusImg from '../../assets/images/generated/attendance-bonus.p
 import { GameHubUseCases } from '../application/game-hub-use-cases'
 import { HUB_BOOTSTRAP_CONFIG, HUB_STORAGE_KEY } from '../primitives/constants'
 import type { HubSnapshot, MiniGameId, MiniGameResult } from '../primitives/types'
-import { miniGameManifests, miniGameModuleById } from '../minigames/registry'
+import type { MiniGameModule } from '../minigames/contracts'
+import { loadMiniGameModule, miniGameManifestById, miniGameManifests } from '../minigames/registry'
 import { LocalStorageProgressStore } from '../infrastructure/local-storage-progress-store'
 import { projectHubUi } from '../view-model/hub-ui-model'
 import lobbyTapDashIcon from '../../assets/images/generated/lobby-icons/lobby-tap-dash.png'
@@ -109,6 +110,7 @@ import uiTabSwitchSfx from '../../assets/sounds/ui/tab-switch.mp3'
 import uiUnlockPopSfx from '../../assets/sounds/ui/unlock-pop.mp3'
 import uiErrorBuzzSfx from '../../assets/sounds/ui/error-buzz.mp3'
 import { STACK_TOWER_GAMEPLAY_BGM_VOLUME } from '../minigames/stack-tower/config'
+import { ResponsiveGameViewport } from './responsive-game-viewport'
 
 const DEFAULT_SELECTED_GAME_ID: MiniGameId = HUB_BOOTSTRAP_CONFIG.starterUnlockedGameIds[0]
 const GAME_START_COUNTDOWN_LABELS = ['3', '2', '1', 'START!'] as const
@@ -282,6 +284,8 @@ export function GameHubApp() {
   const [isAudioReady, setAudioReady] = useState(false)
   const [unlockPopupGameId, setUnlockPopupGameId] = useState<MiniGameId | null>(null)
   const [unlockBurstActive, setUnlockBurstActive] = useState(false)
+  const [activeModule, setActiveModule] = useState<MiniGameModule | null>(null)
+  const [activeModuleError, setActiveModuleError] = useState<string | null>(null)
 
   useEffect(() => {
     void reload(useCases, DEFAULT_SELECTED_GAME_ID, null, setSnapshot, setError)
@@ -310,6 +314,35 @@ export function GameHubApp() {
     setSelectedGameId(fallbackCard.manifest.id)
     setIsLobbyGamePicked(true)
   }, [activeGameId, isLobbyGamePicked, resultGameId, selectedGameId, snapshot])
+
+  useEffect(() => {
+    if (activeGameId === null) {
+      setActiveModule(null)
+      setActiveModuleError(null)
+      return
+    }
+
+    let cancelled = false
+    setActiveModule(null)
+    setActiveModuleError(null)
+
+    void loadMiniGameModule(activeGameId).then(
+      (module) => {
+        if (!cancelled) {
+          setActiveModule(module)
+        }
+      },
+      (caught: unknown) => {
+        if (!cancelled) {
+          setActiveModuleError(toMessage(caught))
+        }
+      },
+    )
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeGameId])
 
   useEffect(() => {
     return () => {
@@ -529,6 +562,7 @@ export function GameHubApp() {
     setActiveGameId(gameId)
     setCountdownStepIndex(0)
 
+    void loadMiniGameModule(gameId)
     await reload(useCases, gameId, gameId, setSnapshot, setError)
   }
 
@@ -619,7 +653,6 @@ export function GameHubApp() {
     }
   }
 
-  const activeModule = activeGameId ? miniGameModuleById[activeGameId] : null
   const activeCard = activeGameId ? snapshot?.cards.find((card) => card.manifest.id === activeGameId) ?? null : null
   const isResultActionView = activeGameId === null && resultGameId !== null
   const isCountdownActive = activeGameId !== null && countdownStepIndex !== null
@@ -628,7 +661,7 @@ export function GameHubApp() {
     ? null
     : HIDDEN_GAME_DESCRIPTION_IDS.has(activeGameId)
       ? null
-      : (COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] ?? miniGameModuleById[activeGameId].manifest.description)
+      : (COUNTDOWN_GUIDE_BY_GAME_ID[activeGameId] ?? miniGameManifestById[activeGameId].description)
   const displayedSettlementScore = isRollingDone && settlement ? settlement.score : rollingScore
   const displayedSettlementCoins = isRollingDone && settlement ? settlement.earnedCoins : rollingCoins
 
@@ -682,7 +715,7 @@ export function GameHubApp() {
         ) : null}
         {error !== null && !isInGameView ? <p className="error-toast">{error}</p> : null}
 
-        {activeGameId !== null && activeModule ? (
+        {activeGameId !== null ? (
           <section className="game-live-shell" aria-label="mini-game-live-shell">
             <div className={`game-live-fx-layer ${isCountdownActive ? 'countdown' : ''}`} aria-hidden>
               {LIVE_FX_SPARKS.map((spark, index) => (
@@ -700,31 +733,50 @@ export function GameHubApp() {
                 />
               ))}
             </div>
-            {isCountdownActive && countdownLabel !== null ? (
-              <section
-                className={`game-countdown-panel ${isInGameView ? 'game-immersive' : ''}`}
-                aria-label="game-start-countdown"
-              >
-                <div className="game-countdown-content">
-                  <p className="game-countdown-text">{countdownLabel}</p>
-                  <p className="game-countdown-title">{activeCard?.manifest.title ?? 'Mini Game'}</p>
-                  {countdownGuide !== null ? <p className="game-countdown-guide">{countdownGuide}</p> : null}
-                </div>
-              </section>
-            ) : (
-              <activeModule.Component
-                onFinish={finishMiniGame}
-                onExit={exitMiniGame}
-                bestScore={activeCard?.bestScore ?? 0}
-              />
-            )}
-            {gameOverOverlay !== null ? (
-              <section className="game-over-overlay" aria-live="polite" aria-label="game-over-overlay">
-                <p className="game-over-title">GAME OVER</p>
-                <p className="game-over-score">{gameOverOverlay.score.toLocaleString()}</p>
-                {gameOverOverlay.endReason ? <p className="game-over-reason">{gameOverOverlay.endReason}</p> : null}
-              </section>
-            ) : null}
+            <ResponsiveGameViewport>
+              {isCountdownActive && countdownLabel !== null ? (
+                <section
+                  className={`game-countdown-panel ${isInGameView ? 'game-immersive' : ''}`}
+                  aria-label="game-start-countdown"
+                >
+                  <div className="game-countdown-content">
+                    <p className="game-countdown-text">{countdownLabel}</p>
+                    <p className="game-countdown-title">{activeCard?.manifest.title ?? 'Mini Game'}</p>
+                    {countdownGuide !== null ? <p className="game-countdown-guide">{countdownGuide}</p> : null}
+                  </div>
+                </section>
+              ) : activeModuleError !== null ? (
+                <section className="game-module-status-panel" aria-label="game-module-load-error">
+                  <div className="game-module-status-content">
+                    <p className="game-module-status-title">LOAD FAILED</p>
+                    <p className="game-module-status-message">{activeModuleError}</p>
+                    <button className="action-button menu" type="button" onClick={() => void openMainMenu()}>
+                      MAIN MENU
+                    </button>
+                  </div>
+                </section>
+              ) : activeModule === null ? (
+                <section className="game-module-status-panel" aria-label="game-module-loading">
+                  <div className="game-module-status-content">
+                    <p className="game-module-status-title">LOADING</p>
+                    <p className="game-module-status-message">Preparing mini game module...</p>
+                  </div>
+                </section>
+              ) : (
+                <activeModule.Component
+                  onFinish={finishMiniGame}
+                  onExit={exitMiniGame}
+                  bestScore={activeCard?.bestScore ?? 0}
+                />
+              )}
+              {gameOverOverlay !== null ? (
+                <section className="game-over-overlay" aria-live="polite" aria-label="game-over-overlay">
+                  <p className="game-over-title">GAME OVER</p>
+                  <p className="game-over-score">{gameOverOverlay.score.toLocaleString()}</p>
+                  {gameOverOverlay.endReason ? <p className="game-over-reason">{gameOverOverlay.endReason}</p> : null}
+                </section>
+              ) : null}
+            </ResponsiveGameViewport>
           </section>
         ) : isResultActionView ? (
           <div className="post-game-result-wrapper">
