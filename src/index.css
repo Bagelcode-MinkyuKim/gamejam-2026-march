@@ -1795,13 +1795,15 @@ img {
   flex: 1;
   height: 100%;
   min-height: 520px;
-  --run-run-score-board-width: clamp(188px, 40vw, 320px);
+  --run-run-score-board-width: clamp(130px, 28vw, 200px);
   --run-run-score-board-height: calc(var(--run-run-score-board-width) * 144 / 600);
   --run-run-action-button-size: 46px;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+  background: #6b7b5e;
+  overflow: hidden;
 }
 
 .run-run-board.paused {
@@ -1847,7 +1849,7 @@ img {
   margin: 0;
   width: 100%;
   color: #fffef3;
-  font-size: clamp(0.94rem, 4.6vw, 1.6rem);
+  font-size: clamp(1.4rem, 6vw, 2.4rem);
   line-height: 1;
   text-align: center;
   letter-spacing: 0.02em;
@@ -1903,7 +1905,7 @@ img {
 
 @media (max-width: 520px) {
   .run-run-board {
-    --run-run-score-board-width: clamp(170px, 54vw, 240px);
+    --run-run-score-board-width: clamp(120px, 32vw, 180px);
     --run-run-action-button-size: 41px;
   }
 
@@ -1912,7 +1914,7 @@ img {
   }
 
   .run-run-score-value {
-    font-size: clamp(0.82rem, 4.8vw, 1.18rem);
+    font-size: clamp(1.2rem, 5.5vw, 2rem);
   }
 }
 

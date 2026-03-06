@@ -136,8 +136,16 @@ const C = {
 // COMPONENT
 // ══════════════════════════════════════════════════
 function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) {
-  const [snake, setSnake] = useState<Pos[]>(mkSnake)
-  const [apple, setApple] = useState<Pos>(() => spawn(occ(mkSnake(), [])))
+  // Shared initial values — computed once, used by both state and ref
+  const initRef = useRef<{ snake: Pos[]; apple: Pos } | null>(null)
+  if (!initRef.current) {
+    const s = mkSnake()
+    initRef.current = { snake: s, apple: spawn(occ(s, [])) }
+  }
+  const init = initRef.current
+
+  const [snake, setSnake] = useState<Pos[]>(() => init.snake)
+  const [apple, setApple] = useState<Pos>(() => init.apple)
   const [score, setScore] = useState(0)
   const [gameOver, setGameOver] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
@@ -164,7 +172,7 @@ function SnakeClassicGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
 
   // ── Refs ──
   const R = useRef({
-    snake: mkSnake() as Pos[], apple: spawn(occ(mkSnake(), [])),
+    snake: init.snake, apple: init.apple,
     dir: 'up' as Dir, nextDir: 'up' as Dir,
     score: 0, elapsed: 0, over: false, done: false,
     moveAcc: 0, raf: null as number | null, lastFrame: null as number | null,

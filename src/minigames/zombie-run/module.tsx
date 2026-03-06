@@ -45,10 +45,10 @@ const JUMP_H = 70
 const VW = 432
 const VH = 768
 const GROUND_Y = 580
-const PLAYER_W = 72
-const PLAYER_H = 72
-const ZOMBIE_W = 80
-const ZOMBIE_H = 80
+const PLAYER_W = 96
+const PLAYER_H = 96
+const ZOMBIE_W = 100
+const ZOMBIE_H = 100
 
 // ═══ Gimmicks ═══
 const POWERUP_INTERVAL_MS = 7500
@@ -266,13 +266,13 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   // ── Input ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Escape') { e.preventDefault(); onExitRef.current(); return }
       if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); handleTap() }
       if (e.code === 'ArrowUp') { e.preventDefault(); handleJump() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleTap, handleJump, onExit])
+  }, [handleTap, handleJump])
 
   useEffect(() => {
     let sy = 0
@@ -584,8 +584,8 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
             style={{ left: pScreenX - PLAYER_W / 2, top: GROUND_Y - PLAYER_H - jumpOff }}>
             <div className="zr-sprite-player" style={{
               backgroundImage: `url(${playerSpriteSheet})`,
-              backgroundPosition: `${-playerFrame * (100 / 3)}% 0%`,
-              backgroundSize: '400% 100%',
+              backgroundPosition: `${-playerFrame * (100 / 3)}% 50%`,
+              backgroundSize: '400% auto',
               width: PLAYER_W, height: PLAYER_H,
             }} />
             {jumping && <span className="zr-jump-txt">JUMP!</span>}
@@ -637,7 +637,7 @@ function ZombieRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         <div className="zr-actions">
           <button className="zr-act" type="button" onClick={() => finish('Game ended!')}>End</button>
-          <button className="zr-act ghost" type="button" onClick={onExit}>Exit</button>
+          <button className="zr-act ghost" type="button" onClick={() => onExitRef.current()}>Exit</button>
         </div>
       </div>
 
@@ -810,7 +810,7 @@ const ZR_CSS = `
 .zr-player-flash { filter: brightness(2) drop-shadow(0 0 8px rgba(255,255,255,0.6)) !important; }
 .zr-player-inv { filter: drop-shadow(0 0 12px rgba(167,139,250,0.8)) !important; }
 .zr-player-fever { filter: drop-shadow(0 0 10px rgba(239,68,68,0.6)) !important; }
-.zr-sprite-player { image-rendering: pixelated; }
+.zr-sprite-player { image-rendering: pixelated; overflow: hidden; }
 
 .zr-jump-txt {
   position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
@@ -855,40 +855,40 @@ const ZR_CSS = `
 }
 
 /* ─── Controls ─── */
-.zr-controls { display: flex; gap: 10px; padding: 6px 12px; flex-shrink: 0; }
+.zr-controls { display: flex; gap: 12px; padding: 8px 16px 12px; flex-shrink: 0; }
 .zr-btn-tap {
-  flex: 3; height: clamp(60px, 9vh, 84px);
-  border: 3px solid #15803d; border-radius: 10px;
+  flex: 3; height: clamp(72px, 11vh, 100px);
+  border: 3px solid #15803d; border-radius: 12px;
   background: linear-gradient(180deg, #166534, #14532d);
   color: #fff; cursor: pointer; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 2px;
-  box-shadow: 0 4px 0 #052e16, 0 6px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 6px 0 #052e16, 0 8px 16px rgba(0,0,0,0.5);
   transition: transform 0.04s;
   font-family: monospace;
 }
 .zr-btn-tap:active, .zr-tap-on {
-  transform: translateY(3px);
-  box-shadow: 0 1px 0 #052e16;
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 #052e16;
   background: linear-gradient(180deg, #22c55e, #166534);
 }
 .zr-tap-fever {
   border-color: #dc2626 !important;
   background: linear-gradient(180deg, #991b1b, #7f1d1d) !important;
-  box-shadow: 0 4px 0 #450a0a, 0 0 20px rgba(239,68,68,0.3) !important;
+  box-shadow: 0 6px 0 #450a0a, 0 0 24px rgba(239,68,68,0.3) !important;
   animation: zr-pulse 0.3s infinite;
 }
-.zr-btn-label { font-size: clamp(16px, 3.5vw, 22px); font-weight: 900; letter-spacing: 3px; }
-.zr-btn-sub { font-size: 7px; opacity: 0.5; }
+.zr-btn-label { font-size: clamp(20px, 4.5vw, 28px); font-weight: 900; letter-spacing: 3px; }
+.zr-btn-sub { font-size: 9px; opacity: 0.5; }
 .zr-btn-jump {
-  flex: 1; height: clamp(60px, 9vh, 84px);
-  border: 3px solid #1d4ed8; border-radius: 10px;
+  flex: 1; height: clamp(72px, 11vh, 100px);
+  border: 3px solid #1d4ed8; border-radius: 12px;
   background: linear-gradient(180deg, #2563eb, #1e40af);
   color: #fff; cursor: pointer; display: flex;
   align-items: center; justify-content: center;
-  box-shadow: 0 4px 0 #1e3a5f, 0 6px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 6px 0 #1e3a5f, 0 8px 16px rgba(0,0,0,0.5);
   transition: transform 0.04s; font-family: monospace;
 }
-.zr-btn-jump:active { transform: translateY(3px); box-shadow: 0 1px 0 #1e3a5f; }
+.zr-btn-jump:active { transform: translateY(4px); box-shadow: 0 2px 0 #1e3a5f; }
 .zr-btn-jump:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .zr-status {

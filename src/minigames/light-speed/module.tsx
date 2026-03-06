@@ -501,10 +501,10 @@ function LightSpeedGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
   }, [addPop, addRipple, play, finish, startFever, chainLightning])
 
   useEffect(() => {
-    const kd = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExit() } }
+    const kd = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); onExitRef.current() } }
     window.addEventListener('keydown', kd)
     return () => window.removeEventListener('keydown', kd)
-  }, [onExit])
+  }, [])
 
   // ── Audio preload ──────────────────────────────────────
   useEffect(() => {

@@ -13,20 +13,47 @@ import gameOverHitSfx from '../../../assets/sounds/game-over-hit.mp3'
 import { useGameEffects, ParticleRenderer, ScorePopupRenderer, FlashOverlay, GAME_EFFECTS_CSS, getComboLabel, getComboColor } from '../shared/game-effects'
 
 // ─── Game Constants ─────────────────────────────────────────────────
-const ROUND_DURATION_MS = 40000
+const ROUND_DURATION_MS = 45000
 const LANE_COUNT = 3
-const HIT_LINE_Y = 0.82 // fraction of game area height
+const HIT_LINE_Y = 0.82
 const PERFECT_ZONE = 0.03
-void 0.07 // GOOD_ZONE - reserved
+const GOOD_ZONE = 0.07
 const MISS_ZONE = 0.12
 
-// Note spawning
-const INITIAL_SPAWN_INTERVAL_MS = 800
-const MIN_SPAWN_INTERVAL_MS = 350
-const SPAWN_SPEEDUP_PER_SEC = 12
-const INITIAL_FALL_SPEED = 0.35 // fraction of height per second
-const MAX_FALL_SPEED = 0.75
-const SPEED_INCREASE_PER_SEC = 0.008
+// ─── Progressive Difficulty Constants ───────────────────────────────
+// Fall speed: starts slow, ramps up aggressively
+const INITIAL_FALL_SPEED = 0.28
+const MAX_FALL_SPEED = 0.95
+const SPEED_INCREASE_PER_SEC = 0.018
+
+// Spawn interval: starts generous, shrinks fast
+const INITIAL_SPAWN_INTERVAL_MS = 900
+const MIN_SPAWN_INTERVAL_MS = 250
+const SPAWN_SPEEDUP_PER_SEC = 18
+
+// Max active notes: more notes on screen over time
+const INITIAL_MAX_ACTIVE = 3
+const MAX_ACTIVE_CEILING = 10
+const MAX_ACTIVE_INCREASE_PER_SEC = 0.15
+
+// Judgement zones shrink over time
+const PERFECT_ZONE_SHRINK_PER_SEC = 0.0005
+const MIN_PERFECT_ZONE = 0.015
+const GOOD_ZONE_SHRINK_PER_SEC = 0.0008
+const MIN_GOOD_ZONE = 0.035
+
+// Special note chances increase over time
+const BASE_GOLDEN_CHANCE = 0.06
+const MAX_GOLDEN_CHANCE = 0.18
+const BASE_DOUBLE_CHANCE = 0.04
+const MAX_DOUBLE_CHANCE = 0.15
+const BASE_HOLD_CHANCE = 0.03
+const MAX_HOLD_CHANCE = 0.12
+
+// Multi-spawn: chance of spawning 2-3 notes at once
+const MULTI_SPAWN_START_SEC = 10
+const MULTI_SPAWN_CHANCE_PER_SEC = 0.015
+const MAX_MULTI_SPAWN_CHANCE = 0.4
 
 // Scoring
 const PERFECT_SCORE = 10
@@ -35,11 +62,7 @@ const LOW_TIME_MS = 5000
 const FEVER_COMBO = 10
 const FEVER_DURATION_MS = 5000
 const FEVER_MULTIPLIER = 3
-const GOLDEN_CHANCE = 0.08
 const GOLDEN_MULTIPLIER = 3
-const DOUBLE_CHANCE = 0.06
-const HOLD_CHANCE = 0.05
-void 2 // HOLD_BONUS_PER_TICK - reserved
 
 // Level up
 const CATCHES_PER_LEVEL = 8
@@ -51,10 +74,18 @@ const LANE_COLORS = ['#f43f5e', '#8b5cf6', '#3b82f6'] as const
 const LANE_LABELS = ['LEFT', 'MID', 'RIGHT'] as const
 const LANE_KEYS = [['KeyA', 'ArrowLeft', 'Digit1'], ['KeyS', 'ArrowDown', 'Space', 'Digit2'], ['KeyD', 'ArrowRight', 'Digit3']] as const
 
+// Pixel art note symbols (dot art style unicode block chars)
+const NOTE_SYMBOLS: Record<NoteType, string> = {
+  normal: '\u25C6',  // ◆
+  golden: '\u2605',  // ★
+  double: '\u25C8',  // ◈
+  hold: '\u25BC',    // ▼
+}
+
 interface Note {
   id: number
   lane: number
-  y: number // 0 = top, 1 = bottom
+  y: number
   type: NoteType
   holdDuration?: number
   holdProgress?: number
@@ -92,10 +123,10 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const [, setPerfectCount] = useState(0)
   const [, setGoodCount] = useState(0)
   const [, setMissCount] = useState(0)
+  const [dangerLevel, setDangerLevel] = useState(0)
 
   const effects = useGameEffects()
 
-  // Mutable refs for game loop
   const scoreRef = useRef(0)
   const remainingMsRef = useRef(ROUND_DURATION_MS)
   const comboRef = useRef(0)
@@ -119,7 +150,6 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
   const judgeTimerRef = useRef<number | null>(null)
   const gameAreaRef = useRef<HTMLDivElement | null>(null)
 
-  // Audio refs
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const playAudio = useCallback((name: string, volume = 0.6, rate = 1) => {
@@ -131,27 +161,62 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     void audio.play().catch(() => {})
   }, [])
 
+  // ─── Progressive difficulty getters ───────────────────────────────
+  const getElapsedSec = useCallback(() => elapsedRef.current / 1000, [])
+
   const getCurrentFallSpeed = useCallback(() => {
-    const elapsed = elapsedRef.current / 1000
-    return Math.min(MAX_FALL_SPEED, INITIAL_FALL_SPEED + elapsed * SPEED_INCREASE_PER_SEC)
-  }, [])
+    const t = getElapsedSec()
+    // Quadratic ramp: accelerates faster as time goes on
+    return Math.min(MAX_FALL_SPEED, INITIAL_FALL_SPEED + t * SPEED_INCREASE_PER_SEC + (t * t * 0.0002))
+  }, [getElapsedSec])
 
   const getCurrentSpawnInterval = useCallback(() => {
-    const elapsed = elapsedRef.current / 1000
-    return Math.max(MIN_SPAWN_INTERVAL_MS, INITIAL_SPAWN_INTERVAL_MS - elapsed * SPAWN_SPEEDUP_PER_SEC)
-  }, [])
+    const t = getElapsedSec()
+    return Math.max(MIN_SPAWN_INTERVAL_MS, INITIAL_SPAWN_INTERVAL_MS - t * SPAWN_SPEEDUP_PER_SEC)
+  }, [getElapsedSec])
+
+  const getCurrentMaxActive = useCallback(() => {
+    const t = getElapsedSec()
+    return Math.min(MAX_ACTIVE_CEILING, Math.floor(INITIAL_MAX_ACTIVE + t * MAX_ACTIVE_INCREASE_PER_SEC))
+  }, [getElapsedSec])
+
+  const getCurrentPerfectZone = useCallback(() => {
+    const t = getElapsedSec()
+    return Math.max(MIN_PERFECT_ZONE, PERFECT_ZONE - t * PERFECT_ZONE_SHRINK_PER_SEC)
+  }, [getElapsedSec])
+
+  const getCurrentGoodZone = useCallback(() => {
+    const t = getElapsedSec()
+    return Math.max(MIN_GOOD_ZONE, GOOD_ZONE - t * GOOD_ZONE_SHRINK_PER_SEC)
+  }, [getElapsedSec])
+
+  const getSpecialChances = useCallback(() => {
+    const t = getElapsedSec()
+    const progress = Math.min(1, t / 40)
+    return {
+      golden: BASE_GOLDEN_CHANCE + (MAX_GOLDEN_CHANCE - BASE_GOLDEN_CHANCE) * progress,
+      double: t > 5 ? BASE_DOUBLE_CHANCE + (MAX_DOUBLE_CHANCE - BASE_DOUBLE_CHANCE) * progress : 0,
+      hold: t > 10 ? BASE_HOLD_CHANCE + (MAX_HOLD_CHANCE - BASE_HOLD_CHANCE) * progress : 0,
+      multiSpawn: t > MULTI_SPAWN_START_SEC
+        ? Math.min(MAX_MULTI_SPAWN_CHANCE, (t - MULTI_SPAWN_START_SEC) * MULTI_SPAWN_CHANCE_PER_SEC)
+        : 0,
+    }
+  }, [getElapsedSec])
 
   const spawnNote = useCallback(() => {
-    const elapsed = elapsedRef.current / 1000
+    const activeCount = notesRef.current.filter(n => !n.hit && !n.missed).length
+    if (activeCount >= getCurrentMaxActive()) return
+
+    const chances = getSpecialChances()
     const lane = Math.floor(Math.random() * LANE_COUNT)
 
     let type: NoteType = 'normal'
     const roll = Math.random()
-    if (elapsed > 15 && roll < HOLD_CHANCE) {
+    if (roll < chances.hold) {
       type = 'hold'
-    } else if (elapsed > 8 && roll < HOLD_CHANCE + DOUBLE_CHANCE) {
+    } else if (roll < chances.hold + chances.double) {
       type = 'double'
-    } else if (roll < HOLD_CHANCE + DOUBLE_CHANCE + GOLDEN_CHANCE) {
+    } else if (roll < chances.hold + chances.double + chances.golden) {
       type = 'golden'
     }
 
@@ -175,7 +240,25 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     } else {
       notesRef.current = [...notesRef.current, note]
     }
-  }, [])
+
+    // Multi-spawn: sometimes spawn extra notes
+    if (Math.random() < chances.multiSpawn) {
+      const extraLane = Math.floor(Math.random() * LANE_COUNT)
+      if (notesRef.current.filter(n => !n.hit && !n.missed && n.lane === extraLane).length === 0) {
+        noteIdCounter += 1
+        const extraNote: Note = {
+          id: noteIdCounter,
+          lane: extraLane,
+          y: -0.08 - Math.random() * 0.05,
+          type: 'normal',
+          hit: false,
+          missed: false,
+          holdProgress: 0,
+        }
+        notesRef.current = [...notesRef.current, extraNote]
+      }
+    }
+  }, [getCurrentMaxActive, getSpecialChances])
 
   const addHitEffect = useCallback((lane: number, kind: JudgeKind) => {
     noteIdCounter += 1
@@ -192,6 +275,9 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
   const handleLaneHit = useCallback((lane: number) => {
     if (finishedRef.current) return
+
+    const perfectZone = getCurrentPerfectZone()
+    const goodZone = getCurrentGoodZone()
 
     const candidates = notesRef.current
       .filter((n) => n.lane === lane && !n.hit && !n.missed)
@@ -229,7 +315,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     }
 
     note.hit = true
-    const kind: JudgeKind = dist <= PERFECT_ZONE ? 'perfect' : 'good'
+    const kind: JudgeKind = dist <= perfectZone ? 'perfect' : dist <= goodZone ? 'good' : 'good'
 
     const nextCombo = comboRef.current + 1
     comboRef.current = nextCombo
@@ -297,7 +383,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       const px = lane * laneWidth + laneWidth / 2
       const py = areaRect.height * HIT_LINE_Y
       if (kind === 'perfect') {
-        effects.comboHitBurst(px, py, nextCombo, earned, ['💥', '⚡', '✨', '🌟', '🎯'])
+        effects.comboHitBurst(px, py, nextCombo, earned, ['\u25C6', '\u2605', '\u2726', '\u2737', '\u2738'])
       } else {
         effects.spawnParticles(3, px, py)
         effects.showScorePopup(earned, px, py - 20)
@@ -309,7 +395,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
     judgeTimerRef.current = window.setTimeout(() => { setLastJudge(null) }, 350)
 
     setNotes([...notesRef.current])
-  }, [playAudio, addHitEffect, addLaneFlash, effects])
+  }, [playAudio, addHitEffect, addLaneFlash, effects, getCurrentPerfectZone, getCurrentGoodZone])
 
   const handleLaneRelease = useCallback((lane: number) => {
     holdingLanesRef.current.delete(lane)
@@ -391,6 +477,10 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         return
       }
 
+      // Update danger level for visual feedback (0-100)
+      const t = elapsedRef.current / 1000
+      setDangerLevel(Math.min(100, Math.floor(t / ROUND_DURATION_MS * 1000 * 2.5)))
+
       // Fever countdown
       if (feverRef.current) {
         feverMsRef.current = Math.max(0, feverMsRef.current - deltaMs)
@@ -417,7 +507,6 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         if (note.hit || note.missed) continue
         note.y += fallSpeed * deltaSec
 
-        // Miss detection
         if (note.y > HIT_LINE_Y + MISS_ZONE && !note.hit) {
           note.missed = true
           comboRef.current = 0
@@ -434,10 +523,8 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
       }
 
-      // Remove off-screen notes
       notesRef.current = notesRef.current.filter((n) => n.y < 1.2)
 
-      // Clean old effects
       const nowPerf = performance.now()
       hitEffectsRef.current = hitEffectsRef.current.filter((e) => nowPerf - e.createdAt < 400)
       laneFlashesRef.current = laneFlashesRef.current.filter((f) => nowPerf - f.createdAt < 200)
@@ -473,16 +560,24 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       style={{ ...effects.getShakeStyle() }}
     >
       <style>{GAME_EFFECTS_CSS}{`
+        /* ─── Pixel Art Font ─── */
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
         .bc-panel {
           display: flex;
           flex-direction: column;
-          height: 100%;
+          width: 100%;
+          max-width: 432px;
+          aspect-ratio: 6 / 19;
+          margin: 0 auto;
           background: linear-gradient(180deg, #0a0a1a 0%, #0d0520 50%, #0a0a1a 100%);
           user-select: none;
           -webkit-user-select: none;
           touch-action: manipulation;
           position: relative;
           overflow: hidden;
+          font-family: 'Press Start 2P', monospace;
+          image-rendering: pixelated;
         }
 
         .bc-fever {
@@ -499,37 +594,47 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px 6px;
-          background: rgba(0,0,0,0.4);
-          border-bottom: 2px solid rgba(244,63,94,0.3);
+          padding: 10px 14px 8px;
+          background: rgba(0,0,0,0.6);
+          border-bottom: 3px solid rgba(244,63,94,0.5);
           flex-shrink: 0;
           z-index: 5;
         }
 
         .bc-hdr-score {
-          font-size: clamp(22px, 6vw, 32px);
+          font-size: clamp(28px, 9vw, 48px);
           font-weight: 900;
           color: #fb7185;
           margin: 0;
-          line-height: 1;
-          text-shadow: 0 0 12px rgba(244,63,94,0.6), 0 2px 4px rgba(0,0,0,0.5);
+          line-height: 1.1;
+          text-shadow: 0 0 16px rgba(244,63,94,0.8), 0 3px 6px rgba(0,0,0,0.7),
+                       2px 2px 0 #881337;
+          font-family: 'Press Start 2P', monospace;
+          letter-spacing: -1px;
         }
 
         .bc-hdr-best {
-          font-size: 8px;
+          font-size: 7px;
           color: rgba(253,164,175,0.6);
-          margin: 2px 0 0;
+          margin: 3px 0 0;
+          font-family: 'Press Start 2P', monospace;
         }
 
         .bc-hdr-time {
-          font-size: clamp(18px, 5vw, 24px);
+          font-size: clamp(20px, 7vw, 36px);
           font-weight: 800;
           color: #e4e4e7;
           margin: 0;
           font-variant-numeric: tabular-nums;
+          font-family: 'Press Start 2P', monospace;
+          text-shadow: 2px 2px 0 rgba(0,0,0,0.5);
         }
 
-        .bc-hdr-time.low { color: #ef4444; animation: bc-blink 0.4s infinite alternate; }
+        .bc-hdr-time.low {
+          color: #ef4444;
+          animation: bc-blink 0.4s infinite alternate;
+          text-shadow: 0 0 12px rgba(239,68,68,0.8), 2px 2px 0 #7f1d1d;
+        }
 
         @keyframes bc-blink { from { opacity: 1; } to { opacity: 0.3; } }
 
@@ -538,20 +643,22 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           display: flex;
           justify-content: center;
           align-items: center;
-          gap: 8px;
-          padding: 3px 10px;
-          font-size: 10px;
+          gap: 10px;
+          padding: 4px 10px;
+          font-size: 8px;
           color: #a1a1aa;
           flex-shrink: 0;
           z-index: 5;
-          background: rgba(0,0,0,0.3);
+          background: rgba(0,0,0,0.4);
+          font-family: 'Press Start 2P', monospace;
+          border-bottom: 2px solid rgba(255,255,255,0.05);
         }
 
         .bc-stat p { margin: 0; }
 
         .bc-combo-num {
           color: #facc15 !important;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 800;
         }
 
@@ -559,20 +666,34 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           color: #facc15;
           font-weight: 800;
           animation: bc-blink 0.3s infinite alternate;
-          text-shadow: 0 0 6px rgba(250,204,21,0.5);
+          text-shadow: 0 0 8px rgba(250,204,21,0.7);
+          font-size: 8px;
         }
 
-        /* ─── Speed Bar ─── */
+        /* ─── Danger/Speed Bar ─── */
         .bc-speed-bar {
-          height: 3px;
+          height: 4px;
           background: rgba(255,255,255,0.05);
           flex-shrink: 0;
         }
 
         .bc-speed-fill {
           height: 100%;
-          background: linear-gradient(90deg, #3b82f6, #f43f5e);
+          background: linear-gradient(90deg, #3b82f6, #f59e0b, #ef4444);
           transition: width 0.3s ease;
+          image-rendering: pixelated;
+        }
+
+        /* ─── Difficulty Indicator ─── */
+        .bc-diff-label {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          font-size: 6px;
+          color: rgba(255,255,255,0.4);
+          font-family: 'Press Start 2P', monospace;
+          z-index: 6;
+          pointer-events: none;
         }
 
         /* ─── Game Area ─── */
@@ -587,7 +708,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         .bc-lane {
           flex: 1;
           position: relative;
-          border-right: 1px solid rgba(255,255,255,0.04);
+          border-right: 2px solid rgba(255,255,255,0.06);
         }
 
         .bc-lane:last-child { border-right: none; }
@@ -606,7 +727,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
         }
 
         @keyframes bc-lane-flash {
-          0% { opacity: 0.3; }
+          0% { opacity: 0.4; }
           100% { opacity: 0; }
         }
 
@@ -616,9 +737,17 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           right: 0;
           top: ${HIT_LINE_Y * 100}%;
           height: 4px;
-          background: linear-gradient(90deg, rgba(244,63,94,0.6), rgba(139,92,246,0.6), rgba(59,130,246,0.6));
+          background: repeating-linear-gradient(90deg,
+            #f43f5e 0px, #f43f5e 4px,
+            transparent 4px, transparent 6px,
+            #8b5cf6 6px, #8b5cf6 10px,
+            transparent 10px, transparent 12px,
+            #3b82f6 12px, #3b82f6 16px,
+            transparent 16px, transparent 18px
+          );
           z-index: 3;
-          box-shadow: 0 0 12px rgba(244,63,94,0.4), 0 0 24px rgba(139,92,246,0.2);
+          box-shadow: 0 0 12px rgba(244,63,94,0.5), 0 0 24px rgba(139,92,246,0.3);
+          image-rendering: pixelated;
         }
 
         .bc-hit-line::before,
@@ -641,139 +770,159 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           background: linear-gradient(0deg, transparent, rgba(255,255,255,0.03));
         }
 
-        /* Notes */
+        /* ─── Pixel Art Notes ─── */
         .bc-note {
           position: absolute;
-          width: 48px;
-          height: 48px;
-          border-radius: 50%;
+          width: 36px;
+          height: 36px;
           transform: translate(-50%, -50%);
           z-index: 4;
           pointer-events: none;
+          image-rendering: pixelated;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .bc-note-normal {
-          background: radial-gradient(circle at 30% 30%, #fb7185, #e11d48);
-          box-shadow: 0 0 12px rgba(244,63,94,0.6), inset 0 -2px 4px rgba(0,0,0,0.3);
-          border: 2px solid rgba(255,255,255,0.3);
+          background: #e11d48;
+          border: 3px solid #fb7185;
+          box-shadow: 0 0 8px rgba(244,63,94,0.6),
+                      inset 0 0 0 2px rgba(0,0,0,0.3),
+                      3px 3px 0 rgba(0,0,0,0.4);
         }
 
         .bc-note-golden {
-          background: radial-gradient(circle at 30% 30%, #fde047, #f59e0b);
-          box-shadow: 0 0 16px rgba(250,204,21,0.8), 0 0 32px rgba(250,204,21,0.3);
-          border: 2px solid rgba(255,255,255,0.5);
-          animation: bc-golden-pulse 0.4s ease-in-out infinite alternate;
+          background: #f59e0b;
+          border: 3px solid #fde047;
+          box-shadow: 0 0 14px rgba(250,204,21,0.9),
+                      inset 0 0 0 2px rgba(0,0,0,0.2),
+                      3px 3px 0 rgba(0,0,0,0.4);
+          animation: bc-golden-pulse 0.3s steps(2) infinite alternate;
         }
 
         @keyframes bc-golden-pulse {
-          from { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 16px rgba(250,204,21,0.8); }
-          to { transform: translate(-50%, -50%) scale(1.15); box-shadow: 0 0 24px rgba(250,204,21,1); }
+          from { box-shadow: 0 0 14px rgba(250,204,21,0.9), inset 0 0 0 2px rgba(0,0,0,0.2), 3px 3px 0 rgba(0,0,0,0.4); }
+          to { box-shadow: 0 0 22px rgba(250,204,21,1), inset 0 0 0 2px rgba(255,255,255,0.2), 3px 3px 0 rgba(0,0,0,0.4); }
         }
 
         .bc-note-double {
-          background: radial-gradient(circle at 30% 30%, #c084fc, #7c3aed);
-          box-shadow: 0 0 14px rgba(139,92,246,0.7);
-          border: 2px solid rgba(255,255,255,0.4);
+          background: #7c3aed;
+          border: 3px solid #c084fc;
+          box-shadow: 0 0 10px rgba(139,92,246,0.7),
+                      inset 0 0 0 2px rgba(0,0,0,0.3),
+                      3px 3px 0 rgba(0,0,0,0.4);
         }
 
         .bc-note-hold {
-          background: radial-gradient(circle at 30% 30%, #34d399, #059669);
-          box-shadow: 0 0 14px rgba(52,211,153,0.7);
-          border: 2px solid rgba(255,255,255,0.4);
-          border-radius: 12px;
-          width: 42px;
-          height: 60px;
+          background: #059669;
+          border: 3px solid #34d399;
+          box-shadow: 0 0 10px rgba(52,211,153,0.7),
+                      inset 0 0 0 2px rgba(0,0,0,0.3),
+                      3px 3px 0 rgba(0,0,0,0.4);
+          width: 32px;
+          height: 48px;
+          border-radius: 4px;
         }
 
         .bc-note-hit {
-          animation: bc-note-hit 0.3s ease-out forwards;
+          animation: bc-note-hit 0.25s steps(4) forwards;
         }
 
         @keyframes bc-note-hit {
           0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-          50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.5; }
+          50% { transform: translate(-50%, -50%) scale(1.6); opacity: 0.5; }
           100% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
         }
 
         .bc-note-miss {
-          opacity: 0.3;
+          opacity: 0.25;
           filter: grayscale(1);
         }
 
         .bc-note-inner {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 16px;
+          font-size: 14px;
           line-height: 1;
           pointer-events: none;
+          color: #fff;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
         }
 
-        /* Hit effects */
+        /* ─── Hit effects ─── */
         .bc-hit-fx {
           position: absolute;
           top: ${HIT_LINE_Y * 100}%;
           transform: translate(-50%, -50%);
           z-index: 6;
           pointer-events: none;
-          animation: bc-hit-ring 0.4s ease-out forwards;
+          animation: bc-hit-ring 0.35s steps(6) forwards;
         }
 
         @keyframes bc-hit-ring {
-          0% { width: 20px; height: 20px; opacity: 1; border-width: 3px; }
-          100% { width: 80px; height: 80px; opacity: 0; border-width: 1px; }
+          0% { width: 16px; height: 16px; opacity: 1; border-width: 4px; }
+          100% { width: 64px; height: 64px; opacity: 0; border-width: 2px; }
         }
 
-        .bc-hit-fx-perfect { border: 3px solid #facc15; border-radius: 50%; }
-        .bc-hit-fx-good { border: 3px solid #22c55e; border-radius: 50%; }
-        .bc-hit-fx-miss { border: 3px solid #ef4444; border-radius: 50%; }
+        .bc-hit-fx-perfect { border: 4px solid #facc15; border-radius: 2px; }
+        .bc-hit-fx-good { border: 4px solid #22c55e; border-radius: 2px; }
+        .bc-hit-fx-miss { border: 4px solid #ef4444; border-radius: 2px; }
 
-        /* Judgement popup */
+        /* ─── Judgement popup ─── */
         .bc-judge {
           position: absolute;
           top: ${(HIT_LINE_Y - 0.12) * 100}%;
           left: 50%;
           transform: translate(-50%, -50%);
-          font-size: clamp(24px, 7vw, 36px);
+          font-size: clamp(18px, 6vw, 28px);
           font-weight: 900;
           z-index: 8;
           pointer-events: none;
-          animation: bc-judge-pop 0.35s ease-out forwards;
-          text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+          animation: bc-judge-pop 0.35s steps(5) forwards;
+          font-family: 'Press Start 2P', monospace;
         }
 
-        .bc-judge-perfect { color: #facc15; }
-        .bc-judge-good { color: #22c55e; }
-        .bc-judge-miss { color: #ef4444; }
+        .bc-judge-perfect {
+          color: #facc15;
+          text-shadow: 2px 2px 0 #92400e, 0 0 12px rgba(250,204,21,0.7);
+        }
+        .bc-judge-good {
+          color: #22c55e;
+          text-shadow: 2px 2px 0 #14532d, 0 0 8px rgba(34,197,94,0.5);
+        }
+        .bc-judge-miss {
+          color: #ef4444;
+          text-shadow: 2px 2px 0 #7f1d1d, 0 0 8px rgba(239,68,68,0.5);
+        }
 
         @keyframes bc-judge-pop {
           0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
-          30% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+          20% { opacity: 1; transform: translate(-50%, -50%) scale(1.4); }
           100% { opacity: 0; transform: translate(-50%, -70%) scale(0.9); }
         }
 
         .bc-combo-display {
           position: absolute;
-          top: ${(HIT_LINE_Y - 0.2) * 100}%;
+          top: ${(HIT_LINE_Y - 0.22) * 100}%;
           left: 50%;
           transform: translateX(-50%);
-          font-size: clamp(16px, 5vw, 22px);
+          font-size: clamp(14px, 5vw, 22px);
           font-weight: 900;
           color: #facc15;
           z-index: 7;
           pointer-events: none;
-          text-shadow: 0 2px 8px rgba(0,0,0,0.6), 0 0 12px rgba(250,204,21,0.4);
-          animation: bc-combo-in 0.25s ease-out;
+          text-shadow: 2px 2px 0 #92400e, 0 0 10px rgba(250,204,21,0.5);
+          animation: bc-combo-in 0.2s steps(3);
+          font-family: 'Press Start 2P', monospace;
         }
 
         @keyframes bc-combo-in {
           0% { transform: translateX(-50%) scale(0.5); opacity: 0; }
-          60% { transform: translateX(-50%) scale(1.2); }
+          60% { transform: translateX(-50%) scale(1.3); }
           100% { transform: translateX(-50%) scale(1); opacity: 1; }
         }
 
-        /* ─── Lane Buttons ─── */
+        /* ─── Lane Buttons (Pixel Art) ─── */
         .bc-btns {
           display: flex;
           flex-shrink: 0;
@@ -782,37 +931,40 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
 
         .bc-lane-btn {
           flex: 1;
-          padding: clamp(16px, 4vw, 24px) 0;
+          padding: clamp(14px, 4vw, 22px) 0;
           border: none;
-          font-size: clamp(14px, 4vw, 18px);
+          font-size: clamp(10px, 3vw, 14px);
           font-weight: 900;
-          letter-spacing: 2px;
+          letter-spacing: 1px;
           cursor: pointer;
-          transition: transform 0.08s, filter 0.08s;
+          transition: transform 0.05s, filter 0.05s;
           color: #fff;
-          text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+          font-family: 'Press Start 2P', monospace;
+          text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
+          image-rendering: pixelated;
+          border-top: 3px solid rgba(255,255,255,0.15);
         }
 
         .bc-lane-btn:nth-child(1) {
-          background: linear-gradient(180deg, #e11d48, #be123c);
-          border-right: 1px solid rgba(255,255,255,0.1);
+          background: #be123c;
+          border-right: 2px solid rgba(0,0,0,0.3);
         }
 
         .bc-lane-btn:nth-child(2) {
-          background: linear-gradient(180deg, #7c3aed, #6d28d9);
-          border-right: 1px solid rgba(255,255,255,0.1);
+          background: #6d28d9;
+          border-right: 2px solid rgba(0,0,0,0.3);
         }
 
         .bc-lane-btn:nth-child(3) {
-          background: linear-gradient(180deg, #2563eb, #1d4ed8);
+          background: #1d4ed8;
         }
 
         .bc-lane-btn:active {
-          transform: scale(0.95);
-          filter: brightness(1.3);
+          transform: scale(0.94);
+          filter: brightness(1.4);
         }
 
-        /* ─── Overlays ─── */
+        /* ─── Pixel Overlays ─── */
         .bc-scanlines {
           position: absolute;
           inset: 0;
@@ -821,10 +973,22 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           background: repeating-linear-gradient(
             0deg,
             transparent 0px,
-            transparent 3px,
-            rgba(0,0,0,0.08) 3px,
-            rgba(0,0,0,0.08) 4px
+            transparent 2px,
+            rgba(0,0,0,0.12) 2px,
+            rgba(0,0,0,0.12) 3px
           );
+          image-rendering: pixelated;
+        }
+
+        .bc-pixel-grid {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 1;
+          background:
+            repeating-linear-gradient(90deg, rgba(255,255,255,0.01) 0px, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 8px),
+            repeating-linear-gradient(0deg, rgba(255,255,255,0.01) 0px, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 8px);
+          image-rendering: pixelated;
         }
 
         .bc-lane-guides {
@@ -838,8 +1002,8 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           position: absolute;
           top: 0;
           bottom: 0;
-          width: 1px;
-          background: rgba(255,255,255,0.03);
+          width: 2px;
+          background: rgba(255,255,255,0.04);
         }
 
         .bc-bottom-glow {
@@ -848,9 +1012,22 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           right: 0;
           bottom: 0;
           height: 20%;
-          background: linear-gradient(180deg, transparent, rgba(244,63,94,0.05));
+          background: linear-gradient(180deg, transparent, rgba(244,63,94,0.06));
           pointer-events: none;
           z-index: 1;
+        }
+
+        /* ─── Level Indicator ─── */
+        .bc-level-badge {
+          position: absolute;
+          top: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          font-size: 7px;
+          color: rgba(255,255,255,0.3);
+          font-family: 'Press Start 2P', monospace;
+          z-index: 6;
+          pointer-events: none;
         }
       `}</style>
 
@@ -865,7 +1042,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           <p className="bc-hdr-best">BEST {displayedBestScore.toLocaleString()}</p>
         </div>
         <p className={`bc-hdr-time ${isLowTime ? 'low' : ''}`}>
-          {(remainingMs / 1000).toFixed(1)}s
+          {(remainingMs / 1000).toFixed(1)}
         </p>
       </div>
 
@@ -873,13 +1050,13 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       <div className="bc-stat">
         <p>
           COMBO <span className="bc-combo-num">{combo}</span>
-          {comboLabel && <span className="ge-combo-label" style={{ color: comboColor, marginLeft: 3, fontSize: 9 }}>{comboLabel}</span>}
+          {comboLabel && <span className="ge-combo-label" style={{ color: comboColor, marginLeft: 3, fontSize: 7 }}>{comboLabel}</span>}
         </p>
         <p>Lv.<strong style={{ color: '#e4e4e7' }}>{level}</strong></p>
         {isFever && <p className="bc-fever-tag">FEVER x{FEVER_MULTIPLIER} {(feverRemainingMs / 1000).toFixed(1)}s</p>}
       </div>
 
-      {/* Speed Bar */}
+      {/* Speed/Danger Bar */}
       <div className="bc-speed-bar">
         <div className="bc-speed-fill" style={{ width: `${speedPct}%` }} />
       </div>
@@ -887,7 +1064,16 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
       {/* Game Area */}
       <div className="bc-game" ref={gameAreaRef}>
         <div className="bc-scanlines" />
+        <div className="bc-pixel-grid" />
         <div className="bc-bottom-glow" />
+
+        {dangerLevel > 50 && (
+          <span className="bc-diff-label" style={{ color: dangerLevel > 80 ? '#ef4444' : '#f59e0b' }}>
+            {dangerLevel > 80 ? 'DANGER!!' : 'SPEED UP!'}
+          </span>
+        )}
+
+        <span className="bc-level-badge">Lv.{level}</span>
 
         {Array.from({ length: LANE_COUNT }).map((_, i) => {
           const isFlashing = laneFlashes.some((f) => f.lane === i)
@@ -912,10 +1098,10 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
           const topPct = note.y * 100
 
           let typeClass = 'bc-note-normal'
-          let symbol = ''
-          if (note.type === 'golden') { typeClass = 'bc-note-golden'; symbol = '\u2605' }
-          else if (note.type === 'double') { typeClass = 'bc-note-double'; symbol = '\u00d72' }
-          else if (note.type === 'hold') { typeClass = 'bc-note-hold'; symbol = '\u25bc' }
+          const symbol = NOTE_SYMBOLS[note.type]
+          if (note.type === 'golden') typeClass = 'bc-note-golden'
+          else if (note.type === 'double') typeClass = 'bc-note-double'
+          else if (note.type === 'hold') typeClass = 'bc-note-hold'
 
           const stateClass = note.hit ? 'bc-note-hit' : note.missed ? 'bc-note-miss' : ''
 
@@ -925,7 +1111,7 @@ function BeatCatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps
               className={`bc-note ${typeClass} ${stateClass}`}
               style={{ left: `${laneCenter}%`, top: `${topPct}%` }}
             >
-              {symbol && <span className="bc-note-inner">{symbol}</span>}
+              <span className="bc-note-inner">{symbol}</span>
             </div>
           )
         })}

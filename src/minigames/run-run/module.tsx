@@ -1825,7 +1825,7 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
         <svg
           className="zigzag-svg run-run-svg"
           viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-          preserveAspectRatio="xMidYMax meet"
+          preserveAspectRatio="xMidYMax slice"
           aria-label="zigzag-road"
         >
           <defs>

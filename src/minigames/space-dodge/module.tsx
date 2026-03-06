@@ -262,14 +262,14 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
   useEffect(() => {
     const kd = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') { e.preventDefault(); onExit(); return }
+      if (e.code === 'Escape') { e.preventDefault(); onExitRef.current(); return }
       if (finRef.current) return
       if (e.code === 'ArrowLeft') { e.preventDefault(); txR.current = clamp(txR.current - 40, SHIP_W / 2, W - SHIP_W / 2) }
       if (e.code === 'ArrowRight') { e.preventDefault(); txR.current = clamp(txR.current + 40, SHIP_W / 2, W - SHIP_W / 2) }
       if (e.code === 'Space') { e.preventDefault(); dash(txR.current > pxR.current ? 1 : -1) }
     }
     window.addEventListener('keydown', kd); return () => window.removeEventListener('keydown', kd)
-  }, [onExit, dash])
+  }, [dash])
 
   useEffect(() => {
     const map: Record<string, string> = {
@@ -558,7 +558,7 @@ function SpaceDodgeGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <p className="sd-status">{msg}</p>
         <div className="sd-actions">
           <button className="sd-btn" type="button" onPointerDown={e=>e.stopPropagation()} onClick={()=>{play('hit',0.5,1);finish()}}>FINISH</button>
-          <button className="sd-btn ghost" type="button" onPointerDown={e=>e.stopPropagation()} onClick={onExit}>EXIT</button>
+          <button className="sd-btn ghost" type="button" onPointerDown={e=>e.stopPropagation()} onClick={() => onExitRef.current()}>EXIT</button>
         </div>
       </div>
 
