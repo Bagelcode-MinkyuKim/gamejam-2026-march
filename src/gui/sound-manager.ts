@@ -43,6 +43,7 @@ function clamp01(v: number): number {
 }
 
 let currentSettings = loadSettings()
+let snapshotCache: SoundSettings = { ...currentSettings }
 let activeBgm: HTMLAudioElement | null = null
 let activeBgmTrack: string | null = null
 let activeBgmBaseVolume = 0
@@ -50,7 +51,7 @@ let activeBgmBaseVolume = 0
 const listeners = new Set<() => void>()
 
 export function getSoundSettings(): SoundSettings {
-  return { ...currentSettings }
+  return snapshotCache
 }
 
 export function updateSoundSettings(partial: Partial<SoundSettings>): void {
@@ -60,6 +61,7 @@ export function updateSoundSettings(partial: Partial<SoundSettings>): void {
     bgmVolume: partial.bgmVolume !== undefined ? clamp01(partial.bgmVolume) : currentSettings.bgmVolume,
     sfxVolume: partial.sfxVolume !== undefined ? clamp01(partial.sfxVolume) : currentSettings.sfxVolume,
   }
+  snapshotCache = { ...currentSettings }
   saveSettings(currentSettings)
   applyBgmVolume()
   listeners.forEach((fn) => fn())
