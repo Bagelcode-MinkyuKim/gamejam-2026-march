@@ -37,6 +37,7 @@ import runRunScoreBoard from '../../../assets/images/Run Run/Score Board.png'
 import runRunHomeButton from '../../../assets/images/Run Run/Home Btn.png'
 import runRunPauseButton from '../../../assets/images/Run Run/Pause Btn.png'
 import runRunPlayButton from '../../../assets/images/Run Run/Play Btn.png'
+import runRunBurningLoveBgm from '../../../assets/images/Run Run/Burning Love BGM.mp3'
 
 const TICK_MS = 16
 const SPEED_STAGE_LEVELS = [100, 120, 140, 160] as const
@@ -121,6 +122,10 @@ const ITEM_POPUP_DURATION_MS = 820
 const ITEM_SWAY_DURATION_MIN_SECONDS = 0.9
 const ITEM_SWAY_DURATION_STEP_SECONDS = 0.12
 const ITEM_SWAY_DELAY_STEP_SECONDS = 0.08
+const AUDIO_MASTER_GAIN = 0.24
+const BGM_VOLUME = 0.16
+const TURN_SFX_DURATION_SECONDS = 0.08
+const ITEM_SFX_DURATION_SECONDS = 0.15
 const WALL_CHARACTER_SPACING = 12
 const WALL_CHARACTER_HEIGHT = 40
 const WALL_CHARACTER_PADDING = 2
@@ -1203,6 +1208,9 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
   const itemSpawnDistanceRef = useRef(ITEM_SPAWN_MIN_GAP)
   const itemIdRef = useRef(0)
   const popupIdRef = useRef(0)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const audioMasterGainRef = useRef<GainNode | null>(null)
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
   const pausedRef = useRef(false)
   const finishedRef = useRef(false)
 
@@ -1300,6 +1308,142 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
       .filter((popup): popup is { id: string; value: number; x: number; y: number; opacity: number; scale: number } => popup !== null)
   }, [cameraAnchor, elapsedMs, itemPopups])
 
+  const ensureAudioReady = useCallback((): AudioContext | null => {
+    if (typeof window === 'undefined' || !('AudioContext' in window)) {
+      return null
+    }
+
+    if (audioContextRef.current === null) {
+      const context = new window.AudioContext()
+      const masterGain = context.createGain()
+      masterGain.gain.value = AUDIO_MASTER_GAIN
+      masterGain.connect(context.destination)
+      audioContextRef.current = context
+      audioMasterGainRef.current = masterGain
+    }
+
+    const context = audioContextRef.current
+    if (context.state === 'suspended') {
+      void context.resume()
+    }
+    return context
+  }, [])
+
+  const playTurnSfx = useCallback(() => {
+    const context = ensureAudioReady()
+    const masterGain = audioMasterGainRef.current
+    if (context === null || masterGain === null || context.state !== 'running') {
+      return
+    }
+
+    const now = context.currentTime
+    const oscillator = context.createOscillator()
+    const gainNode = context.createGain()
+
+    oscillator.type = 'square'
+    oscillator.frequency.setValueAtTime(820, now)
+    oscillator.frequency.exponentialRampToValueAtTime(460, now + TURN_SFX_DURATION_SECONDS)
+
+    gainNode.gain.setValueAtTime(0.0001, now)
+    gainNode.gain.exponentialRampToValueAtTime(0.13, now + 0.006)
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + TURN_SFX_DURATION_SECONDS)
+
+    oscillator.connect(gainNode)
+    gainNode.connect(masterGain)
+    oscillator.start(now)
+    oscillator.stop(now + TURN_SFX_DURATION_SECONDS + 0.008)
+  }, [ensureAudioReady])
+
+  const playItemPickupSfx = useCallback(
+    (itemValue: number) => {
+      const context = ensureAudioReady()
+      const masterGain = audioMasterGainRef.current
+      if (context === null || masterGain === null || context.state !== 'running') {
+        return
+      }
+
+      const now = context.currentTime
+      const baseFrequency = itemValue >= ITEM_03_VALUE ? 1320 : itemValue >= ITEM_02_VALUE ? 1180 : 980
+      const firstDuration = ITEM_SFX_DURATION_SECONDS * 0.62
+      const secondStart = now + firstDuration * 0.68
+      const secondDuration = ITEM_SFX_DURATION_SECONDS * 0.86
+      const detuneCents = Math.random() * 8 - 4
+
+      const brightFilter = context.createBiquadFilter()
+      brightFilter.type = 'highpass'
+      brightFilter.frequency.setValueAtTime(420, now)
+      brightFilter.Q.value = 0.9
+      brightFilter.connect(masterGain)
+
+      const firstOscillator = context.createOscillator()
+      const firstGain = context.createGain()
+      firstOscillator.type = 'square'
+      firstOscillator.detune.setValueAtTime(detuneCents, now)
+      firstOscillator.frequency.setValueAtTime(baseFrequency * 1.16, now)
+      firstOscillator.frequency.exponentialRampToValueAtTime(baseFrequency * 0.92, now + firstDuration)
+      firstGain.gain.setValueAtTime(0.0001, now)
+      firstGain.gain.exponentialRampToValueAtTime(0.15, now + 0.004)
+      firstGain.gain.exponentialRampToValueAtTime(0.0001, now + firstDuration)
+      firstOscillator.connect(firstGain)
+      firstGain.connect(brightFilter)
+
+      const secondOscillator = context.createOscillator()
+      const secondGain = context.createGain()
+      secondOscillator.type = 'triangle'
+      secondOscillator.detune.setValueAtTime(detuneCents + 2.5, secondStart)
+      secondOscillator.frequency.setValueAtTime(baseFrequency * 1.9, secondStart)
+      secondOscillator.frequency.exponentialRampToValueAtTime(baseFrequency * 1.52, secondStart + secondDuration)
+      secondGain.gain.setValueAtTime(0.0001, secondStart)
+      secondGain.gain.exponentialRampToValueAtTime(0.1, secondStart + 0.004)
+      secondGain.gain.exponentialRampToValueAtTime(0.0001, secondStart + secondDuration)
+      secondOscillator.connect(secondGain)
+      secondGain.connect(brightFilter)
+
+      firstOscillator.start(now)
+      secondOscillator.start(secondStart)
+      firstOscillator.stop(now + firstDuration + 0.01)
+      secondOscillator.stop(secondStart + secondDuration + 0.01)
+    },
+    [ensureAudioReady],
+  )
+
+  const ensureBgmReady = useCallback((): HTMLAudioElement | null => {
+    if (typeof window === 'undefined') {
+      return null
+    }
+
+    if (bgmAudioRef.current === null) {
+      const audio = new window.Audio(runRunBurningLoveBgm)
+      audio.loop = true
+      audio.volume = BGM_VOLUME
+      audio.preload = 'auto'
+      bgmAudioRef.current = audio
+    }
+
+    return bgmAudioRef.current
+  }, [])
+
+  const playBgmIfAvailable = useCallback(() => {
+    if (finishedRef.current || pausedRef.current) {
+      return
+    }
+
+    const audio = ensureBgmReady()
+    if (audio === null || !audio.paused) {
+      return
+    }
+
+    void audio.play().catch(() => undefined)
+  }, [ensureBgmReady])
+
+  const pauseBgm = useCallback(() => {
+    const audio = bgmAudioRef.current
+    if (audio === null || audio.paused) {
+      return
+    }
+    audio.pause()
+  }, [])
+
   const appendItemsFromRoad = useCallback((sourceRoad: RoadSegment[], startIndex: number) => {
     const spawnStartIndex = Math.max(startIndex, ITEM_START_SPAWN_SKIP_SEGMENTS)
     if (spawnStartIndex >= sourceRoad.length) {
@@ -1379,13 +1523,14 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     }
 
     finishedRef.current = true
+    pauseBgm()
     const finalDurationMs = elapsedMsRef.current > 0 ? elapsedMsRef.current : TICK_MS
     const finalScore = toScore(travelDistanceRef.current) + bonusScoreRef.current
     onFinish({
       score: finalScore,
       durationMs: finalDurationMs,
     })
-  }, [onFinish])
+  }, [onFinish, pauseBgm])
 
   const togglePause = useCallback(() => {
     if (finishedRef.current) {
@@ -1395,12 +1540,14 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     if (pausedRef.current) {
       pausedRef.current = false
       setIsPaused(false)
+      playBgmIfAvailable()
       return
     }
 
     pausedRef.current = true
     setIsPaused(true)
-  }, [])
+    pauseBgm()
+  }, [pauseBgm, playBgmIfAvailable])
 
   const setMoveDirection = useCallback(
     (nextDirection: MoveDirection) => {
@@ -1408,10 +1555,15 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
         return
       }
 
+      if (directionRef.current === nextDirection) {
+        return
+      }
+
       directionRef.current = nextDirection
       setMoveDirectionState(nextDirection)
+      playTurnSfx()
     },
-    [],
+    [playTurnSfx],
   )
 
   useEffect(() => {
@@ -1434,6 +1586,8 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
   const handleBoardPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault()
+      ensureAudioReady()
+      playBgmIfAvailable()
       if (event.pointerType === 'mouse') {
         if (event.button !== 0) {
           return
@@ -1443,7 +1597,7 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
       }
       setMoveDirectionFromClientX(event.clientX, event.currentTarget)
     },
-    [setMoveDirectionFromClientX, toggleMoveDirection],
+    [ensureAudioReady, playBgmIfAvailable, setMoveDirectionFromClientX, toggleMoveDirection],
   )
 
   const handleBoardPointerMove = useCallback(
@@ -1465,18 +1619,24 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'ArrowLeft') {
         event.preventDefault()
+        ensureAudioReady()
+        playBgmIfAvailable()
         setMoveDirection('left')
         return
       }
 
       if (event.code === 'ArrowRight') {
         event.preventDefault()
+        ensureAudioReady()
+        playBgmIfAvailable()
         setMoveDirection('right')
         return
       }
 
       if (event.code === 'Space') {
         event.preventDefault()
+        ensureAudioReady()
+        playBgmIfAvailable()
         toggleMoveDirection()
         return
       }
@@ -1491,7 +1651,33 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [setMoveDirection, toggleMoveDirection, togglePause])
+  }, [ensureAudioReady, playBgmIfAvailable, setMoveDirection, toggleMoveDirection, togglePause])
+
+  useEffect(() => {
+    if (isPaused) {
+      pauseBgm()
+      return
+    }
+    playBgmIfAvailable()
+  }, [isPaused, pauseBgm, playBgmIfAvailable])
+
+  useEffect(() => {
+    return () => {
+      const context = audioContextRef.current
+      audioContextRef.current = null
+      audioMasterGainRef.current = null
+      if (context !== null && context.state !== 'closed') {
+        void context.close()
+      }
+
+      const bgmAudio = bgmAudioRef.current
+      bgmAudioRef.current = null
+      if (bgmAudio !== null) {
+        bgmAudio.pause()
+        bgmAudio.currentTime = 0
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1553,12 +1739,14 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
       const nextItems: RunRunItem[] = []
       let itemListChanged = false
       let collectedBonus = 0
+      let highestCollectedItemValue = 0
       const createdPopups: ItemPopup[] = []
 
       for (const item of itemsRef.current) {
         const isCollected = distanceBetweenPoints(item.point, movedPlayer) <= ITEM_COLLISION_RADIUS
         if (isCollected) {
           collectedBonus += item.value
+          highestCollectedItemValue = Math.max(highestCollectedItemValue, item.value)
           itemListChanged = true
           popupIdRef.current += 1
           createdPopups.push({
@@ -1602,6 +1790,7 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
 
       const isSafe = isPointInsideRoad(movedPlayer, nextRoadHistory)
       if (collectedBonus > 0) {
+        playItemPickupSfx(highestCollectedItemValue)
         bonusScoreRef.current += collectedBonus
       }
       setScore(toScore(travelDistanceRef.current) + bonusScoreRef.current)
@@ -1614,7 +1803,7 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
     return () => {
       window.clearInterval(timer)
     }
-  }, [appendItemsFromRoad, finishRound])
+  }, [appendItemsFromRoad, finishRound, playItemPickupSfx])
 
   const groundPatternOffset = useMemo(() => {
     const wrapOffset = (value: number): number =>
