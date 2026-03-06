@@ -640,7 +640,7 @@ export const memoryFlipModule: MiniGameModule = {
   manifest: {
     id: 'memory-flip',
     title: 'Memory Flip',
-    description: '카드를 뒤집어 짝을 맞춰라! 연속 매치하면 콤보 보너스 + 시간 추가!',
+    description: 'Flip cards to find pairs! Chain matches for combo bonus + extra time!',
     unlockCost: 45,
     baseReward: 15,
     scoreRewardMultiplier: 1.2,

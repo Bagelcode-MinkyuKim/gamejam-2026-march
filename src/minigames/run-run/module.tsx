@@ -1982,8 +1982,8 @@ function RunRunGame({ onFinish, onExit }: MiniGameSessionProps) {
 export const runRunModule: MiniGameModule = {
   manifest: {
     id: 'run-run',
-    title: '달려달려',
-    description: '탭할 때마다 좌우 전환하며 지그재그 길 위를 최대한 멀리 가는 탑뷰 게임',
+    title: 'Run Run',
+    description: 'Tap to switch directions and zigzag as far as you can!',
     unlockCost: 60,
     baseReward: 14,
     scoreRewardMultiplier: 0.7,

@@ -191,7 +191,7 @@ function createHeartPickup(heartId: number): HeartPickup {
 }
 
 function TapDashGame({ onFinish, onExit, bestScore = 0, isAudioMuted = false }: MiniGameSessionProps) {
-  const [effectPresetId, setEffectPresetId] = useState<EffectPresetId>('medium')
+  const [effectPresetId] = useState<EffectPresetId>('medium')
   const [currentScore, setCurrentScore] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ROUND_DURATION_MS)
   const [currentCombo, setCurrentCombo] = useState(0)
@@ -952,31 +952,6 @@ function TapDashGame({ onFinish, onExit, bestScore = 0, isAudioMuted = false }: 
             />
           </div>
         </div>
-        <div className="tap-dash-effects-toggle" role="radiogroup" aria-label="effects-intensity-toggle">
-          {EFFECT_PRESET_IDS.map((presetId) => {
-            const isActive = effectPresetId === presetId
-            return (
-              <button
-                key={presetId}
-                className={`tap-dash-effects-button ${isActive ? 'active' : ''}`}
-                type="button"
-                role="radio"
-                aria-checked={isActive}
-                onPointerDown={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                }}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  setEffectPresetId(presetId)
-                }}
-              >
-                {EFFECT_PRESET_CONFIG[presetId].label}
-              </button>
-            )
-          })}
-        </div>
 
         {timeBoostText ? (
           <p key={timeBoostPulseId} className={`tap-dash-time-boost-pop ${isSuperFeverActive ? 'super' : ''}`} aria-live="polite">
@@ -1109,7 +1084,7 @@ export const tapDashModule: MiniGameModule = {
   manifest: {
     id: 'tap-dash',
     title: 'Tap Dash',
-    description: '30초 동안 랜덤 타겟에 등장하는 캐릭터를 탭해 점수를 쌓는 미니게임',
+    description: 'Tap characters appearing at random targets to score in 30 seconds!',
     unlockCost: 0,
     baseReward: 8,
     scoreRewardMultiplier: 1.2,

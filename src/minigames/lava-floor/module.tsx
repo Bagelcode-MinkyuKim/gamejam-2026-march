@@ -938,7 +938,7 @@ export const lavaFloorModule: MiniGameModule = {
   manifest: {
     id: 'lava-floor',
     title: 'Lava Floor',
-    description: '바닥은 용암! 나타나는 플랫폼으로 뛰어라!',
+    description: 'The floor is lava! Jump to the platforms!',
     unlockCost: 35,
     baseReward: 13,
     scoreRewardMultiplier: 1.15,

@@ -771,7 +771,7 @@ export const bubblePopModule: MiniGameModule = {
   manifest: {
     id: 'bubble-pop',
     title: 'Bubble Pop',
-    description: '버블을 터뜨려라! 폭탄 3번 터뜨리면 게임오버! 점수가 오를수록 어려워진다!',
+    description: 'Pop the bubbles! 3 bombs and it\'s game over! Gets harder as you score!',
     unlockCost: 25,
     baseReward: 11,
     scoreRewardMultiplier: 1.05,
