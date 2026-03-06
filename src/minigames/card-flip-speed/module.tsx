@@ -1157,7 +1157,7 @@ export const cardFlipSpeedModule: MiniGameModule = {
   manifest: {
     id: 'card-flip-speed',
     title: 'Card Flip',
-    description: '\uB2E4\uC74C \uCE74\uB4DC\uAC00 \uB192\uC744\uAE4C \uB0AE\uC744\uAE4C? \uBE60\uB974\uAC8C \uC608\uCE21\uD558\uB77C!',
+    description: 'Will the next card be higher or lower? Predict fast!',
     unlockCost: 20,
     baseReward: 10,
     scoreRewardMultiplier: 1.0,

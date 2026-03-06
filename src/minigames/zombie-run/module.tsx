@@ -939,7 +939,7 @@ export const zombieRunModule: MiniGameModule = {
   manifest: {
     id: 'zombie-run',
     title: 'Zombie Run',
-    description: '\uC880\uBE44\uAC00 \uCAD3\uC544\uC628\uB2E4! \uBBF8\uCE5C\uB4EF\uC774 \uD0ED\uD574\uC11C \uB3C4\uB9DD\uCCD0\uB77C!',
+    description: 'Zombies are coming! Tap like crazy to escape!',
     unlockCost: 25,
     baseReward: 11,
     scoreRewardMultiplier: 1.05,

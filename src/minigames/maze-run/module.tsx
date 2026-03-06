@@ -846,15 +846,15 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
         .mr-topbar {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
+          gap: 12px;
+          padding: 12px 16px;
           background: ${PAL.hud};
           border-bottom: 3px solid ${PAL.wall};
         }
 
         .mr-avatar {
-          width: 40px;
-          height: 40px;
+          width: 56px;
+          height: 56px;
           border-radius: 4px;
           border: 2px solid ${PAL.wall};
           object-fit: contain;
@@ -867,29 +867,29 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
 
         .mr-score {
           margin: 0;
-          font-size: 1.8rem;
+          font-size: 4.5rem;
           font-weight: 900;
           color: ${PAL.player};
-          text-shadow: 2px 2px 0 ${PAL.bg}, -1px -1px 0 ${PAL.bg};
-          line-height: 1.1;
-          letter-spacing: 2px;
+          text-shadow: 4px 4px 0 ${PAL.bg}, -2px -2px 0 ${PAL.bg};
+          line-height: 1;
+          letter-spacing: 4px;
         }
 
         .mr-best {
           margin: 0;
-          font-size: 0.55rem;
+          font-size: 1rem;
           color: ${PAL.textDim};
           font-weight: 700;
           letter-spacing: 1px;
         }
 
         .mr-timer {
-          font-size: 1.2rem;
+          font-size: 3rem;
           font-weight: 900;
           font-variant-numeric: tabular-nums;
           color: ${PAL.text};
-          text-shadow: 1px 1px 0 ${PAL.bg};
-          letter-spacing: 1px;
+          text-shadow: 3px 3px 0 ${PAL.bg};
+          letter-spacing: 2px;
         }
 
         .mr-timer-low {
@@ -903,7 +903,7 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
         }
 
         .mr-timebar {
-          height: 4px;
+          height: 6px;
           background: ${PAL.floor};
           margin: 0;
         }
@@ -916,9 +916,9 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
         .mr-stats {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 4px 12px;
-          font-size: 0.65rem;
+          gap: 10px;
+          padding: 6px 16px;
+          font-size: 0.85rem;
           font-weight: 800;
           letter-spacing: 1px;
           flex-wrap: wrap;
@@ -979,19 +979,19 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 3px;
-          padding: 8px 0 4px;
+          gap: 4px;
+          padding: 10px 0 6px;
         }
 
-        .mr-dpad-row { display: flex; align-items: center; gap: 3px; }
+        .mr-dpad-row { display: flex; align-items: center; gap: 4px; }
 
-        .mr-dpad-center { width: 52px; height: 52px; }
+        .mr-dpad-center { width: 68px; height: 68px; }
 
         .mr-dpad-btn {
-          width: 52px;
-          height: 52px;
+          width: 68px;
+          height: 68px;
           border: 3px solid ${PAL.wall};
-          border-radius: 4px;
+          border-radius: 6px;
           background: ${PAL.hud};
           color: ${PAL.text};
           display: flex;
@@ -1012,18 +1012,18 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
 
         .mr-actions {
           display: flex;
-          gap: 6px;
-          padding: 2px 12px 8px;
+          gap: 8px;
+          padding: 4px 16px 10px;
           justify-content: center;
         }
 
         .mr-btn {
-          padding: 8px 20px;
+          padding: 12px 28px;
           border: 2px solid ${PAL.wall};
-          border-radius: 3px;
+          border-radius: 4px;
           background: ${PAL.hud};
           color: ${PAL.text};
-          font-size: 0.75rem;
+          font-size: 0.95rem;
           font-weight: 800;
           font-family: 'Courier New', monospace;
           cursor: pointer;
@@ -1043,10 +1043,10 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
 
         .mr-combo-display {
           position: absolute;
-          top: 8px;
+          top: 10px;
           left: 50%;
           transform: translateX(-50%);
-          font-size: 1.1rem;
+          font-size: 1.5rem;
           font-weight: 900;
           color: ${PAL.coinLight};
           text-shadow: 2px 2px 0 ${PAL.bg};
@@ -1064,10 +1064,10 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
         .mr-key-indicator {
           display: flex;
           align-items: center;
-          gap: 3px;
-          padding: 2px 6px;
+          gap: 4px;
+          padding: 4px 8px;
           border-radius: 3px;
-          font-size: 0.6rem;
+          font-size: 0.8rem;
           font-weight: 800;
         }
       `}</style>
@@ -1274,38 +1274,33 @@ function MazeRunGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProps) 
       <div className="mr-dpad" role="group" aria-label="controls">
         <div className="mr-dpad-row">
           <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_UP)} aria-label="up">
-            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="6" y="2" width="4" height="4" fill="currentColor" /><rect x="4" y="6" width="8" height="4" fill="currentColor" /><rect x="2" y="10" width="12" height="4" fill="currentColor" /></svg>
+            <svg viewBox="0 0 16 16" width="32" height="32"><rect x="6" y="2" width="4" height="4" fill="currentColor" /><rect x="4" y="6" width="8" height="4" fill="currentColor" /><rect x="2" y="10" width="12" height="4" fill="currentColor" /></svg>
           </button>
         </div>
         <div className="mr-dpad-row">
           <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_LEFT)} aria-label="left">
-            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="2" y="6" width="4" height="4" fill="currentColor" /><rect x="6" y="4" width="4" height="8" fill="currentColor" /><rect x="10" y="2" width="4" height="12" fill="currentColor" /></svg>
+            <svg viewBox="0 0 16 16" width="32" height="32"><rect x="2" y="6" width="4" height="4" fill="currentColor" /><rect x="6" y="4" width="4" height="8" fill="currentColor" /><rect x="10" y="2" width="4" height="12" fill="currentColor" /></svg>
           </button>
           <div className="mr-dpad-center" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <button
               className="mr-dpad-btn"
               type="button"
               onClick={() => { setShowMinimap(v => { if (!v) playSfx('minimap', 0.4); return !v }) }}
-              style={{ width: 36, height: 36, fontSize: '0.5rem', color: showMinimap ? PAL.exit : PAL.textDim }}
+              style={{ width: 48, height: 48, fontSize: '0.65rem', color: showMinimap ? PAL.exit : PAL.textDim }}
               aria-label="minimap"
             >MAP</button>
           </div>
           <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_RIGHT)} aria-label="right">
-            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="10" y="6" width="4" height="4" fill="currentColor" /><rect x="6" y="4" width="4" height="8" fill="currentColor" /><rect x="2" y="2" width="4" height="12" fill="currentColor" /></svg>
+            <svg viewBox="0 0 16 16" width="32" height="32"><rect x="10" y="6" width="4" height="4" fill="currentColor" /><rect x="6" y="4" width="4" height="8" fill="currentColor" /><rect x="2" y="2" width="4" height="12" fill="currentColor" /></svg>
           </button>
         </div>
         <div className="mr-dpad-row">
           <button className="mr-dpad-btn" type="button" onClick={() => movePlayer(DIR_DOWN)} aria-label="down">
-            <svg viewBox="0 0 16 16" width="24" height="24"><rect x="2" y="2" width="12" height="4" fill="currentColor" /><rect x="4" y="6" width="8" height="4" fill="currentColor" /><rect x="6" y="10" width="4" height="4" fill="currentColor" /></svg>
+            <svg viewBox="0 0 16 16" width="32" height="32"><rect x="2" y="2" width="12" height="4" fill="currentColor" /><rect x="4" y="6" width="8" height="4" fill="currentColor" /><rect x="6" y="10" width="4" height="4" fill="currentColor" /></svg>
           </button>
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="mr-actions">
-        <button className="mr-btn" type="button" onClick={finishGame}>FINISH</button>
-        <button className="mr-btn mr-btn-ghost" type="button" onClick={onExit}>EXIT</button>
-      </div>
     </section>
   )
 }

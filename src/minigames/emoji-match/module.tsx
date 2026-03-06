@@ -1279,7 +1279,7 @@ export const emojiMatchModule: MiniGameModule = {
   manifest: {
     id: 'emoji-match',
     title: 'Pixel Match',
-    description: '\uB808\uD2B8\uB85C \uB3C4\uD2B8 \uC2A4\uD0C0\uC77C! \uD0C0\uAC9F \uC544\uC774\uD15C\uC744 \uCC3E\uC544 \uD0ED\uD558\uB77C!',
+    description: 'Retro dot style! Find and tap the target item!',
     unlockCost: 20,
     baseReward: 10,
     scoreRewardMultiplier: 1.0,

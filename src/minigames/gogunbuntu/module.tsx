@@ -23,7 +23,7 @@ import bgmLoop from '../../../assets/sounds/gogunbuntu/gogunbuntu-bgm-loop.mp3'
 
 const STAGE_VIEW_WIDTH = 360
 const STAGE_VIEW_HEIGHT = 560
-const GROUND_SCREEN_OFFSET = 160
+const GROUND_SCREEN_OFFSET = 90
 
 const PLAYER_WIDTH = 86
 const PLAYER_HEIGHT = 86
@@ -572,7 +572,7 @@ function extendWorld(model: WorldModel, minAheadX: number): void {
 
     const coinCount = Math.random() < lerpNumber(0.72, 0.48, runProgress) ? 2 : 1
     for (let index = 0; index < coinCount; index += 1) {
-      const coinX = nextStartX + ((index + 1) / (coinCount + 1)) * (nextEndX - nextStartX) + randomBetween(-16, 16)
+      const coinX = nextStartX + ((index + 1) / (coinCount + 1)) * (finalEndX - nextStartX) + randomBetween(-16, 16)
       const coinY = nextY + randomBetween(44, 110)
       model.coins = [
         ...model.coins,
@@ -1417,28 +1417,28 @@ function GogunbuntuGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           className="gogunbuntu-bg-layer depth-1"
           style={{
             backgroundImage: `url(${gogunbuntuBg})`,
-            backgroundPositionX: `${-renderState.cameraX * 0.06 * viewportScale}px`,
+            backgroundPositionX: `${-renderState.cameraX * 0.03 * viewportScale}px`,
           }}
         />
         <div
           className="gogunbuntu-bg-layer depth-2"
           style={{
             backgroundImage: `url(${gogunbuntuBg})`,
-            backgroundPositionX: `${-renderState.cameraX * 0.15 * viewportScale}px`,
+            backgroundPositionX: `${-renderState.cameraX * 0.12 * viewportScale}px`,
           }}
         />
         <div
           className="gogunbuntu-bg-layer depth-3"
           style={{
             backgroundImage: `url(${gogunbuntuBg})`,
-            backgroundPositionX: `${-renderState.cameraX * 0.3 * viewportScale}px`,
+            backgroundPositionX: `${-renderState.cameraX * 0.4 * viewportScale}px`,
           }}
         />
         <div className="gogunbuntu-bg-particles" />
         <div
           className="gogunbuntu-bg-ground-streak"
           style={{
-            backgroundPositionX: `${-renderState.cameraX * 0.85 * viewportScale}px`,
+            backgroundPositionX: `${-renderState.cameraX * 0.9 * viewportScale}px`,
           }}
         />
 

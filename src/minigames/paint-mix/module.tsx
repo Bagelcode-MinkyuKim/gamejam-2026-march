@@ -1177,7 +1177,7 @@ export const paintMixModule: MiniGameModule = {
   manifest: {
     id: 'paint-mix',
     title: 'Paint Mix',
-    description: '\uBE68\uD30C\uB178 \uD398\uC778\uD2B8\uB97C \uC11E\uC5B4 \uD0C0\uAC9F \uC0C9\uC0C1\uC744 \uB9CC\uB4E4\uC5B4\uB77C!',
+    description: 'Mix RGB paint to create the target color!',
     unlockCost: 40,
     baseReward: 14,
     scoreRewardMultiplier: 1.15,

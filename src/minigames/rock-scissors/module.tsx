@@ -725,7 +725,7 @@ export const rockScissorsModule: MiniGameModule = {
   manifest: {
     id: 'rock-scissors',
     title: 'Rock Scissors',
-    description: '\uC5F0\uC18D \uAC00\uC704\uBC14\uC704\uBCF4! AI\uC758 \uD328\uD134\uC744 \uC77D\uACE0 \uC5F0\uC2B9\uC744 \uB178\uB824\uB77C!',
+    description: 'Rock Paper Scissors streak! Read AI patterns and win big!',
     unlockCost: 20,
     baseReward: 10,
     scoreRewardMultiplier: 1.0,

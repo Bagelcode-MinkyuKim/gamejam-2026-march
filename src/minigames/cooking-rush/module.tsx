@@ -1082,7 +1082,7 @@ export const cookingRushModule: MiniGameModule = {
   manifest: {
     id: 'cooking-rush',
     title: 'Cooking Rush',
-    description: '\uB808\uC2DC\uD53C\uB300\uB85C \uC7AC\uB8CC\uB97C \uC21C\uC11C\uB300\uB85C \uB123\uC5B4 \uC694\uB9AC\uB97C \uC644\uC131\uD558\uB77C!',
+    description: 'Follow the recipe! Add ingredients in order to cook!',
     unlockCost: 35,
     baseReward: 13,
     scoreRewardMultiplier: 1.15,

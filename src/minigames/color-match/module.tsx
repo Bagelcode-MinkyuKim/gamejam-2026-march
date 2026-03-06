@@ -39,7 +39,7 @@ const MULTI_CHOICE_CHANCE = 0.25
 
 // Level system
 const LEVEL_THRESHOLDS = [0, 10, 25, 45, 70, 100] as const
-const LEVEL_NAMES = ['Beginner', 'Rookie', 'Pro', 'Master', 'Legend', 'GOD'] as const
+const LEVEL_NAMES = ['초보', '루키', '고수', '달인', '전설', 'GOD'] as const
 const LEVEL_COLORS = ['#6b7280', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'] as const
 
 // Speed rush
@@ -71,17 +71,17 @@ const FREEZE_DURATION_MS = 3000
 const FREEZE_SCORE_THRESHOLD = 12
 
 const BASE_COLORS: readonly ColorEntry[] = [
-  { name: 'Red', hex: '#ef4444' },
-  { name: 'Blue', hex: '#3b82f6' },
-  { name: 'Green', hex: '#22c55e' },
-  { name: 'Yellow', hex: '#eab308' },
-  { name: 'Purple', hex: '#8b5cf6' },
+  { name: '빨강', hex: '#ef4444' },
+  { name: '파랑', hex: '#3b82f6' },
+  { name: '초록', hex: '#22c55e' },
+  { name: '노랑', hex: '#eab308' },
+  { name: '보라', hex: '#8b5cf6' },
 ]
 
 const EXTRA_COLORS: readonly ColorEntry[] = [
-  { name: 'Sky', hex: '#06b6d4' },
-  { name: 'Pink', hex: '#ec4899' },
-  { name: 'Orange', hex: '#f97316' },
+  { name: '하늘', hex: '#06b6d4' },
+  { name: '분홍', hex: '#ec4899' },
+  { name: '주황', hex: '#f97316' },
 ]
 
 interface ColorEntry {
@@ -387,23 +387,23 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         let timeBonus = TIME_BONUS_PER_CORRECT_MS
         if (elapsed <= PERFECT_TIMING_WINDOW_MS) {
           earned += PERFECT_BONUS_SCORE
-          showTimingLabel('PERFECT!', '#fbbf24')
+          showTimingLabel('퍼펙트!', '#fbbf24')
           perfectCountRef.current += 1
           setPerfectCount(perfectCountRef.current)
           timeBonus = PERFECT_TIME_BONUS_MS
         } else if (elapsed <= GOOD_TIMING_WINDOW_MS) {
           earned += GOOD_BONUS_SCORE
-          showTimingLabel('GOOD!', '#22c55e')
+          showTimingLabel('굿!', '#22c55e')
           timeBonus = TIME_BONUS_PER_CORRECT_MS * 2
         } else if (elapsed > displayLimit * 0.8) {
-          showTimingLabel('CLOSE!', '#f97316')
+          showTimingLabel('아슬아슬!', '#f97316')
         }
 
         // Golden question multiplier
         if (currentQuestion.isGolden) {
           earned *= GOLDEN_SCORE_MULTIPLIER
           timeBonus = GOLDEN_TIME_BONUS_MS
-          showTimingLabel('GOLDEN!', '#fbbf24')
+          showTimingLabel('골든!', '#fbbf24')
           effects.comboHitBurst(200, 300, nextCombo, earned, ['💰', '👑', '🌟', '💎'])
           playAudio(tapHitStrongAudioRef, 0.9, 1.5)
         }
@@ -426,14 +426,14 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         if (nextCombo > 0 && nextCombo % SHIELD_COMBO_THRESHOLD === 0 && shieldsRef.current < MAX_SHIELDS) {
           shieldsRef.current += 1
           setShields(shieldsRef.current)
-          showTimingLabel(`SHIELD +1`, '#8b5cf6')
+          showTimingLabel(`실드 +1`, '#8b5cf6')
           effects.comboHitBurst(200, 300, nextCombo, earned, ['🛡️'])
         }
 
         // Trigger speed rush
         if (nextCombo === SPEED_RUSH_COMBO_THRESHOLD && !speedRushActiveRef.current && !feverActiveRef.current) {
           activateSpeedRush()
-          showFloatingScore(`SPEED RUSH! +${earned}`)
+          showFloatingScore(`스피드러시! +${earned}`)
           effects.comboHitBurst(200, 300, nextCombo, earned, ['💨', '⚡', '🏃'])
           playAudio(tapHitStrongAudioRef, 0.7, 1.4)
         }
@@ -441,12 +441,12 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         else if (nextCombo === FEVER_COMBO_THRESHOLD && !feverActiveRef.current) {
           activateFever()
           playAudio(tapHitStrongAudioRef, 0.8, 1.3)
-          showFloatingScore(`FEVER! +${earned}`)
+          showFloatingScore(`피버! +${earned}`)
           effects.comboHitBurst(200, 300, nextCombo, earned, ['🔥', '⚡', '💥', '🌟'])
         } else if (isComboBonus) {
           triggerComboPulse()
           playAudio(tapHitStrongAudioRef, 0.6, 1.1 + Math.min(0.3, nextCombo * 0.02))
-          showFloatingScore(`+${earned} COMBO!`)
+          showFloatingScore(`+${earned} 콤보!`)
           effects.comboHitBurst(200, 300, nextCombo, earned)
         } else if (!currentQuestion.isGolden) {
           playAudio(tapHitAudioRef, 0.5, 1 + Math.min(0.2, nextCombo * 0.015))
@@ -472,10 +472,10 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         if (currentQuestion.isGolden) {
           setCharAnim('golden-celebrate')
           charSpeechKeyRef.current += 1
-          setCharSpeech({ text: 'GOLDEN!!', key: charSpeechKeyRef.current })
+          setCharSpeech({ text: '골든!!', key: charSpeechKeyRef.current })
         } else {
           setCharAnim('correct-bounce')
-          const speeches = nextCombo >= 10 ? ['MAX!', 'FIRE!', 'INSANE!'] : nextCombo >= 5 ? ['NICE!', 'GREAT!', 'YEAH!'] : ['OK!', 'YES!', 'GO!']
+          const speeches = nextCombo >= 10 ? ['최고!', '불타!', '미쳤다!'] : nextCombo >= 5 ? ['좋아!', '대박!', '오예!'] : ['좋아!', '맞아!', '고고!']
           charSpeechKeyRef.current += 1
           setCharSpeech({ text: speeches[Math.floor(Math.random() * speeches.length)], key: charSpeechKeyRef.current })
         }
@@ -485,8 +485,8 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         if (shieldsRef.current > 0) {
           shieldsRef.current -= 1
           setShields(shieldsRef.current)
-          showTimingLabel('SHIELD!', '#8b5cf6')
-          showFloatingScore('BLOCKED!')
+          showTimingLabel('실드!', '#8b5cf6')
+          showFloatingScore('방어!')
           effects.triggerFlash('rgba(139,92,246,0.4)')
           effects.spawnParticles(5, 200, 300)
           playAudio(tapHitStrongAudioRef, 0.5, 0.8)
@@ -514,12 +514,12 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         effects.spawnParticles(4, 200, 300)
         playAudio(tapHitAudioRef, 0.4, 0.7)
         showFloatingScore(`-${WRONG_PENALTY}`)
-        showTimingLabel('MISS!', '#ef4444')
+        showTimingLabel('미스!', '#ef4444')
 
         // Character recoil + speech
         setCharAnim('wrong-recoil')
         charSpeechKeyRef.current += 1
-        const missSpeeches = ['UGH!', 'NO!', 'OOPS!', 'AH!']
+        const missSpeeches = ['으악!', '아닌데!', '앗!', '헉!']
         setCharSpeech({ text: missSpeeches[Math.floor(Math.random() * missSpeeches.length)], key: charSpeechKeyRef.current })
         setTimeout(() => setCharAnim(''), 500)
       }
@@ -712,10 +712,10 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
     .join(' ')
 
   const arenaBackground = isFeverMode
-    ? `linear-gradient(180deg, rgba(255,251,235,0.95), rgba(254,243,199,0.95))`
+    ? `linear-gradient(180deg, rgba(255,247,220,0.97), rgba(254,235,180,0.97))`
     : isSpeedRush
-      ? `linear-gradient(180deg, rgba(224,242,254,0.95), rgba(186,230,253,0.95))`
-      : `linear-gradient(180deg, hsla(${bgHue}, 15%, 98%, 0.95), hsla(${bgHue}, 12%, 96%, 0.95))`
+      ? `linear-gradient(180deg, rgba(210,235,255,0.97), rgba(170,215,250,0.97))`
+      : `linear-gradient(180deg, hsla(${bgHue}, 25%, 96%, 0.97), hsla(${(bgHue + 30) % 360}, 20%, 93%, 0.97))`
 
   return (
     <section className={panelClass} aria-label="color-match-game" style={{ maxWidth: '432px', aspectRatio: '9/16', margin: '0 auto', overflow: 'hidden', position: 'relative', padding: 0, ...effects.getShakeStyle() }}>
@@ -765,11 +765,12 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           justify-content: space-between;
           align-items: center;
           width: 100%;
-          padding: 8px 12px;
-          background: rgba(255,255,255,0.85);
+          padding: 10px 14px;
+          background: linear-gradient(180deg, rgba(245,244,239,0.95), rgba(237,233,223,0.9));
           backdrop-filter: blur(8px);
           z-index: 10;
           flex-shrink: 0;
+          border-bottom: 2px solid rgba(107,114,128,0.15);
         }
 
         .color-match-fever-banner {
@@ -903,11 +904,12 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         }
 
         .color-match-combo {
-          font-size: 18px;
+          font-size: 20px;
           font-weight: 800;
           color: #6b7280;
           margin: 0;
           transition: transform 0.2s ease, color 0.2s ease;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.08);
         }
 
         .color-match-combo.active {
@@ -934,10 +936,11 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
         .color-match-question-timer {
           width: 100%;
-          height: 8px;
+          height: 10px;
           background: #e5e7eb;
           overflow: hidden;
           flex-shrink: 0;
+          box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .color-match-question-timer-fill {
@@ -987,15 +990,16 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         }
 
         .color-match-word {
-          font-size: clamp(52px, 14vw, 72px);
+          font-size: clamp(56px, 15vw, 80px);
           font-weight: 900;
           margin: 0;
           text-align: center;
           user-select: none;
           transition: opacity 0.15s ease, transform 0.15s ease;
           line-height: 1.2;
-          letter-spacing: 4px;
-          -webkit-text-stroke: 0px;
+          letter-spacing: 6px;
+          -webkit-text-stroke: 1px rgba(0,0,0,0.08);
+          text-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .color-match-word.hidden {
@@ -1105,19 +1109,20 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
         .color-match-char-speech {
           position: absolute;
-          top: -28px;
+          top: -36px;
           left: 50%;
           transform: translateX(-50%);
           background: #fff;
           border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          padding: 3px 10px;
-          font-size: 12px;
+          border-radius: 14px;
+          padding: 5px 14px;
+          font-size: 16px;
           font-weight: 800;
           white-space: nowrap;
           z-index: 5;
           animation: color-match-speech-pop 0.5s ease-out forwards;
           pointer-events: none;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
 
         .color-match-char-speech::after {
@@ -1190,10 +1195,10 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
         .color-match-button {
           flex: 1;
-          padding: 20px 8px;
-          border-radius: 16px;
+          padding: 24px 8px;
+          border-radius: 18px;
           border: 3px solid;
-          font-size: 16px;
+          font-size: 18px;
           font-weight: 800;
           cursor: pointer;
           user-select: none;
@@ -1202,6 +1207,7 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           overflow: hidden;
           font-family: inherit;
           letter-spacing: 1px;
+          min-height: 90px;
         }
 
         .color-match-button:active {
@@ -1305,14 +1311,36 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         .color-match-bg-orb {
           position: absolute;
           border-radius: 50%;
-          opacity: 0.12;
-          filter: blur(40px);
-          animation: color-match-orb-float 6s ease-in-out infinite alternate;
+          opacity: 0.18;
+          filter: blur(50px);
+          animation: color-match-orb-float 8s ease-in-out infinite alternate;
         }
 
         @keyframes color-match-orb-float {
           0% { transform: translate(0, 0) scale(1); }
-          100% { transform: translate(20px, -30px) scale(1.2); }
+          50% { transform: translate(15px, -20px) scale(1.15); }
+          100% { transform: translate(-10px, -35px) scale(1.25); }
+        }
+
+        .color-match-deco-dots {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          overflow: hidden;
+        }
+
+        .color-match-deco-dot {
+          position: absolute;
+          border-radius: 50%;
+          opacity: 0.35;
+          animation: color-match-dot-twinkle 3s ease-in-out infinite alternate;
+        }
+
+        @keyframes color-match-dot-twinkle {
+          0% { opacity: 0.15; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.4); }
+          100% { opacity: 0.2; transform: scale(0.8); }
         }
 
         .color-match-rainbow-bar {
@@ -1422,21 +1450,21 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         </div>
         <div style={{ textAlign: 'right' }}>
           <p className={`color-match-time ${isLowTime ? 'low-time' : ''}`}>{(remainingMs / 1000).toFixed(1)}s</p>
-          <p className="color-match-best">BEST {displayedBestScore}</p>
+          <p className="color-match-best">최고 {displayedBestScore}</p>
         </div>
       </div>
 
       {/* Info strip: combo, perfect count, colors */}
       <div className="color-match-info-strip">
         <p className={`color-match-combo ${combo >= COMBO_BONUS_THRESHOLD ? 'active' : ''} ${isComboPulse ? 'pulse' : ''}`}>
-          COMBO <strong>{combo}</strong>
+          콤보 <strong>{combo}</strong>
         </p>
         {perfectCount > 0 && (
-          <p className="color-match-perfect-count">PERFECT x{perfectCount}</p>
+          <p className="color-match-perfect-count">퍼펙트 x{perfectCount}</p>
         )}
         {activeColorCount > BASE_COLORS.length && (
           <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>
-            {activeColorCount}colors
+            {activeColorCount}색
           </p>
         )}
         {shields > 0 && (
@@ -1462,7 +1490,7 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       {/* Banners */}
       {isFeverMode && (
         <div className="color-match-fever-banner">
-          FEVER x{FEVER_SCORE_MULTIPLIER}
+          피버 x{FEVER_SCORE_MULTIPLIER}
           <div className="color-match-fever-timer">
             <div className="color-match-fever-timer-fill" style={{ width: `${(feverRemainingMs / FEVER_DURATION_MS) * 100}%` }} />
           </div>
@@ -1471,7 +1499,7 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
       {isSpeedRush && !isFeverMode && (
         <div className="color-match-speed-rush-banner">
-          SPEED RUSH
+          스피드 러시
           <div className="color-match-fever-timer">
             <div className="color-match-fever-timer-fill" style={{ width: `${(speedRushRemainingMs / SPEED_RUSH_DURATION_MS) * 100}%`, background: 'linear-gradient(90deg, #06b6d4, #3b82f6)' }} />
           </div>
@@ -1480,7 +1508,7 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
       {isFrozen && !isFeverMode && !isSpeedRush && (
         <div className="color-match-freeze-banner">
-          FREEZE
+          프리즈
           <div className="color-match-fever-timer">
             <div className="color-match-fever-timer-fill" style={{ width: `${(frozenRemainingMs / FREEZE_DURATION_MS) * 100}%`, background: 'linear-gradient(90deg, #22d3ee, #06b6d4)' }} />
           </div>
@@ -1491,9 +1519,24 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
       <div className={`color-match-arena ${question.isGolden ? 'color-match-golden-arena' : ''}`} style={{ background: arenaBackground }}>
         {/* Background orbs */}
         <div className="color-match-bg-orbs">
-          <div className="color-match-bg-orb" style={{ width: '200px', height: '200px', background: isFeverMode ? '#fbbf24' : '#3b82f6', top: '-20%', left: '-10%', animationDelay: '0s' }} />
-          <div className="color-match-bg-orb" style={{ width: '150px', height: '150px', background: isFeverMode ? '#ef4444' : '#8b5cf6', bottom: '-10%', right: '-5%', animationDelay: '2s' }} />
-          <div className="color-match-bg-orb" style={{ width: '120px', height: '120px', background: isFeverMode ? '#f59e0b' : '#22c55e', top: '40%', right: '10%', animationDelay: '4s' }} />
+          <div className="color-match-bg-orb" style={{ width: '280px', height: '280px', background: isFeverMode ? '#fbbf24' : '#3b82f6', top: '-15%', left: '-15%', animationDelay: '0s' }} />
+          <div className="color-match-bg-orb" style={{ width: '220px', height: '220px', background: isFeverMode ? '#ef4444' : '#8b5cf6', bottom: '-5%', right: '-10%', animationDelay: '2s' }} />
+          <div className="color-match-bg-orb" style={{ width: '160px', height: '160px', background: isFeverMode ? '#f59e0b' : '#22c55e', top: '35%', right: '5%', animationDelay: '4s' }} />
+          <div className="color-match-bg-orb" style={{ width: '140px', height: '140px', background: isFeverMode ? '#ec4899' : '#eab308', top: '60%', left: '5%', animationDelay: '1s' }} />
+          <div className="color-match-bg-orb" style={{ width: '100px', height: '100px', background: isFeverMode ? '#fbbf24' : '#ec4899', top: '15%', right: '20%', animationDelay: '3s' }} />
+        </div>
+        {/* Decorative color dots */}
+        <div className="color-match-deco-dots">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="color-match-deco-dot" style={{
+              left: `${10 + (i * 12) % 85}%`,
+              top: `${5 + (i * 17) % 90}%`,
+              width: `${6 + (i % 3) * 4}px`,
+              height: `${6 + (i % 3) * 4}px`,
+              background: [question.textColor, '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#8b5cf6', '#ec4899', '#f97316'][i],
+              animationDelay: `${i * 0.4}s`,
+            }} />
+          ))}
         </div>
 
         {/* Frozen overlay */}
@@ -1516,7 +1559,7 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
 
         {/* Reverse mode indicator - no other hint text */}
         {question.isReverse && questionVisible && (
-          <p className="color-match-reverse-indicator" style={{ marginTop: '4px' }}>REVERSE!</p>
+          <p className="color-match-reverse-indicator" style={{ marginTop: '4px' }}>반전!</p>
         )}
 
         {/* Character */}
@@ -1530,8 +1573,8 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
             src={parkSangminImg}
             alt="park-sangmin"
             style={{
-              width: 'clamp(120px, 35vw, 180px)',
-              height: 'clamp(120px, 35vw, 180px)',
+              width: 'clamp(180px, 50vw, 260px)',
+              height: 'clamp(180px, 50vw, 260px)',
               objectFit: 'contain',
               filter: isFeverMode ? 'brightness(1.3) saturate(1.5) drop-shadow(0 0 16px rgba(251,191,36,0.6))'
                 : isSpeedRush ? 'brightness(1.2) drop-shadow(0 0 10px rgba(59,130,246,0.5))'
@@ -1549,7 +1592,7 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
           <span
             key={floatingScore.key}
             className={`color-match-floating-score ${
-              floatingScore.value.startsWith('-') ? 'negative' : floatingScore.value.includes('COMBO') || floatingScore.value.includes('FEVER') || floatingScore.value.includes('RUSH') ? 'bonus' : 'positive'
+              floatingScore.value.startsWith('-') ? 'negative' : floatingScore.value.includes('콤보') || floatingScore.value.includes('피버') || floatingScore.value.includes('러시') ? 'bonus' : 'positive'
             }`}
           >
             {floatingScore.value}
@@ -1575,11 +1618,11 @@ function ColorMatchGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionProp
         <div className="color-match-buttons">
           <button className="color-match-button match" type="button" onClick={() => handleAnswer(true)}>
             <span className="color-match-button-icon">O</span>
-            <span className="color-match-button-label">MATCH</span>
+            <span className="color-match-button-label">일치</span>
           </button>
           <button className="color-match-button no-match" type="button" onClick={() => handleAnswer(false)}>
             <span className="color-match-button-icon">X</span>
-            <span className="color-match-button-label">MISMATCH</span>
+            <span className="color-match-button-label">불일치</span>
           </button>
         </div>
       )}
@@ -1603,7 +1646,7 @@ export const colorMatchModule: MiniGameModule = {
   manifest: {
     id: 'color-match',
     title: 'Color Match',
-    description: '\uC0C9 \uC774\uB984\uACFC \uAE00\uC790 \uC0C9\uC774 \uC77C\uCE58\uD558\uB294\uC9C0 \uBE60\uB974\uAC8C \uD310\uB2E8\uD558\uB77C! \uC2A4\uD2B8\uB8F9 \uD14C\uC2A4\uD2B8 \uCC4C\uB9B0\uC9C0',
+    description: 'Does the color name match the text color? Stroop test challenge!',
     unlockCost: 30,
     baseReward: 12,
     scoreRewardMultiplier: 1.1,

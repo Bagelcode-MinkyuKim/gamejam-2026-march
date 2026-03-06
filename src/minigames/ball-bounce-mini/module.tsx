@@ -53,9 +53,9 @@ const FEVER_COMBO = 10
 const FEVER_MULT = 3
 const WALL_DAMP = 0.8
 const H_FORCE = 0.28
-const BALL_R = 18
-const TAP_RADIUS = 60
-const PERFECT_RADIUS = 24
+const BALL_R = 28
+const TAP_RADIUS = 110
+const PERFECT_RADIUS = 44
 const COMBO_DECAY_MS = 2200
 const HT_SCORE_DIV = 65
 const PX_BORDER = 3
@@ -71,7 +71,7 @@ const PU_COLORS: Record<PUType, string> = {
 }
 const PU_DUR_MS = 5000
 const PU_SPAWN_MS = 7000
-const PU_SIZE = 22
+const PU_SIZE = 32
 
 // Obstacles
 const OB_SPAWN_MS = 10000
@@ -79,13 +79,13 @@ const OB_SPEED = 0.09
 
 // Stars (coins)
 const STAR_SPAWN_MS = 3500
-const STAR_SIZE = 14
+const STAR_SIZE = 22
 const STAR_PTS = 5
 
 // Platforms
 const PLAT_CHANCE = 0.2
-const PLAT_W = 48
-const PLAT_H = 6
+const PLAT_W = 70
+const PLAT_H = 10
 const PLAT_DUR_MS = 5000
 
 // Wind event
@@ -158,7 +158,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
   const bxR = useRef(160)
   const byR = useRef(300)
   const vxR = useRef(0)
-  const vyR = useRef(-0.3)
+  const vyR = useRef(-0.45)
   const scoreR = useRef(0)
   const comboR = useRef(0)
   const maxHtR = useRef(0)
@@ -636,21 +636,21 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
       {/* ─── HUD ──────────────────────────────── */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
-        padding: '8px 10px 4px', display: 'flex', flexDirection: 'column', gap: 2,
+        padding: '12px 14px 6px', display: 'flex', flexDirection: 'column', gap: 4,
         background: `linear-gradient(180deg, ${PX.black}ee 0%, transparent 100%)`,
       }}>
         {/* Score row */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 22, fontWeight: 800, color: PX.text, textShadow: `2px 2px 0 ${PX.black}` }}>
+          <span style={{ fontSize: 36, fontWeight: 800, color: PX.text, textShadow: `2px 2px 0 ${PX.black}` }}>
             {score.toLocaleString()}
           </span>
-          <span style={{ fontSize: 8, color: PX.textDim }}>
+          <span style={{ fontSize: 14, color: PX.textDim }}>
             BEST {best.toLocaleString()}
           </span>
         </div>
 
         {/* Stats row */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: PX.textDim }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, color: PX.textDim }}>
           <span>LV<strong style={{ color: PX.accent }}>{level}</strong></span>
           <span>B<strong style={{ color: PX.text }}>{bounces}</strong></span>
           <span style={{ color: bc, fontWeight: 700 }}>C<strong>{combo}</strong></span>
@@ -660,7 +660,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         {/* Fever */}
         {fever && (
           <div style={{
-            textAlign: 'center', color: PX.accent, fontWeight: 800, fontSize: 11,
+            textAlign: 'center', color: PX.accent, fontWeight: 800, fontSize: 20,
             textShadow: `0 0 8px ${PX.accent}, 2px 2px 0 ${PX.black}`,
             animation: 'bb-pulse 0.3s ease-in-out infinite alternate',
           }}>
@@ -671,7 +671,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         {/* Combo label */}
         {cLabel && combo >= 3 && (
           <div style={{
-            textAlign: 'center', fontSize: 13, fontWeight: 800,
+            textAlign: 'center', fontSize: 22, fontWeight: 800,
             color: getComboColor(combo), textShadow: `2px 2px 0 ${PX.black}, 0 0 6px ${getComboColor(combo)}`,
             animation: 'bb-pop 0.3s ease-out',
           }}>
@@ -682,10 +682,10 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         {/* PowerUp bar */}
         {activePU && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-            <span style={{ fontSize: 10, color: PU_COLORS[activePU], fontWeight: 800, textShadow: `1px 1px 0 ${PX.black}` }}>
+            <span style={{ fontSize: 16, color: PU_COLORS[activePU], fontWeight: 800, textShadow: `1px 1px 0 ${PX.black}` }}>
               {PU_ICONS[activePU]}
             </span>
-            <div style={{ flex: 1, maxWidth: 100, height: 5, background: `${PX.textDim}44`, overflow: 'hidden' }}>
+            <div style={{ flex: 1, maxWidth: 140, height: 8, background: `${PX.textDim}44`, overflow: 'hidden' }}>
               <div style={{ width: `${puPct}%`, height: '100%', background: PU_COLORS[activePU], transition: 'width 100ms linear' }} />
             </div>
           </div>
@@ -693,7 +693,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
         {/* Dash indicator */}
         {!dashReady && (
-          <div style={{ textAlign: 'center', fontSize: 8, color: PX.textDim, animation: 'bb-blink 0.5s infinite' }}>
+          <div style={{ textAlign: 'center', fontSize: 14, color: PX.textDim, animation: 'bb-blink 0.5s infinite' }}>
             DASH COOLDOWN
           </div>
         )}
@@ -701,7 +701,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
       {/* Height meter */}
       <div style={{
-        position: 'absolute', left: 4, top: 75, bottom: 15, width: 5,
+        position: 'absolute', left: 4, top: 100, bottom: 15, width: 8,
         background: `${PX.textDim}22`, zIndex: 5, overflow: 'hidden',
       }}>
         <div style={{ position: 'absolute', bottom: 0, width: '100%', height: `${htPct}%`, background: `${PX.accent}44` }} />
@@ -720,7 +720,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
             pointerEvents: 'none',
           }}>
             <span style={{
-              position: 'absolute', right: 4, top: 1, fontSize: 7, color: `${z.color}88`,
+              position: 'absolute', right: 4, top: 1, fontSize: 13, color: `${z.color}88`,
               fontWeight: 800,
             }}>x{z.mult}</span>
           </div>
@@ -730,7 +730,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         {wind !== 0 && (
           <div style={{
             position: 'absolute', top: '45%', left: 0, right: 0, textAlign: 'center',
-            fontSize: 24, color: `${PX.platform}66`, pointerEvents: 'none',
+            fontSize: 36, color: `${PX.platform}66`, pointerEvents: 'none',
             transform: wind > 0 ? 'scaleX(1)' : 'scaleX(-1)',
             animation: 'bb-wind-arrow 1s ease-in-out infinite',
           }}>
@@ -740,11 +740,11 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
 
         {/* Floor (pixel style) */}
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, height: 4,
-          background: PX.floor, boxShadow: `0 -2px 0 ${PX.floorDark}, 0 -6px 12px ${PX.danger}44`,
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: 8,
+          background: PX.floor, boxShadow: `0 -3px 0 ${PX.floorDark}, 0 -8px 16px ${PX.danger}44`,
         }} />
         <div style={{
-          position: 'absolute', bottom: 4, left: 0, right: 0, height: 2,
+          position: 'absolute', bottom: 8, left: 0, right: 0, height: 4,
           background: PX.floorDark,
         }} />
 
@@ -766,7 +766,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
         {milestone && (
           <div style={{
             position: 'absolute', top: '32%', left: 0, right: 0, textAlign: 'center',
-            fontSize: 18, fontWeight: 800, color: PX.accent,
+            fontSize: 28, fontWeight: 800, color: PX.accent,
             textShadow: `3px 3px 0 ${PX.black}, 0 0 16px ${PX.accent}`,
             animation: 'bb-pop 0.4s ease-out', zIndex: 15, pointerEvents: 'none',
           }}>
@@ -813,7 +813,7 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
             width: PU_SIZE, height: PU_SIZE,
             background: PU_COLORS[p.type], boxShadow: pxBorder(PX.black, 2),
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 8, fontWeight: 800, color: PX.white,
+            fontSize: 13, fontWeight: 800, color: PX.white,
             animation: 'bb-float 1s ease-in-out infinite',
             opacity: Math.min(1, p.ms / 800),
           }}>
@@ -878,19 +878,19 @@ function BallBounceMiniGame({ onFinish, onExit, bestScore = 0 }: MiniGameSession
           <div style={{
             position: 'absolute', inset: 0, background: `${PX.black}cc`,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            gap: 10, zIndex: 20,
+            gap: 16, zIndex: 20,
           }}>
             <p style={{
-              fontSize: 26, fontWeight: 800, color: PX.danger,
+              fontSize: 42, fontWeight: 800, color: PX.danger,
               textShadow: `3px 3px 0 ${PX.black}`, margin: 0,
             }}>GAME OVER</p>
             <p style={{
-              fontSize: 16, color: PX.accent, fontWeight: 700, margin: 0,
+              fontSize: 28, color: PX.accent, fontWeight: 700, margin: 0,
               textShadow: `2px 2px 0 ${PX.black}`,
             }}>Score: {score.toLocaleString()}</p>
-            <div style={{ fontSize: 9, color: PX.textDim, textAlign: 'center' }}>
-              <p style={{ margin: '2px 0' }}>Level {level} | Bounces {bounces}</p>
-              <p style={{ margin: '2px 0' }}>Max Height {Math.floor(maxHt)}</p>
+            <div style={{ fontSize: 16, color: PX.textDim, textAlign: 'center' }}>
+              <p style={{ margin: '4px 0' }}>Level {level} | Bounces {bounces}</p>
+              <p style={{ margin: '4px 0' }}>Max Height {Math.floor(maxHt)}</p>
             </div>
           </div>
         )}

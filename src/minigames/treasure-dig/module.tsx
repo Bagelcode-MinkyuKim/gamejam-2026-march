@@ -1309,7 +1309,7 @@ export const treasureDigModule: MiniGameModule = {
   manifest: {
     id: 'treasure-dig',
     title: 'Treasure Dig',
-    description: '\uB545\uC744 \uD30C\uC11C \uBCF4\uBB3C\uC744 \uCC3E\uC544\uB77C! \uD3ED\uD0C4\uC740 \uC870\uC2EC!',
+    description: 'Dig the ground to find treasure! Watch out for bombs!',
     unlockCost: 30,
     baseReward: 12,
     scoreRewardMultiplier: 1.1,

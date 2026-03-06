@@ -1051,7 +1051,7 @@ export const tornadoRunModule: MiniGameModule = {
   manifest: {
     id: 'tornado-run',
     title: 'Tornado Run',
-    description: '\uBC14\uB78C\uC744 \uD53C\uD558\uACE0 \uCF54\uC778\uC744 \uBAA8\uC544\uB77C! \uB3C4\uD2B8 \uD48D(\u98A8) \uB7EC\uB108!',
+    description: 'Dodge winds and collect coins! Pixel wind runner!',
     unlockCost: 35,
     baseReward: 13,
     scoreRewardMultiplier: 1.15,

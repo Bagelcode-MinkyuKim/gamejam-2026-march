@@ -1206,7 +1206,7 @@ export const speedTapModule: MiniGameModule = {
   manifest: {
     id: 'speed-tap',
     title: 'Speed Tap',
-    description: '10\ucd08\uac04 \ubbf8\uce5c\ub4ef\uc774 \ud0ed\ud574\uc11c \ucd5c\uace0 \uc810\uc218\ub97c \ub178\ub824\ub77c! RUSH TIME\uc5d0\ub294 \uc810\uc218 2\ubc30!',
+    description: 'Tap like crazy for 10 seconds to get the highest score! Double points during RUSH TIME!',
     unlockCost: 20,
     baseReward: 10,
     scoreRewardMultiplier: 1.0,

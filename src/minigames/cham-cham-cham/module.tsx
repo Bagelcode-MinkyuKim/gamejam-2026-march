@@ -20,6 +20,9 @@ import damageSfx from '../../../assets/sounds/cham-cham-cham/damage.mp3'
 import dodgeSfx from '../../../assets/sounds/cham-cham-cham/dodge.mp3'
 import chamVoiceSfx from '../../../assets/sounds/cham-cham-cham/cham-cham-cham-voice.mp3'
 import roleSwitchSfx from '../../../assets/sounds/cham-cham-cham/role-switch.mp3'
+import comboSfx from '../../../assets/sounds/cham-cham-cham/combo.mp3'
+import gameoverSfx from '../../../assets/sounds/cham-cham-cham/gameover.mp3'
+import timerWarnSfx from '../../../assets/sounds/cham-cham-cham/timer-warn.mp3'
 
 type Direction = 'left' | 'center' | 'right'
 type TurnRole = 'attack' | 'defense'
@@ -52,7 +55,7 @@ const OPPONENT_CHARS = [
   { src: taeJinaSprite, name: 'Tae Jina' },
 ] as const
 
-type AudioKey = 'hit' | 'miss' | 'damage' | 'dodge' | 'voice' | 'roleSwitch'
+type AudioKey = 'hit' | 'miss' | 'damage' | 'dodge' | 'voice' | 'roleSwitch' | 'combo' | 'gameover' | 'timerWarn'
 
 function randomDirection(): Direction {
   return ALL_DIRECTIONS[Math.floor(Math.random() * ALL_DIRECTIONS.length)]
@@ -81,6 +84,10 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const [scorePop, setScorePop] = useState<number | null>(null)
   const [sparkBurst, setSparkBurst] = useState(false)
   const [hpLossFlash, setHpLossFlash] = useState(false)
+  const [comboFlash, setComboFlash] = useState(false)
+  const [roleSwoosh, setRoleSwoosh] = useState(false)
+  const [gameoverParticles, setGameoverParticles] = useState(false)
+  const timerWarnPlayedRef = useRef(false)
 
   const finishedRef = useRef(false)
   const startedAtRef = useRef(window.performance.now())
@@ -93,7 +100,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const defenseDeadlineRef = useRef<number | null>(null)
   const chantTimerRef = useRef<number | null>(null)
   const sfxRefs = useRef<Record<AudioKey, HTMLAudioElement | null>>({
-    hit: null, miss: null, damage: null, dodge: null, voice: null, roleSwitch: null,
+    hit: null, miss: null, damage: null, dodge: null, voice: null, roleSwitch: null, combo: null, gameover: null, timerWarn: null,
   })
 
   const playSfx = useCallback((key: AudioKey, vol = 0.9, rate = 1) => {
@@ -115,20 +122,26 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const triggerScorePop = useCallback((pts: number) => { setScorePop(pts); window.setTimeout(() => setScorePop(null), 600) }, [])
   const triggerSparkBurst = useCallback(() => { setSparkBurst(true); window.setTimeout(() => setSparkBurst(false), 500) }, [])
   const triggerHpLoss = useCallback(() => { setHpLossFlash(true); window.setTimeout(() => setHpLossFlash(false), 600) }, [])
+  const triggerComboFlash = useCallback(() => { setComboFlash(true); window.setTimeout(() => setComboFlash(false), 400) }, [])
+  const triggerRoleSwoosh = useCallback(() => { setRoleSwoosh(true); window.setTimeout(() => setRoleSwoosh(false), 500) }, [])
+  const triggerGameoverParticles = useCallback(() => { setGameoverParticles(true); window.setTimeout(() => setGameoverParticles(false), 800) }, [])
 
   const finishGame = useCallback(() => {
     if (finishedRef.current) return
     finishedRef.current = true
     clearPhaseTimer(); clearDefenseTimer(); clearChantTimer()
     setCharAnim('hit')
-    playSfx('damage', 0.8, 0.85)
+    playSfx('gameover', 0.9)
+    triggerGameoverParticles(); triggerShake()
     const elapsed = Math.max(Math.round(DEFAULT_FRAME_MS), Math.round(window.performance.now() - startedAtRef.current))
-    onFinish({ score: scoreRef.current + bestComboRef.current * 3, durationMs: elapsed })
-  }, [clearChantTimer, clearDefenseTimer, clearPhaseTimer, onFinish, playSfx])
+    window.setTimeout(() => {
+      onFinish({ score: scoreRef.current + bestComboRef.current * 3, durationMs: elapsed })
+    }, 600)
+  }, [clearChantTimer, clearDefenseTimer, clearPhaseTimer, onFinish, playSfx, triggerGameoverParticles, triggerShake])
 
   useEffect(() => {
     const mk = (s: string) => { const a = new Audio(s); a.preload = 'auto'; return a }
-    sfxRefs.current = { hit: mk(hitSfx), miss: mk(missSfx), damage: mk(damageSfx), dodge: mk(dodgeSfx), voice: mk(chamVoiceSfx), roleSwitch: mk(roleSwitchSfx) }
+    sfxRefs.current = { hit: mk(hitSfx), miss: mk(missSfx), damage: mk(damageSfx), dodge: mk(dodgeSfx), voice: mk(chamVoiceSfx), roleSwitch: mk(roleSwitchSfx), combo: mk(comboSfx), gameover: mk(gameoverSfx), timerWarn: mk(timerWarnSfx) }
     return () => { clearPhaseTimer(); clearDefenseTimer(); clearChantTimer(); Object.values(sfxRefs.current).forEach((a) => { if (a) { a.pause(); a.currentTime = 0 } }) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -160,6 +173,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
   const startDefenseTurn = useCallback(() => {
     setRole('defense'); setPlayerChoice(null); setOpponentChoice(null); setResolveResult(null)
     setOpponent(randomChar()); setCharAnim('idle')
+    timerWarnPlayedRef.current = false
     const aiDir = randomDirection()
     setOpponentChoice(aiDir)
     setPhase('defense-incoming')
@@ -171,6 +185,9 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         if (defenseDeadlineRef.current === null) return
         const rem = Math.max(0, defenseDeadlineRef.current - window.performance.now())
         setDefenseTimerMs(rem)
+        if (rem < DEFENSE_TIME_LIMIT_MS * 0.3 && !timerWarnPlayedRef.current) {
+          timerWarnPlayedRef.current = true; playSfx('timerWarn', 0.5, 1.2)
+        }
         if (rem <= 0) { clearDefenseTimer(); resolveDefense(aiDir, aiDir) }
       }, 50)
     })
@@ -192,11 +209,11 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       triggerFlash('success'); triggerEffect('dodge'); playSfx('dodge', 0.7, 1.06)
       setPhase('defense-resolve')
       phaseTimerRef.current = window.setTimeout(() => {
-        phaseTimerRef.current = null; setRoleText('ATTACK!'); setPhase('role-switch'); playSfx('roleSwitch', 0.85)
+        phaseTimerRef.current = null; setRoleText('ATTACK!'); setPhase('role-switch'); playSfx('roleSwitch', 0.85); triggerRoleSwoosh()
         phaseTimerRef.current = window.setTimeout(() => { phaseTimerRef.current = null; setRoleText(null); startAttackTurn() }, ROLE_SWITCH_MS)
       }, RESOLVE_DISPLAY_MS)
     }
-  }, [clearChantTimer, clearDefenseTimer, clearPhaseTimer, finishGame, playSfx, startAttackTurn, startDefenseTurn, triggerEffect, triggerFlash, triggerHpLoss, triggerShake])
+  }, [clearChantTimer, clearDefenseTimer, clearPhaseTimer, finishGame, playSfx, startAttackTurn, startDefenseTurn, triggerEffect, triggerFlash, triggerHpLoss, triggerRoleSwoosh, triggerShake])
 
   const handleAttack = useCallback((dir: Direction) => {
     if (phase !== 'attack-choose' || finishedRef.current) return
@@ -208,8 +225,9 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         comboRef.current += 1; bestComboRef.current = Math.max(bestComboRef.current, comboRef.current)
         setCombo(comboRef.current); scoreRef.current += comboRef.current; setScore(scoreRef.current)
         setResolveResult('hit'); setCharAnim('hit')
-        triggerFlash('success'); triggerEffect('hit'); triggerSparkBurst(); triggerScorePop(comboRef.current)
+        triggerFlash('success'); triggerEffect('hit'); triggerSparkBurst(); triggerScorePop(comboRef.current); triggerComboFlash()
         playSfx('hit', 0.7, 1 + Math.min(0.2, comboRef.current * 0.025))
+        if (comboRef.current >= 3) playSfx('combo', 0.6, 1 + Math.min(0.3, comboRef.current * 0.03))
       } else {
         comboRef.current = 0; setCombo(0); setResolveResult('miss'); setCharAnim('dodge')
         triggerFlash('fail'); playSfx('miss', 0.6, 0.92)
@@ -219,12 +237,12 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         phaseTimerRef.current = window.setTimeout(() => { phaseTimerRef.current = null; startAttackTurn() }, RESOLVE_DISPLAY_MS)
       } else {
         phaseTimerRef.current = window.setTimeout(() => {
-          phaseTimerRef.current = null; setRoleText('DEFENSE!'); setPhase('role-switch'); playSfx('roleSwitch', 0.85)
+          phaseTimerRef.current = null; setRoleText('DEFENSE!'); setPhase('role-switch'); playSfx('roleSwitch', 0.85); triggerRoleSwoosh()
           phaseTimerRef.current = window.setTimeout(() => { phaseTimerRef.current = null; setRoleText(null); startDefenseTurn() }, ROLE_SWITCH_MS)
         }, RESOLVE_DISPLAY_MS)
       }
     })
-  }, [clearPhaseTimer, phase, playChant, playSfx, startAttackTurn, startDefenseTurn, triggerEffect, triggerFlash, triggerScorePop, triggerSparkBurst])
+  }, [clearPhaseTimer, phase, playChant, playSfx, startAttackTurn, startDefenseTurn, triggerComboFlash, triggerEffect, triggerFlash, triggerRoleSwoosh, triggerScorePop, triggerSparkBurst])
 
   const handleDefense = useCallback((dir: Direction) => {
     if (phase !== 'defense-choose' || finishedRef.current || opponentChoice === null) return
@@ -278,6 +296,13 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       ) : null}
       {scorePop !== null ? <p className="cham-score-pop" aria-hidden>+{scorePop}</p> : null}
       {hpLossFlash ? <div className="cham-hp-loss-vignette" aria-hidden /> : null}
+      {comboFlash ? <div className="cham-combo-flash" aria-hidden /> : null}
+      {roleSwoosh ? <div className="cham-role-swoosh" aria-hidden /> : null}
+      {gameoverParticles ? (
+        <div className="cham-gameover-particles" aria-hidden>
+          <span /><span /><span /><span /><span /><span />
+        </div>
+      ) : null}
 
       <div className="cham-hud">
         <div className="cham-hp-bar">
@@ -294,7 +319,7 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
       </div>
 
       {phase === 'defense-choose' ? (
-        <div className="cham-defense-timer">
+        <div className={`cham-defense-timer ${defPct < 30 ? 'urgent' : ''}`}>
           <div className="cham-defense-timer-fill" style={{ width: `${defPct}%` }} />
           <span className="cham-defense-timer-label">{(defenseTimerMs / 1000).toFixed(1)}s</span>
         </div>
@@ -328,9 +353,6 @@ function ChamChamChamGame({ onFinish, onExit, bestScore = 0 }: MiniGameSessionPr
         ))}
       </div>
 
-      <div className="cham-bottom-bar">
-        <button className="text-button" type="button" onClick={handleExit}>EXIT</button>
-      </div>
     </section>
   )
 }

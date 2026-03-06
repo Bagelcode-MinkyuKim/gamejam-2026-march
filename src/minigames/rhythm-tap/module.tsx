@@ -1092,7 +1092,7 @@ export const rhythmTapModule: MiniGameModule = {
   manifest: {
     id: 'rhythm-tap',
     title: 'Rhythm Tap',
-    description: '\uC218\uCD95\uD558\uB294 \uC6D0\uC744 \uD0C0\uC774\uBC0D\uC5D0 \uB9DE\uCDB0 \uD0ED! MISS\uD558\uBA74 \uCCB4\uB825\uC774 \uAE4E\uC5EC\uC694',
+    description: 'Tap shrinking circles on time! Miss and lose HP!',
     unlockCost: 40,
     baseReward: 14,
     scoreRewardMultiplier: 1.15,
