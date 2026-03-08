@@ -51,6 +51,7 @@ import lobbyColorMatchIcon from '../../assets/images/generated/lobby-icons/lobby
 import lobbyBubblePopIcon from '../../assets/images/generated/lobby-icons/lobby-bubble-pop.png'
 import lobbyMemoryFlipIcon from '../../assets/images/generated/lobby-icons/lobby-memory-flip.png'
 import lobbySpeedSortIcon from '../../assets/images/generated/lobby-icons/lobby-speed-sort.png'
+import lobbyReactionTestIcon from '../../assets/images/generated/lobby-icons/lobby-reaction-test.png'
 import lobbySnakeClassicIcon from '../../assets/images/generated/lobby-icons/lobby-snake-classic.png'
 import lobbyBreakoutMiniIcon from '../../assets/images/generated/lobby-icons/lobby-breakout-mini.png'
 import lobbySlidePuzzleIcon from '../../assets/images/generated/lobby-icons/lobby-slide-puzzle.png'
@@ -208,6 +209,7 @@ const CUSTOM_LOBBY_ICONS: Partial<Record<MiniGameId, string>> = {
   'music-harmony': lobbyMusicHarmonyIcon,
   'math-blitz': lobbyMathBlitzIcon,
   'music-memory': lobbyMusicMemoryIcon,
+  'reaction-test': lobbyReactionTestIcon,
 }
 const FALLBACK_LOBBY_ICONS = [
   kimYeonjaCastSprite,
